@@ -142,7 +142,7 @@ Owner rules are never rewritten by the agent silently: report the gap and let th
 
 - `local/` — private state, never committed: `local/scratch/` (one-off drafts, Russian text fragments,
 
-  commit-message files) and `local/archive/` (61 carried-over evidence files + `MANIFEST.md`, copied
+  commit-message files) and `local/archive/` (82 carried-over evidence files + `MANIFEST.md`, copied
 
   from the hub clone `FarCryCoop/Temp`, `FarCryCoop/local/scratch` and the scratch folder
 
