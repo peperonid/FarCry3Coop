@@ -39,6 +39,10 @@ Alternative: `npx rea-agents setup` registers REA for every project (user scope)
 
 ## Registered on the owner's PC (2026-10-18)
 
+Historical evidence from the owner's PC (drive `E:`).
+On this PC there is no Ghidra, no `claude` CLI and no `E:` drive, so nothing here was re-registered;
+live paths for this PC are in `AGENTS.md` and `docs/workspace.md`.
+
 Owner approved the one write to `C:\Users\<user>\.claude.json` (local scope, this folder only). All tool paths point to `E:\FarCryCoop`:
 
 ```powershell

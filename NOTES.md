@@ -546,23 +546,17 @@ are committed here: `fc3_dis.py`, `fc3_callers.py`, `fc3_addrmap.py`, `fc3_iat_r
 agent harness scratch (`Temp/`) and private state (`local/`, `local/scratch/`) are gitignored.
 Scratch patterns in `.gitignore`: `*.scratch*`, `.scratch*`, `scratch_*`, `local/scratch/`.
 
-Canonical layout, the owner's scheme (`docs/workspace.md`, CLAUDE.md golden rule 2): everything
-under `E:\FarCryCoop` (`Downloads\<name>\`, `Tools\`, `Data\`, `Temp\`), C:\ untouched.
-`E:\FarCryCoop` does not exist on this machine: this repo sits at
-`D:\Projects\Co-op Anything\FarCry3Coop-bantila`, the test copy at `H:\FarCryCoop\TestFC3`, so the
-E:\ scheme still needs reconciliation with the owner. Carried-over scripts hardcode stale paths
-`DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`,
-`DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`. The agent harness writes its own temp
-work to `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` (delegate outputs, sandbox scripts),
-which contradicts golden rule 2 — flagged, not fixed (owner decision).
-
-Canonical layout, the owner's other scheme (`docs/workspace.md`, CLAUDE.md golden rule 2): everything under
-`E:\FarCryCoop` (`Downloads\<name>\`, `Tools\`, `Data\`, `Temp\`), C:\ untouched. `E:\FarCryCoop` does not exist on
-this machine — repos are at `D:\Projects\Co-op Anything\`, the test copy at `H:\FarCryCoop\TestFC3`, so the E:\ scheme
-still needs reconciliation with the owner. Carried-over bantila scripts hardcode stale paths
-`DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`, `DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`.
-The agent harness itself writes temp work to `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` (delegate outputs,
-sandbox scripts), which contradicts golden rule 2 — flagged, not fixed (owner decision).
+Canonical layout: the owner's scheme is everything under `E:\FarCryCoop\` — `Downloads\<name>\`,
+`Tools\`, `Data\`, `Temp\`, `Work\` (see `docs/workspace.md`). Drive `E:` is absent on
+this machine, so it is historical evidence, not the live layout here. Live paths on this PC
+(verified 2026-11-02, canonical: `AGENTS.md` + hub `docs/LOCAL.md`): repos at
+`D:\Projects\Co-op Anything\`, the 1.06 test game copy at `H:\FarCryCoop\TestFC3\`, the
+read-only Ubisoft Connect install at `H:\Uplay\Far Cry 3\`. Carried-over bantila scripts
+originally hardcoded `DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll` and
+`DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`; the local `scripts\` copies are retargeted to the
+verified paths above. The agent harness writes its own temp work to `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` (delegate
+outputs, sandbox scripts), which contradicts golden rule 2 (never touch C:) — flagged, not
+fixed: a contradiction inside the owner's own rules is the owner's decision, not the agent's.
 
 An undeletable stray file named `nul` sits at the workspace root and makes `git add -A` fail
 (`error: invalid path 'NUL'`); commit with explicit paths only.
@@ -571,6 +565,10 @@ An undeletable stray file named `nul` sits at the workspace root and makes `git 
 
 - [x] Confirm game version and install path with owner (1.06, H:/Uplay/Far Cry 3/)
 - [x] Set up test copy of FC3 outside store folder (H:/FarCryCoop/TestFC3/)
+- [x] Repo decision (2026-11-02): own fork of this game repo — `peperonid/FarCry3Coop`
+  (forked from `Bantila/FarCry3Coop`) — the working copy of this game. The pipeline fork
+  `peperonid/FarCryCoop` keeps other games (`games/far-cry`, `games/far-cry-6`). The owner's
+  `backup` branch is left untouched.
 - [x] Phase 2: verify game launches with -offline (confirmed, main menu shows)
 - [ ] Phase 2: navigate to Co-op menu, start host session, test client connect
 - [ ] Decompile `FUN_106518ba` (host) and `FUN_10651d10` (client) to understand the direct connect path

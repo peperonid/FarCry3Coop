@@ -62,3 +62,12 @@ of a **copy** of FC3.dll / FC3_d3d11.dll), `fc3_trampoline.py` (14-byte jmp stub
 
 `*_dis_cache.json` (disassembly cache), `__pycache__/`, `../Temp/` (agent scratch) and
 `../local/` are gitignored.
+
+## Carried-over paths
+
+The scripts copied from the owner's PC (October 2026) hardcoded the old layout: `DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`,
+`DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`. Drive `E:` does not exist on this PC. These scripts are
+kept as evidence and are NOT retargeted silently: re-pointing a script that writes into the game
+install (patch / build / unpack) is an owner decision. On this PC the read-only install is
+`H:\Uplay\Far Cry 3\`, the 1.06 test copy is `H:\FarCryCoop\TestFC3\`; analysis-only scripts here
+already read those verified paths.
