@@ -367,6 +367,63 @@ B4) структура параметров сессии по адресу `[ebp
   ссылок. Следующая зацепка — динамическая: запуск тестовой копии с `-exec`/`-execline` либо
   декомпиляция thunkей в Ghidra (`scripts/fc3_ghidra_dis.py`).
 
+## Зацепки 1.06: флаг `-coop`, пароль бунта и блок полей сессии (2026-11-02, сеанс 22:xx)
+
+- **Флаг `-coop` и разбор запуска.`FC3_d3d11.dll`** строка `-coop` лежит в `0x11fdc0cd` — в том же
+  связном блоке переключателей, что `-perfhud` `0x11fdbc1c`, `-logFile` `0x11fdbc28`, `-bfname`
+  `0x11fdbc34`, `-execline` `0x11fdbc3c`, `-exec` `0x11fdbc48`, `-quickstartup` `0x11fdbc50`,
+  `-debugFramerateCameras` `0x11fdbcf8`. Флаг разбирают две функции: главный разбор аргументов входа
+  `0x11aa0670` (`-coop` в `0x11aa08d3` и `0x11aa0cfc`, `-bfname` в `0x11aa089e` и `0x11aa0cb9`) и второй
+  блок разбора `0x11aa1b90` (там же `-netemulator` `0x11fdc10c` в `0x11aa10cc`/`0x11aa10db`, `-ranked`
+  `0x11fdc11c` в `0x11aa0bda`/`0x11aa1198`, `-spawn` `0x11fdbe90`, `-spawnpos` `0x11fdbe98`,
+  `-spawnangle` `0x11fdbea4`, `-class` `0x11fdbe88`). Отдельный парсер консольных строк — `0x11aa2fe0`
+  (`-bfname` `0x11aa302a`, `-execline` `0x11aa3054`/`0x11aa3070`/`0x11aa30ce`, `-exec`
+  `0x11aa3144`/`0x11aa3167`/`0x11aa3244`/`0x11aa3250`, `-quickstartup` `0x11aa326a`, дальше консольные
+  строки `gfx_NoLaunchCountdown 1` `0x11fdbc60`, `gfx_NoPostRoundCountdown 1` `0x11fdbc78`,
+  `gfx_NoPreRoundTimeOut 1` `0x11fdbc94`, `multi_DisableInitialSpawnDelay 1` `0x11fdbcac`,
+  `hack_loadOutIsWaitingForMissionBlocks 0` `0x11fdbcd0`). Три вызова в `0x11aa2fe0`: `0x117b565d`,
+  `0x117b7003`, `0x11997f41` плюс слот таблицы `0x11f31b10`. У `-splitscreen` `0x11f31d75`,
+  `-splitscreen4` `0x11f31d85` и `-numclients` `0x11fb1e19` нет ссылок с немедленным операндом — их
+  читают через смещения строковой таблицы, поэтому поиск `push imm32` / `mov reg, imm32` их не находит.
+- **Обработчик `-password` и буфер пароля бунта:** функция `0x117b5580` (`push ebp; mov ebp,esp;
+  sub esp,8; mov eax,[ebp+8]`) собирает строку из `[eax]` или `[eax+0xc]` (при пустом значении
+  `0x117b5597 mov eax,0x11f31ea8`), далее `0x117b55a6 mov eax,0x11f31d34 str='-password'` и
+  `0x117b55ab call 0x117b5160` (разбор переключателя). Если значение есть и `[ebx+4]` не ноль:
+  `0x117b55c4 test byte ptr [0x128b59a8],1`, `0x117b55cc or dword ptr [0x128b59a8],1`,
+  `0x117b55d2 push 0x11f31bbc str='******'` и `mov dword ptr [0x128b59a4],0`, `0x117b55dd call 0x10002a50`,
+  `0x117b55f1 call 0x10001ec0`, `0x117b55f6 push 0x11bb76a0`, `0x117b55fb call 0x1070085d`
+  (регистрация колбэка), `0x117b5606 push 0x128b59a4`. В этой же функции находятся вызовы
+  `0x117b5653 call 0x11aa0670` и `0x117b565d call 0x11aa2fe0`. Вывод: пароль бунта (`-bfname`)
+  обрабатывается до разбора аргументов запуска, то есть защищённый паролем бунт доступен из
+  командной строки.
+- **Правка блока имён полей сессии для 1.06:** имена полей реестра сессионной операции лежат связно в
+  `.rdata` с `0x11fb4a00` по `0x11fb4c98`; обходитель реестра `0x103173f0` (`cmp byte ptr
+  [0x128293f4],0`) резервирует запись размером `0x10 + 0x20` = 48 байта через `0x11790750` /
+  `0x118e8340`. Полные адреса 1.06: `untFlags` `0x11fb4a00` (вызов `0x11347a0c`), `controllerIndex`
+  `0x11fb4a0c` (вызов `0x11347a34`), `silentLogin` `0x11fb4a1c` (вызов `0x11347a5c`), `isPrimaryIndex`
+  `0x11fb4a28` (вызов `0x11347a84`), `platformSpecificId` `0x11fb4a38` (цепочка `0x11342759 call
+  0x103173f0`, есть и другие места), `demoname` `0x11fb4a4c`, `isInEditor` `0x11fb4a58`,
+  `fullNetworkInitialization` `0x11fb4a64` (место `0x113478e0`), `execLines` `0x11fb4a80` (единственное
+  место `0x1134824a`), `mapIdLow` `0x11fb4a8c`, `mapIdHigh` `0x11fb4a98`, `versionIdHigh` `0x11fb4aa4`,
+  `versionIdLow` `0x11fb4ab4`, `mapIdType` `0x11fb4ac4`, `bfname` `0x11fb4ad0` (места `0x11328860`,
+  `0x113482f4`), `execFilenames` `0x11fb4ad8` (место `0x11348300`), `saveGameFilename` `0x11fb4ae8`,
+  `unloadWorld` `0x11fb4afc`, `SearchIdAddress` `0x11fb4b08`, `SearchSessionId` `0x11fb4b18`, `JoinGame`
+  `0x11fb4b28` (место `0x11348010`), `JoinService` `0x11fb4b34`, `JoinSessionId` `0x11fb4b40`,
+  `DeleteSessionId` `0x11fb4b50`, `DeleteMessageId` `0x11fb4b60`, `PlaylistId` `0x11fb4b70`,
+  `MatchMakingEnabled` `0x11fb4b7c`, `SessionRefId` `0x11fb4b90`, `SessionType` `0x11fb4ba0`,
+  `NetEngineType` `0x11fb4bac`, `AccountType` `0x11fb4bbc`, `SearchRanked` `0x11fb4bc8`,
+  `SearchRetries` `0x11fb4bd8`, `SearchSlots` `0x11fb4be8`, `SearchNeedSlots` `0x11fb4bf4`,
+  `SearchGameModes` `0x11fb4c04`, `Silent` `0x11fb4c14`, `DeleteCurrent` `0x11fb4c1c`, `WasInvited`
+  `0x11fb4c2c`, `EmulatorProfileId` `0x11fb4c38`, `UseTicketRequestAttachment` `0x11fb4c4c`,
+  `FollowHost` `0x11fb4c68`, `DoNATTypeDetection` `0x11fb4c74`; дальше идут поля быстрого запуска и
+  возвращения игрока `mode` `0x11fb4c88`, `touched` `0x11fb4c90`, `spawnPtId` `0x11fb4c98`,
+  `keepPlayerState` `0x11fb4ca4`, плюс `OperationId` `0x11fb4938`, `EngineUpdateFlag` `0x11fb4944`,
+  `ranked` `0x11f45e34`, `world` `0x11f46910`, `pos` `0x11f39450`. Прежняя заметка (ссылки вида
+  `SearchSessionId 0x11f90c…`, `FollowHost 0x11f90cd8`, `DoNATTypeDetection 0x11f90ce4`, `execLines
+  0x11f90af0`) относилась не к тому билду: те адреса — dword-ы указательной таблицы `.rdata`, а не
+  строки. Тип поля `execLines` — код `8` из `push` рядом с именем (строка/вектор); оценка «180 байт» из
+  прежней заметки тоже относилась не к этому билду и её нужно перемерить по 48-байтным записям.
+
 ## TODO
 
 - [x] Уточнить версия игры и путь у владельца (1.06, `H:\Uplay\Far Cry 3\`)

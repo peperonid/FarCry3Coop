@@ -483,6 +483,84 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   isolate the consumer — `mov ecx,[0x12829424]; call 0x106c99b0; mov eax,<str>; call 0x11788480` occurs
   8 311 times in the binary, i.e. the generic container idiom. Next handle is dynamic: a `-exec`/`-execline`
   run against the test copy, or Ghidra decompilation of the thunks (`scripts/fc3_ghidra_dis.py`).
+- **1.06 co-op switches and the co-op quick-launch parser (`FC3_d3d11.dll`, 22:xx session).** The
+  string `-coop` lives at `0x11fdc0cd` (in the same contiguous switch block as `-perfhud` `0x11fdbc1c`,
+  `-logFile` `0x11fdbc28`, `-bfname` `0x11fdbc34`, `-execline` `0x11fdbc3c`, `-exec` `0x11fdbc48`,
+  `-quickstartup` `0x11fdbc50`, `-debugFramerateCameras` `0x11fdbcf8`). It is parsed in TWO functions:
+  the main launch-argument parser entry `0x11aa0670` (`push ebx/[ebp+8]` prologue; `-coop` refs
+  `0x11aa08d3` and `0x11aa0cfc`, `-bfname` refs `0x11aa089e`, `0x11aa0cb9`) and a second parser region
+  `0x11aa1b90` (also handles `-netemulator` `0x11fdc10c` at `0x11aa10cc`/`0x11aa10db`, `-ranked`
+  `0x11fdc11c` at `0x11aa0bda`/`0x11aa1198`, `-spawn` `0x11fdbe90`, `-spawnpos` `0x11fdbe98`,
+  `-spawnangle` `0x11fdbea4`, `-class` `0x11fdbe88`); the exec/console parser is `0x11aa2fe0`
+  (`-bfname` at `0x11aa302a`, `-execline` at `0x11aa3054`/`0x11aa3070`/`0x11aa30ce`, `-exec` at
+  `0x11aa3144`/`0x11aa3167`/`0x11aa3244`/`0x11aa3250`, `-quickstartup` at `0x11aa326a`, then the
+  console lines `gfx_NoLaunchCountdown 1` `0x11fdbc60`, `gfx_NoPostRoundCountdown 1` `0x11fdbc78`,
+  `gfx_NoPreRoundTimeOut 1` `0x11fdbc94`, `multi_DisableInitialSpawnDelay 1` `0x11fdbcac`,
+  `hack_loadOutIsWaitingForMissionBlocks 0` `0x11fdbcd0`). Three E8 call sites into `0x11aa2fe0`:
+  `0x117b565d`, `0x117b7003`, `0x11997f41`, plus one table slot `0x11f31b10`. `-splitscreen`
+  `0x11f31d75`, `-splitscreen4` `0x11f31d85` and `-numclients` `0x11fb1e19` have no immediate-operand
+  code reference: they are consumed through the string-table offsets, so a scan for `push imm32` /
+  `mov reg, imm32` finds nothing for them.
+- **1.06 `-password` handler and the BF password buffer:** function `0x117b5580`
+  (`push ebp; mov ebp,esp; sub esp,8; mov eax,[ebp+8]`) builds a string from `[eax]` or `[eax+0xc]`
+  (`0x117b5597 mov eax,0x11f31ea8` when empty), `0x117b55a6 mov eax,0x11f31d34 str='-password'`,
+  `0x117b55ab call 0x117b5160` (the switch parser), then if a value exists and `[ebx+4] != 0`:
+  `0x117b55c4 test byte ptr [0x128b59a8],1`, `0x117b55cc or dword ptr [0x128b59a8],1`,
+  `0x117b55d2 push 0x11f31bbc str='******'` with `mov dword ptr [0x128b59a4],0`,
+  `0x117b55dd call 0x10002a50`, `0x117b55f1 call 0x10001ec0`, `0x117b55f6 push 0x11bb76a0`,
+  `0x117b55fb call 0x1070085d` (callback registration), `0x117b5606 push 0x128b59a4`. Same function
+  hosts the call sites `0x117b5653 call 0x11aa0670` and `0x117b565d call 0x11aa2fe0`. Meaning: bundle
+  (`-bfname`) password handling is resolved before the launch arguments, so a password-protected
+  co-op bundle is reachable from the command line.
+- **Corrected 1.06 session-descriptor field block:** the field-name strings of the session-operation
+  registry are contiguous at `0x11fb4a00`..`0x11fb4c98` (the block quoted in the older note as
+  `SearchSessionId 0x11f90c…`, `FollowHost 0x11f90cd8`, `DoNATTypeDetection 0x11f90ce4` and
+  `execLines 0x11f90af0` was the WRONG build: those addresses are `.rdata` pointer-table dwords, not
+  strings). 1.06 values: `untFlags` `0x11fb4a00`, `controllerIndex` `0x11fb4a0c`, `silentLogin`
+  `0x11fb4a1c`, `isPrimaryIndex` `0x11fb4a28`, `platformSpecificId` `0x11fb4a38`, `demoname`
+  `0x11fb4a4c`, `isInEditor` `0x11fb4a58`, `fullNetworkInitialization` `0x11fb4a64` (ref
+  `0x113478e0`), `execLines` `0x11fb4a80` (single reference, push site `0x1134824a`), `mapIdLow`
+  `0x11fb4a8c`, `mapIdHigh` `0x11fb4a98`, `versionIdHigh` `0x11fb4aa4`, `versionIdLow` `0x11fb4ab4`,
+  `mapIdType` `0x11fb4ac4`, `bfname` `0x11fb4ad0` (refs `0x11328860`, `0x113482f4`), `execFilenames`
+  `0x11fb4ad8` (ref `0x11348300`), `saveGameFilename` `0x11fb4ae8`, `unloadWorld` `0x11fb4afc`,
+  `SearchIdAddress` `0x11fb4b08`, `SearchSessionId` `0x11fb4b18`, `JoinGame` `0x11fb4b28` (ref
+  `0x11348010`), `JoinService` `0x11fb4b34`, `JoinSessionId` `0x11fb4b40`, `DeleteSessionId`
+  `0x11fb4b50`, `DeleteMessageId` `0x11fb4b60`, `PlaylistId` `0x11fb4b70`, `MatchMakingEnabled`
+  `0x11fb4b7c`, `SessionRefId` `0x11fb4b90`, `SessionType` `0x11fb4ba0`, `NetEngineType` `0x11fb4bac`,
+  `AccountType` `0x11fb4bbc`, `SearchRanked` `0x11fb4bc8`, `SearchRetries` `0x11fb4bd8`, `SearchSlots`
+  `0x11fb4be8`, `SearchNeedSlots` `0x11fb4bf4`, `SearchGameModes` `0x11fb4c04`, `Silent` `0x11fb4c14`,
+  `DeleteCurrent` `0x11fb4c1c`, `WasInvited` `0x11fb4c2c`, `EmulatorProfileId` `0x11fb4c38`,
+  `UseTicketRequestAttachment` `0x11fb4c4c`, `FollowHost` `0x11fb4c68`, `DoNATTypeDetection`
+  `0x11fb4c74`. Registration chain: `0x11347fc0` (guard `cmp byte ptr [0x1282a60d],0` → `jne 0x11348217`
+  → `call 0x11347bc0`) registers the matchmaking fields, `0x11348230` (guard `[0x1282a60c]`) registers
+  `execLines` (`push 0x11fb4a80; push 8; mov byte ptr [0x1282a60c],1; call 0x103173f0` then
+  `mov ecx,[0x12852dd0]`, `mov eax,[0x12852dcc]`, `lea eax,[eax+ecx*4]`, `push 1`,
+  `mov esi,0x12852dcc`, `call 0x10638fb0`), `0x11347c60` (guard `[0x1282a607]`) registers the
+  quickload/respawn fields `touched` `0x11fb4c90`, `world` `0x11f46910`, `pos` `0x11f39450`,
+  `spawnPtId` `0x11fb4c98`, `keepPlayerState` `0x11fb4ca4`, `mode` `0x11fb4c88`, plus `OperationId`
+  `0x11fb4938`, `EngineUpdateFlag` `0x11fb4944`, `ranked` `0x11f45e34`. Getter `0x103173f0`
+  (`cmp byte ptr [0x128293f4],0`, allocations of `0x10+0x20` = 48 bytes through `0x11790750` /
+  `0x118e8340`); container walker `0x10638fb0` (`mov ecx,[esi+4]`, `lea ebx,[ecx+edi]`,
+  `lea ecx,[edi+ecx*4]`, `cmp eax,ecx`). `execLines` type code is the `push 8` next to its name
+  (8 = string/vector-like type id), while the 180-byte claim in the older note belonged to the wrong
+  build — re-measure on 1.06 if the descriptor size matters.
+- **Option-string consumption cluster in 1.06 (22:4x session, `FC3_d3d11.dll`).** Option strings are loaded
+  with `mov reg, imm32` and passed through a common resolver, never with `push imm32`, which is why the
+  old `push`-based scans found nothing. `-bfname` `0x11fdbc34` is consumed at `0x1105b68b`
+  (`mov eax,0x11fdbc34`; `call 0x11790540`; `call 0x10001e40`) inside a function gated by
+  `0x1105b670 cmp dword ptr [esi+0x110],0` + `mov eax,[0x1282908c]`, with the result flag written to
+  `0x1105b6b3 mov byte ptr [0x1282a668],1` (`[ebp+8]` is the caller-supplied bundle name); a second
+  site loads `0x11fdbc3c` (`-execline`) at `0x1105b6b0` in the same function. `-spawnangle`
+  `0x11fdbea4` is consumed at `0x111e1e54`/`0x111e1e67` (`mov ecx,0x11fdbea4`; `mov esi,0x11fdbea4`,
+  `call 0x11057c60`, then `mov byte ptr [0x1282a6c8],al`) and applied at `0x111e2984 lea ecx,[edi+0x430]`
+  followed by `call 0x111e4140` / `call 0x10404f40` — that pair is the QuickLaunch spawn-angle writer
+  and is the closest analogue of a per-client spawn override. `spawn_angle` appears as a *stored*
+  session-field name at `0x11fa7000` (pushed as a name at `0x113429ca`, i.e. the same registry route as
+  `execLines`), so a per-slot spawn angle exists in the session descriptor. Re-measurement note: the
+  1.05-era `push <name>; push 0x1c; call 0x10a46480` shape is `FC3.dll` 1.05 code (`0x10a8d0db`), and its
+  1.06 counterpart `push 0x11fb4a80; push 8; call 0x103173f0` uses type code 8 — the earlier "180-byte
+  struct" reading came from a `.rdata` pointer-table entry being mistaken for a string, so treat that
+  size claim as unverified.
 - **PE layout facts for `FC3_d3d11.dll` 1.06 (ImageBase `0x10000000`, EP RVA `0x700be8` = VA
   `0x10700be8`):** `.text` `0x10001000`–`0x11be01c1` (raw `0x400`–`0x1bdf600`), `.rdata`
   `0x11be1000`–`0x120b7347`, `.data` `0x120b8000`–`0x128bc788` with raw size only `0xe7c00`, `.rsrc`
@@ -597,4 +675,6 @@ An undeletable stray file named `nul` sits at the workspace root and makes `git 
 - [ ] Enumerate the rest of the `Game.*` console-command table (`0x111cd3f5`..`0x111cf52f`) and find a
   command that starts or joins a co-op session (`MissionSetState`, `SaveGame`, `Exec`, `RunBatch`)
 - [ ] Find the file behind `HubUtils.cpp (208) Test/dev args file present.` in the Ubisoft Connect log
+- [ ] Confirm what `-coop` (`0x11fdc0cd`, refs `0x11aa08d3` / `0x11aa0cfc`) enables in 1.06 and whether it is the flag the co-op quick-launch path uses; then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect log plus `screenshot\`
+- [ ] Size the real 1.06 session-descriptor record: `push <name>; push <typecode>; call 0x103173f0` (48-byte records from `0x10+0x20`) and the arrays `[0x12852dcc]`/`[0x12852dd0]`, `[0x12852d54]`/`[0x12852d58]`
 - [ ] Phase 3: story script patches for multi-player
