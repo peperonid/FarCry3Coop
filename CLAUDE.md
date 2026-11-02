@@ -53,3 +53,36 @@ locally on the owner's PC: see [docs/tools/rea.md](docs/tools/rea.md).
 **EN:** Chat with the owner in Russian.
 
 **RU:** С владельцем общаться по-русски.
+
+## Repo layout (session 2026-11-02, agent session)
+
+- `NOTES.md` / `NOTES.ru.md` — findings log. New findings are written to **both** files
+  (bilingual rule): English is the primary record, the Russian file mirrors it.
+- `NOTES.md` section order: the owner's granular Phase 1 sections stay first and are the
+  authoritative Phase 1 record; agent-session sections are appended after them with a
+  provenance heading. Do not rewrite the owner's Phase 1 text without telling the owner.
+- `PLAN.md` / `PLAN.ru.md` — campaign-co-op plan. The owner's version is authoritative;
+  the agent's plan lives in the hub repo (`FarCryCoop/games/far-cry-3/PLAN.md`) until the
+  owner merges it.
+- `scripts/` — analysis scripts, **tracked** (disassembler, xref maps, patchers, build
+  helpers). `tools/` — external binaries only (Ghidra, packer), **ignored**. Caches
+  (`*_dis_cache.json`) are ignored.
+- `local/` — private state (registry backups, scratch scripts), ignored. Scratch files use
+  `*.scratch*`, `.scratch*`, `scratch_*`, `local/scratch/`.
+- `Temp/` — agent-harness scratch (delegate output, probe scripts), ignored.
+- Commits: stage explicit paths only (`git add -A` aborts on this machine with
+  `error: invalid path 'NUL'` because of an undeletable `nul` file at the workspace root);
+  commit message via `git commit -F .git/COMMIT_MSG.txt`. Commit text is English; keep
+  Russian only inside the `.ru.md` files.
+
+## Known environment gaps (owner decision needed, not resolved by the agent)
+
+- Golden rule 2 says everything local lives under `E:\FarCryCoop` with `env.ps1` loaded per
+  command. `E:\FarCryCoop` does not exist on this machine and `env.ps1` is not present; the
+  repos live under `D:\Projects/Co-op Anything/`, the test copy at `H:\FarCryCoop/TestFC3`.
+- The agent harness writes its own temp work to `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp`
+  (delegate outputs, sandbox scripts). This contradicts golden rule 2 and is outside the
+  agent's control. Flagged, not fixed.
+- Carried-over scripts contain stale hardcoded paths (`E:\SteamLibrary\…`,
+  `E:\FarCryCoop\Downloads\…`). Fixing them is an owner decision; the agent lists them in
+  `NOTES.md` instead of editing silently.

@@ -4,3 +4,12 @@ local/
 # Debugging tools stay local, only the mod is committed / Инструменты отладки остаются локально, в репозитории только мод
 /tools/
 .playwright-mcp/
+# Agent scratch (delegate output, probe scripts) / черновики агента
+Temp/
+local/scratch/
+*.scratch*
+.scratch*
+scratch_*
+# disassembler caches
+*_dis_cache.json
+__pycache__/
