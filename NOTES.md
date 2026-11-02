@@ -181,3 +181,422 @@ Observed 2026-10-22 on the owner's PC:
 - **Result:** the host loads `coop_vidar` (the world is visible behind the menu); the client appears to join and shows the same screen. Both then show an empty dark panel without text or buttons; the picture stops updating (mouse cursor trails), input does nothing. After pressing an "OK" button on the host it looks the same. Same with DX9 and DX11, with and without RivaTuner (RTSS) overlay.
 - **Not a hang:** both processes respond to Windows; the main thread uses one core and keeps running different game code and driver calls (`scripts\thread_eips.ps1` samples thread EIPs and scans the stack for `FC3*.dll` addresses).
 - **Suspects / next:** (1) the test-only third-party `multimain.feu` from mod 262 in our `patch.dat` breaks the network menu UI: retest with the patched DLL and the vanilla `patch.dat`; (2) a lobby screen (character select / ready) that waits for something from the missing online services; (3) analyse `FC3_d3d11.dll` in REA and map the main-thread stack addresses (e.g. `0x10338ad4`, `0x102f1b1d`, `0x103e07db`, `0x1040aaa3`, `0x10327bbd`).
+
+
+---
+
+## Session notes appended 2026-11-02 (agent session on the owner's PC)
+
+Sections below were written in the agent session on the owner's PC. Their Phase 1 material
+is not duplicated here: this file keeps the owner's granular Phase 1 sections as the
+authoritative Phase 1 record. Paths in the appended sections are relative to this repo
+(`scripts/` for analysis scripts, `local/` and `local/scratch/` for gitignored state).
+
+## Phase 2 findings (2026-11-01, FC3.dll binary analysis)
+
+**Network stack: Storm (Ubisoft)** — confirmed in FC3.dll strings:
+- `storm echo` — session management (Create, ChangeSessionDescription, SessionTicket)
+- `storm punch` — NAT traversal (ClientImplMainInitParams, ClientImplNetworkInitParams, detectNat, qos punch/traversal)
+- `storm echo` — player events: RequestJoin, AcceptJoinRequest, RefuseJoinRequest, RequestAddPlayer, RemovePlayer, UpdatePlayer
+- `AcceptSessionHostCandidacy` / `RefuseSessionHostCandidacy` — host election
+- `BroadcastLanDiscovery2` — LAN discovery via UDP broadcast
+- `Host disconnected starts host migration` — host migration supported
+- `Listening on host port` — server listen
+- `WS2_32.dll` — Winsock import confirmed
+- `-dedicated` flag — dedicated server mode exists
+- `dedicatedConfig`, `NumPlayers`, `SessionId`, `IsDedicated`, `MapSource`
+
+**Co-op entities in engine:**
+- `CSpawnPointCoop`, `CLocalSpawnPointCoopEntity` — co-op-specific spawn points
+- `CSpawnPointMP`, `CSpawnPointBlue`, `CSpawnPointRed`, `CSpawnPointShared` — MP spawn types
+- `CGRQueryIsCoopGame` — co-op game mode query
+- `FCXCoop` — co-op game mode identifier
+
+**Lobby/session infrastructure:**
+- `CLobbyService`, `CNetGameCtrlEnterLobby`, `CNetGameCtrlStateUpdateLobby`
+- `CSessionSendInviteOperation`, `CSessionAcceptInviteOperation`, `CSessionCancelInviteOperation`
+- `CVotingService`, `CPlaylistService`
+- `CFCXGRStateLobby` — co-op lobby state
+- Connection states: `ResolvingAddress`, `Reaching`, `Connected`, `Dropped`, `Deleted`
+- Error states: `CONNECTION_FAILED`, `CONNECTION_TIMED_OUT`, `KICKED`, `BANNED`, `SESSION_JOIN_TIMED_OUT`, `REFUSED`, `MIGRATION`
+
+**Game modes in FC3.dll:**
+- `Singleplayer.feu`, `Multiplayer` menu, `QuickLaunch.feu`
+- `frontendworld`, `multicommon` — world references
+
+**Conclusion:** The engine has a complete co-op infrastructure (Storm netcode, session management, LAN discovery, host migration, spawn points). The `-host`/`-client` flags and session type 3 (co-op story) should work. The "not enough players" check at `0x108c4b09` is the main gate to bypass for solo/offline play.
+
+## Startup / command-line behaviour of the Uplay 1.06 build (2026-11-01)
+
+Verified on the owner's machine: `H:/Uplay/Far Cry 3/bin` = Uplay build 1.06 (version number is NOT
+readable from PE resources; build identity below is re-verified with
+`scripts/fc3_version_probe.py` / `scripts/fc3_rsrc_probe.py` on 2026-11-01.
+
+| file | bytes | sha256 (short) | PE TimeDateStamp |
+| --- | --- | --- | --- |
+| `bin/FC3.dll` | 40720424 | `71d58a7a4503c5c6…` | 2022-10-03T12:21:31 |
+| `bin/FC3_d3d11.dll` | 40869416 | `e541594e11ac6091…` | 2022-10-03T09:36:32 |
+| `bin/farcry3_d3d11.exe` | 203816 | `5437b2e37a54f8a3…` | 2022-10-03T09:37:26 |
+| `bin/farcry3.exe` | 203816 | `fd3929f19ff82591…` | 2022-10-03 |
+
+`H:/Uplay/Far Cry 3/bin` and `H:/FarCryCoop/TestFC3/bin` are byte-identical (16 entries, no
+`FC3_coop*` files).
+
+**Correction (2026-11-01): the numbers in the earlier version of this section were wrong.** The old
+text claimed PE compile time 2022-05-04, an exe size of 60992 bytes, file version 1.06.0.90512 and
+product 1089053420, and MD5 `916c6d4b876d8be5f0ad68f50719a838` (FC3_d3d11) /
+`5742de2aaa76935d46947bf89e2e2eb7` (FC3) / `47d4c992b0e82b7d52cc48e8d1bd9119` (farcry3_d3d11.exe).
+The compile time is 2022-10-03, the exe is 203816 bytes, and **none of these binaries contain a
+version resource** (`VS_VERSION_INFO` is absent; the only `FileVersion` hit is the
+`GetFileVersionInfoA` import name) — so `1.06.0.90512` is not derivable from the PE files. The MD5
+list may belong to a different (1.05) build; the sha256 values in the table above are what this
+machine has. Bantila's recorded 1.05 `FC3.dll` SHA-256
+`493031278308793D841F7419C83A447678651860312F56506A0A18B2A70D19E5` matches nothing here.
+No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:/, E:/, H:/).
+
+- **The exe is a DRM stub.** `bin/farcry3_d3d11.exe` (203816 bytes; PE32, EP `0x000012de`,
+  base `0x00400000`, `.text` 2138 B, `.rsrc` 187880 B, imports: `FC3_d3d11.dll` **1 function**,
+  `MSVCR100.dll` 24, `KERNEL32.dll` 17 — no `GetCommandLine*`, no `CreateProcess*`, no `ShellExecute*`)
+  starts, then re-executes the
+  **canonical install** exe resolved from the registry
+  (`HKLM\SOFTWARE\WOW6432Node\Ubisoft\Far Cry 3`: `InstallDir=H:/Uplay/Far Cry 3`,
+  `ExecutableName=bin/FC3Updater.exe`, SKU=WW, Version=1.05, Language=Russian), passing only
+  `-language=Russian`. Every extra argument is dropped.
+- Consequence for the test copy: launching `H:/FarCryCoop/TestFC3/bin/farcry3_d3d11.exe` with
+  `-host fc3_main -login h1 -coop` starts a child from `H:\Uplay\Far Cry 3\bin` with
+  `-language=Russian` only. The test copy cannot run its own quick-launch.
+- The quick-launch strings ARE present in 1.06 (`FC3.dll` command-line table `0x1fb6f6c`-
+  `0x1fb74f6`): `-host` @0x1fb73cb, `-client` @0x1fb7472, `-login` @0x1fb7370, `-coop` @0x1fb73fc,
+  `-offline` @0x1f36444, `-sessionuid` @0x1fb73e4, `-dedicated` @0x1f0d9dc,
+  "Missing -login or -ip" @0x1fb7458.
+  **Those offsets do not match the binary on this machine.** They look like raw-file offsets, but
+  `0x1fb73cb` is outside the `.text` raw range of the installed `FC3.dll` (`.text` rawptr `0x400`,
+  rawsize `0x1BC2000`; `.rdata` VA `0x11bcb000` rawptr `0x1bca200`; conversion
+  `VA = 0x10001000 + (raw - 0x400)` for `.text`, `VA = 0x11bcb000 + (raw - 0x1bca200)` for `.rdata`).
+  Verified string addresses on the installed 1.06 `FC3.dll` (`scripts/fc3_iat_scan.py`,
+  `scripts/fc3_cmdline_cluster.py`): `-host` `0x11f0e6ac`, `-client` `0x11f0e748`, `-dedicated`
+  `0x11f0e7dc`, `-login` `0x11fb8170`, `-sessionuid` `0x11fb81e4`, `-coop` `0x11fb81fc`, `-online`
+  `0x11fb8234`, `-ip` `0x11fb8254`, `-bfname` `0x11fb7d64`, `-offline` `0x11f37244`.
+  Installed `FC3_d3d11.dll`: `-host` `0x11f31c7c`, `-client` `0x11f31d18`, `-dedicated` `0x11f31dac`,
+  `-login` `0x11fdc040`, `-sessionuid` `0x11fdc0b4`, `-coop` `0x11fdc0cc`, `-online` `0x11fdc104`,
+  `-ip` `0x11fdc124`, `-bfname` `0x11fdbc34`, `-offline` `0x11f5a654`.
+  What is **absent** in 1.06: the 1.05 debug-menu strings
+  "Not enough players", "Local Coop", "Coop Story".
+- Renaming `bin/upc_r1_loader.dll` does not free the stub: the game exits silently ~25 s after
+  launch (no window, no WER event) — the Ubisoft Connect loader is a hard start-up dependency.
+- `HKLM` writes are not available to the current user (not elevated), so the registry cannot be
+  redirected to a private copy. `local/registry-fc3-backup.reg` holds the original values.
+- What 1.06 keeps usable: the single-instance mutex patch (`jnz` at `0x100041bb` / `0x10004092`
+  -> NOPs) lets two copies run side by side; the Uplay party-list crash patch is 1.05-only (the
+  pattern does not occur in 1.06, new UPC API).
+- The 1.06 multiplayer menu is dead: it shows the hard-coded loc id `0x23894` = 145556 =
+  `X360_EU_NETWORK_XLSP_DOWN` dialog (line 152 of the upper-fork notes, see
+  `D:/Projects/Co-op Anything/FarCry3Coop-bantila/NOTES.md`). A quick-launch must therefore
+  bypass the menu, not navigate it.
+- **New lead (2026-11-01): the 1.06 exe already has an exec-line mechanism.** In `FC3_d3d11.dll`
+  the launcher function `0x11aa2fe0` (called from `0x117b7003`, i.e. from the start-up routine that
+  also tests `-language`, `-editorpc`, `-affinity`, `-floatexceptions`, `-host`, `-norender` and
+  opens the single-instance mutex at `0x117b6f3e`) reads `-bfname` `0x11fdbc34`, **`-execline`
+  `0x11fdbc3c`**, **`-exec` `0x11fdbc48`**, **`-quickstartup` `0x11fdbc50`** and then pushes the console
+  variables `gfx_NoLaunchCountdown 1` `0x11fdbc60`, `gfx_NoPostRoundCountdown 1` `0x11fdbc78`,
+  `gfx_NoPreRoundTimeOut 1` `0x11fdbc94`.
+  Hypothesis (untested): feed the co-op quick-launch arguments through `-execline "…"` / `-exec "…"`
+  instead of patching the Uplay relaunch. Open questions: which import sits at IAT slot `0x11be1618`
+  (the switch-test helper), what the consumer of `-execline` at call `0x11a1b940` does, and the
+  `FC3_d3d11.dll` equivalent of the indirect-call pointer `0x11bcb5c0`.
+- Uplay side evidence (`C:/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/logs/launcher_log.txt`):
+  the hub is invoked as `uplay://launch/46/0` and then as
+  `-upc_uplay_id 46 -upc_desktop_mode -offline -upc_game_starter -exec "video_setmode 1280 720 0"`,
+  i.e. Ubisoft Connect itself passes an `-exec "…"` line to the game stub. Every launch line is
+  followed by `HubUtils.cpp (208) Test/dev args file present.` — the file that line refers to is
+  **not identified**; finding it would be a second way to inject arguments without patching.
+  `data/46/` is empty, `cache/configuration/configurations/` is empty, `games/` is empty, and no cfg
+  under the launcher tree contains `video_setmode` (only the log does).
+- **Prior-art addresses transfer to the installed 1.06 `FC3.dll` (verified 2026-11-01).** Anchors
+  found independently in `H:/Uplay/Far Cry 3/bin/FC3.dll` match `D:/Projects/Co-op Anything/FarCry3Coop-bantila/NOTES.md`
+  exactly: `GetLocalPlayerId` `0x11fbdcc4` (push site `0x111ce912`), `TeleportToCurrentObjective`
+  `0x11fbda7c` (push site `0x111cdf76`), `SpawnCoopAI` `0x1206ad0c` (push site `0x11b1da06`), `CoopTeleportPlayer`
+  `0x1206a994` (push site `0x11b1d252`), Lua-function table `0x11b1d252`..`0x11b1df2e`, session-operation parameter registration
+  `FUN_11342740` (called at `0x113429a0`). Caveat: bantila's *REA* snapshot labelled `fc3-105-FC3.dll`
+  uses different VAs (`GetPlayerInSlot 0x10bad843`, `GetNumberOfPlayers 0x10baba48`, …), so that second
+  build is a different file; the Ghidra pass in NOTES lines 55-72 is layout-identical to this 1.06 file.
+- **1.06 command line / console-command mechanism (`FC3_d3d11.dll` launcher func `0x11aa2fe0`).** The
+  switch test is `push <string>; call dword ptr [0x11be1618]` = `MSVCR100.dll:strstr`, so the game DLL
+  parses its own command line. Switch strings: `-execline` `0x11fdbc3c`, `-exec` `0x11fdbc48`,
+  `-quickstartup` `0x11fdbc50`, `-bfname` `0x11fdbc34`; `-numclients` `0x11fb1e19`, `-splitscreen`
+  `0x11f31d75`, `-splitscreen4` `0x11f31d85`, `-world` `0x11fdbf80`, ` -world=fc3_main` `0x11fdbdb1`,
+  `optimal_splitscreen` `0x11f76040`, `execLines` `0x11fb4a80`. Value-extraction helper `0x11a1b940`
+  (called at `0x11aa3082`, `0x11aa3170`), tokenizer `0x10001e40`, `strchr`-like helper `0x10037dc0`.
+  Full contiguous switch block verified by byte search in BOTH 1.06 files (`FC3_d3d11.dll` / `FC3.dll`):
+  `-nocompile` `0x11fdbbd8`/`0x11fb7d08`, `-runscriptindebug` `0x11fdbbe4`/`0x11fb7d14`,
+  **`-disableplayersetuponquicklaunch`** `0x11fdbbf8`/`0x11fb7d28`, `-perfhud` `0x11fdbc1c`/`0x11fb7d4c`,
+  `-logFile` `0x11fdbc28`/`0x11fb7d58`, `-bfname` `0x11fdbc34`/`0x11fb7d64`, `-execline` `0x11fdbc3c`/`0x11fb7d6c`,
+  `-exec` `0x11fdbc48`/`0x11fb7d78`, `-quickstartup` `0x11fdbc50`/`0x11fb7d80`, `-debugFramerateCameras`
+  `0x11fdbcf8`/`0x11fb7e28`, `-demoType` `0x11fdbd80`/`0x11fb7eb0`, `-tracking`/`-trackingextension`/
+  `-forcevip`/`-closedbeta` (only in `FC3.dll`: `0x11fb7e78`, `0x11fb7e84`, `0x11fb7e98`, `0x11fb7ea4`),
+  `-benchmark` `0x11fdbe4c`, `-quickmatch` `0x11fdbe58`, `-load` `0x11fdbe64`, `-wait` `0x11fdbe6c`,
+  `-world` `0x11fdbe80`, `-class` `0x11fdbe88`, `-spawn` `0x11fdbe90`, `-spawnpos` `0x11fdbe98`,
+  `-spawnangle` `0x11fdbea4`, `-map` `0x11fdbeb0`, `-benchmarkinputname` `0x11fdbec4`.
+  A benchmark usage string exists: `Invalid parameters for -benchmark. Ex; -benchmark {playback|record|
+  sectors|spawnpoints|path} -world worldname -map mapname` (`0x11fdbed8` / `0x11fb8008`) — proof that
+  `-world`+`-map` are accepted on the command line. Switches NOT present in 1.06 (exact-string search,
+  both files): `-hostmaster`, `-hostgame`, `-dedicator`, `-profile`, `-quickdebug`, `-demo`, `-devfolder`,
+  `-profilefolder`, `-gametype`, `-gamemode`, `-mapname`, `-mapId`, `-stageName`, `-stageOffset`,
+  `-stageSize`, `-save`, `-log`.
+- FC3.dll 1.06 carries the SAME switch machinery, at its own addresses (verified by byte scan of the
+  little-endian string VA in `.text`) (VA = file offset + 0xc00 for this binary's `.text`): the launcher
+  function spans `0x11a8cf90`..`0x11a8d103`; `-host` `0x11f0e6ac` is referenced at VAs `0x117a6139`,
+  `0x117a6794`, `0x11a8c90c`, `0x11a8cf07`, `0x11a8f657`; `-client` `0x11f0e748` at `0x117a67a2`,
+  `0x11a8cfc3`, `0x11a8f67f`; `-disableplayersetuponquicklaunch` `0x11fb7d28` at `0x11a8c3b0`
+  and `0x11a8e624`. The bytes at those sites are the push immediates (`ac e6 f0 11` / `28 7d fb 11`). FC3.dll's strstr import slot is
+  `[0x11bcb5c0] = MSVCR100.dll:strstr`, used by the validity helper `0x11a8b8c0` which pushes
+  `-online` `0x11fb8234`, `-login` `0x11fb8170` and the error string `'Missing -login or -online for
+  -quickmatch.'` `0x11fb82d8` → the `-quickmatch` handler validates that `-login`+`-online` are present.
+  **This confirms FC3.dll itself contains the multi-player launch-argument validation layer, and the
+  `-quickmatch` route requires `-login` + `-online`.** In `-quickmatch`/`-host` handling
+  (`0x11a8d0c5`..`0x11a8d0eb`): `lea edx,[ebp+8]; call 0x11341dc0` (returns a session-interface object),
+  `mov ecx,[eax]; mov eax,[ecx]; mov eax,[eax+0x74]; push edx; call eax` — a **vftable slot 0x74** call on
+  that object with an out-parameter `[ebp+0x10]`, then `call 0x10005570` (destructor) and `jmp 0x11a8cf90`.
+  The failure path calls `0x11343640`, a destructor that writes the vftable `0x11f90644` (same page as the
+  session-operation field strings `execLines` `0x11f90af0`) and frees the fields at `[obj+0x98]`, `[obj+0x9c]`
+  ⇒ the object IS the session object. So the session-creation call is **vftable slot 0x74** of the object
+  returned by `0x11341dc0` — the exact target a quick-launch/`-exec` route must reach.
+  The collected console lines are `gfx_NoLaunchCountdown 1` `0x11fdbc60`, `gfx_NoPostRoundCountdown 1`
+  `0x11fdbc78`, `gfx_NoPreRoundTimeOut 1` `0x11fdbc94`, `multi_DisableInitialSpawnDelay 1` `0x11fdbcac`,
+  `hack_loadOutIsWaitingForMissionBlocks 0` `0x11fdbcd0`, plus switch-driven extras `starMatch_with_debugCameras 1`
+  `0x11fdbd10` + `multi_SkipIntroMovie 3` `0x11fdbd30` (from `-debugFramerateCameras` `0x11fdbcf8`) and
+  `cheat_GodMode 2` `0x11fdbd8c` (when `-demoType` `0x11fdbd80` equals `StageDemo` `0x11f9a8a0`, compared
+  with `MSVCR100.dll:_stricmp` `[0x11be1390]` at `0x11aa3741`).
+- **Helper identification (corrects this file's earlier claim that `0x10002a50` was a console executor).**
+  Disassembling the callees: `0x10002a50` = **strlen** (aligned zero-byte scan `lea esi,[ecx+0x7efefeff]`
+  … `test esi,0x81010100` … `sub eax,edx; ret`), `0x10001ec0` = SSO `std::string` assign (`add ecx,0xc;`
+  `call 0x10700c10` memmove into the inline buffer, then `[obj+4] = len`, `[obj+0xc+len] = 0`),
+  `0x10037dc0` = aligned alloc/resize helper, `0x10174710` = heap free, `0x11788480` / `0x11790540` =
+  `std::string` bookkeeping that write the class pointer `0x128ac3f4` into the global object
+  `0x12829424` (see the singleton bullet; `0x128ac450` was read from the same kind of site and is likewise
+  a `.bss` object, not a file constant). `0x11a1b940` (60 call sites) = "find `<switch>` in the command line, take the text
+  after it, store it in an SSO string": two `strstr` calls (`[0x11be1618]`) + `strlen` + assign, with `"`
+  (byte `0x22`) quote handling and a space (`0x20`, table at `0x11f31df8`) token split via `0x10003f40`.
+  ⇒ `-exec` / `-execline` values are **collected** into the execLines container (`0x12829424`), not executed
+  in the launcher. The execution step is the engine's execLines consumer (`FC3.dll` session field
+  `execLines` `0x11f90af0`, registered at `0x113429ca`) — the next probe target.
+- **Container-global reference count and construction sites (verified 2026-11-02).** A little-endian scan of
+  `FC3_d3d11.dll .text` for the byte pattern `24 94 82 12` finds **17 332** references to the global
+  `0x12829424`, confirming it is a real singleton used throughout the launcher. Exactly two sites write an
+  immediate class pointer into it: `c7 05 24 94 82 12 f4 c3 8a 12` at `0x1178846e` and again at `0x118e82fd`
+  (value `0x128ac3f4`, i.e. `f4 c3 8a 12` little-endian). All other 17 330 references are reads
+  (`8b/89/8d/83/81 … [0x12829424]`, `ff 35`), i.e. normal member access of one global object.
+- **Complete host/client netblock (VERIFIED 2026-11-02, contiguous `.rdata` run, both 1.06 binaries).**
+  `FC3_d3d11.dll 0x11fdc02c`..`0x11fdc150` and `FC3.dll 0x11fad15c`..`0x11fad308` mirror the same order:
+  `-keyonline` `0x11fdc02c`/`0x11fad15c`, test value `a123456` `0x11fdc038`, `-login` `0x11fdc040`,
+  `-login2` `0x11fdc048`, `-login3` `0x11fdc050`, `-login4` `0x11fdc058`, `-password2` `0x11fdc060`,
+  `-password3` `0x11fdc06c`, `-password4` `0x11fdc078`, `Invalid parameters for -host, missing (-login)`
+  `0x11fdc084`/`0x11fad1b4`, `-sessionuid` `0x11fdc0b4`/`0x11fad1e4`, `-deathmatch` `0x11fdc0c0`,
+  `-coop` `0x11fdc0cc`, `-domination` `0x11fdc0d4`, `-headquarters` `0x11fdc0e0`, `-firestorm` `0x11fdc0f0`,
+  `-dash` `0x11fdc0fc`, `-online` `0x11fdc104`, `-netemulator` `0x11fdc10c`, `-ranked` `0x11fdc11c`,
+  `-ip` `0x11fdc124`, `Missing -login or -ip for -client.` `0x11fdc128`, `Trying to launch an online client, but
+  missing password (-password) or online key settings (-keyonline)` `0x11fdc1d8` (referenced at code VAs
+  `0x11aa085f`, `0x11aa086f`), then the net-engine state names `ENetEngineState_Error` `0x11fdc240`,
+  `ENetEngineState_Initialized_Offline` `0x11fdc258`, `ENetEngineState_Initializing_Offline` `0x11fdc27c`.
+  ⇒ 1.06 accepts `-host <world> -login … -coop … -online [-ip <addr>]` on the command line; the
+  game-mode words (`-coop`, `-deathmatch`, `-domination`, `-headquarters`, `-firestorm`, `-dash`) are switches,
+  not menu names.
+- **`-quickmatch` validation (`FC3.dll`).** Helper `0x11a8b8c0` uses strstr via IAT `[0x11bcb5c0]`
+  (`MSVCR100.dll:strstr`), pushes `-online` `0x11fb8234` and `-login` `0x11fb8170`, and on failure prints
+  `Missing -login or -online for -quickmatch.` `0x11fb82d8` (FC3_d3d11 twin `0x11fdc1a8`) ⇒ `-quickmatch`
+  requires `-login` **and** `-online`.
+- **Console-command vocabulary (`FC3.dll` `Game` table, `0x111cd3f5`..`0x111cf52f`).** Co-op-relevant
+  entries with their name strings: `MissionSetState` `0x11fbd98c`, `Exec` `0x11fbda40`, `SaveGame`
+  `0x11fbda48`, `SetTimeOfDay` `0x11fbda30`, `TeleportToCurrentObjective` `0x11fbda7c`, `TeleportToSpawnPoint`
+  `0x11fbdbbc` (+`Red` `0x11fbdbd4`, `Blue` `0x11fbdbec`, `Spectator` `0x11fbdc08`), `SetHealth` `0x11fbdacc`,
+  `GetLocalPlayerId` `0x11fbdcc4`, `SetPlayerId` `0x11fbd8f8`, `IsServer` `0x11fbd880`, `RunBatch` `0x11fbdcb8`,
+  `GetCurrentPrimaryBuddy` `0x11fbdc54`, `SetCurrentPrimaryBuddy` `0x11fbdc3c`, `SendGlobalChatMessage`
+  `0x11fbd9ec`, `SendTeamChatMessage` `0x11fbda04`, `RefillPlayerAmmo` `0x11fbd9a8`, `AIDebugTool`
+  `0x11fbd99c`, `ChangeFOV` `0x11fbdd00`.
+- **Session-operation fields (`FC3.dll` registration function `0x11342740`, `0x11342758`..`0x11342a73`).**
+  Field-registration helpers `0x11ab6750` / `0x11ab6ac0` / `0x11ab6800`; full name set registered in this
+  one function: `SearchIdAddress` `0x11f90b78`, `SearchSessionId` `0x11f90b88`, `JoinGame` `0x11f90b98`,
+  `JoinService` `0x11f90ba4`, `JoinSessionId` `0x11f90bb0`, `DeleteSessionId` `0x11f90bc0`,
+  `DeleteMessageId` `0x11f90bd0`, `PlaylistId` `0x11f90be0`, `MatchMakingEnabled` `0x11f90bec`,
+  `SessionRefId` `0x11f90c00`, `SessionType` `0x11f90c10`, `NetEngineType` `0x11f90c1c`,
+  `AccountType` `0x11f90c2c`, `SearchRanked` `0x11f90c38`, `SearchRetries` `0x11f90c48`,
+  `SearchSlots` `0x11f90c58`, `SearchNeedSlots` `0x11f90c64`, `SearchGameModes` `0x11f90c74`,
+  `Silent` `0x11f90c84`, `DeleteCurrent` `0x11f90c8c`, `WasInvited` `0x11f90c9c`,
+  `EmulatorProfileId` `0x11f90ca8`, `UseTicketRequestAttachment` `0x11f90cbc`, `FollowHost` `0x11f90cd8`,
+  `DoNATTypeDetection` `0x11f90ce4`, then `execLines` `0x11f90af0` (pushed at `0x113429ca`), `map`
+  `0x11f8d78c` (`0x11342a04`), `mapIdLow` `0x11f90afc`, `mapIdHigh` `0x11f90b08`, `versionIdHigh`
+  `0x11f90b14`, `versionIdLow` `0x11f90b24`, `mapIdType` `0x11f90b34`, `bfname` `0x11f90b40`
+  (`0x11342a73`). String VA → code reference counts: `execLines` has exactly **one** reference in
+  `FC3.dll` (the `push imm8` at `0x113429ca`), and `Exec` `0x11fbda40` exactly one (`push imm8` at
+  `0x111cf4dd`), so this table is the registration site, not a dispatch site.
+  `execLines` being a session-operation field, registered immediately before `map`/`mapId*`/`bfname`, is
+  the strongest link between the command line and a co-op session request: those are exactly the
+  parameters a session-creation call needs.
+- **`exec` / `runbatch` registration and the batch-file operation class (VERIFIED 2026-11-02, 1.06).**
+  `FC3_d3d11.dll` registers console command `exec` `0x11fdd478` with signature `Game:Exec(%%)` `0x11fdd468`
+  (help `Runs a console command "batchfile". Usage: "exec <batchfile>"` `0x11fdd428`, refs `0x111f5c0a` /
+  `0x111f5c1a`) inside a registration block `0x111f5b80`..`0x111f5cbc` whose enclosing function starts at
+  `0x111f4eab`. Registration call at `0x111f5c7b`: `push ebx; push 1; push edx; push <sig>; push eax;`
+  `push ecx; call 0x1163d910` — the handler pointer is carried in `ebx` (a stack value), so
+  `PE.code_refs()` cannot locate it (it only sees `push imm32` / `mov r32, imm32`). `FC3.dll` twins: help
+  `0x11fb9558`, `Usage: runbatch <batchfile>` `0x11fba5bd` (`FC3_d3d11` twin `0x11fde48d`), refs
+  `0x111f032a` / `0x111f033a`. The engine batch-file operation class name `CFCXRunBatchFileOperation`
+  (`FC3_d3d11.dll` `0x12032844`, ref `0x104e5fe9`; `FC3.dll` `0x1200e72c`, ref `0x104df159`) is registered
+  from global-init function `0x104e5f42`, which guards on `cmp byte ptr [0x1288b074], 0` and registers its
+  siblings the same way (`CFCXClearMessageBoxManager` `0x12032808`, `CFCXPrepareUnloadWorldOperation`
+  `0x12032824`; idiom `call 0x103a9180` → `push <name>` → `call 0x10038870`). Both `0x104e5f42` and
+  `0x111f5a00` report **0 E8 callers**: these registration blocks are global-initialization functions run by
+  the CRT initializer (`.initterm`), so `fc3_callers.py` finds nothing — do not treat "0 callers" as "dead
+  code".
+- **Session-creation call layout in the `-quickmatch`/`-host` branch (`FC3.dll`).** `0x11a8d0c5`..`0x11a8d0e2`:
+  `lea edx,[ebp+8]; push edx; lea edi,[ebp-0xb4]; call 0x11341dc0` → `mov ecx,[eax]` (vftable) →
+  `mov eax,[ecx]` → `mov eax,[eax+0x74]` → `lea edx,[ebp+0x10]; push edx; lea esi,[ebx+0x18]; call eax` →
+  `mov edi,eax; call 0x10005570` (release) → `jmp 0x11a8cf90`; failure path destructor
+  `lea ecx,[ebp-0xb4]; call 0x11343640` at `0x11a8d0f6` frees fields at `[obj+0x98]` / `[obj+0x9c]`.
+  ⇒ **vftable slot `0x74` takes exactly one argument: a 0xB4 (180-byte) session-parameter struct at
+  `[ebp+0x10]`**, and the interface handle is tracked in a `[ebp-0xb4]` object. Session-interface getter
+  `0x11341dc0` has **31 E8 callers** in `FC3.dll` (`0x10ce93c9`, `0x10edd676`, `0x10edd6e9`, `0x10edd71a`,
+  `0x11163252`, `0x11163b6f`, `0x111fa8de`, …) ⇒ it is a generic accessor, so the co-op route has to be
+  identified by the 180-byte struct layout, not by caller uniqueness.
+- **Lesson (2026-11-02):** registration routines reached only through the CRT initializer are invisible to a
+  caller scan, and handler/callback pointers passed in registers are invisible to `code_refs()`. The
+  remaining handle on the `-exec` consumer is the 180-byte session-parameter struct at
+  `FC3.dll 0x11a8d0db` plus the session object's `+0x98` field — probe those layouts next.
+- **ExecLines container is a global singleton (`FC3_d3d11.dll`).** A raw byte scan of `.text` for the
+  disp32 `24 94 82 12` (0x12829424 in little-endian) gives **17 502 access sites**, overwhelmingly
+  `8b 0d` (`mov r32,[g]`) pairs ~12 bytes apart — the `mov ecx,[g]` / `call fn` idiom — i.e. this global
+  is the manager object used as `this` by thousands of calls; only two construction-shaped writes
+  (`c7 05` at `0x1178846e` and at `0x118e82fd`). Lesson recorded the hard way: a VA is written in
+  **little-endian** in the image (`0x12829424` → `24 94 82 12`); searching for the reversed byte order
+  (or computing blob offsets with VA arithmetic instead of `file offset − section raw pointer`) produces
+  false "0 matches" results.
+- **Static dead end for the `execLines` consumer (2026-11-02, `FC3_d3d11.dll` 1.06):** the lazy-init
+  thunk at function `0x118e82d0` is the container's Meyers-singleter accessor — `test byte ptr
+  [0x128ac410], 1` / `or dword ptr [0x128ac410], 1` / `push 0; mov ecx, 0x128ac3f4; call 0x106c4b40` /
+  `push 0x11bb98c0; call 0x1070085d` / `mov al, 1; mov dword ptr [0x12829424], 0x128ac3f4; ret` — and
+  `0x11bb98c0` is an atexit-registered destructor thunk (`mov ecx, 0x128ac3f4; jmp 0x106c4b70`), sibling
+  `0x11bb98d0` for the next global. Session-op field names are registered on first use by lazy thunks
+  (`0x11348230` guard `[0x1282a60c]` → `call 0x11347c60` guard `[0x1282a607]` → `push <name>; push <size>`
+  → `call 0x103173f0`, then `[0x12852d54]`/`[0x12852d58]` and `[0x12852dcc]`/`[0x12852dd0]` pairs,
+  `sar ecx, 2` = element count), and the registry is only ever touched by 10-byte accessor thunks at
+  `0x11bc8a80`..`0x11bc8ad0` shaped `b8 <slot> ; e9 <jmp 0x10004d70>`. Conclusion: a static scan will not
+  isolate the consumer — `mov ecx,[0x12829424]; call 0x106c99b0; mov eax,<str>; call 0x11788480` occurs
+  8 311 times in the binary, i.e. the generic container idiom. Next handle is dynamic: a `-exec`/`-execline`
+  run against the test copy, or Ghidra decompilation of the thunks (`scripts/fc3_ghidra_dis.py`).
+- **PE layout facts for `FC3_d3d11.dll` 1.06 (ImageBase `0x10000000`, EP RVA `0x700be8` = VA
+  `0x10700be8`):** `.text` `0x10001000`–`0x11be01c1` (raw `0x400`–`0x1bdf600`), `.rdata`
+  `0x11be1000`–`0x120b7347`, `.data` `0x120b8000`–`0x128bc788` with raw size only `0xe7c00`, `.rsrc`
+  `0x128bd000`, `.reloc` `0x12bfa000`. Because virtual size (`0x804788`) is larger than raw size
+  (`0xe7c00`), everything in `.data` from about `0x1219fc00` to `0x128bc788` is **uninitialized (.bss)**:
+  its bytes are absent from the file, so no analysis of a global in that range can be done from the file
+  alone — only from the instructions that reference it. `scripts/fc3_addrmap.py:va2off` returns `None` for
+  such addresses, which is the correct behaviour and is what exposed this.
+- Tooling note: `capstone` (5.0.9, installed with `python -m pip install capstone`; the `pip` launcher is
+  broken on this machine) plus `scripts/fc3_dis.py` (annotated x86 disassembly), `scripts/fc3_iat_reverse.py`
+  (IAT reverse map), `scripts/fc3_strgrep.py` (.rdata string grep) replace Ghidra for read-only work; those
+  scripts stay local per `.gitignore`. Note: `fc3_addrmap.py:code_refs` returns raw file offsets, not VAs
+  (for `FC3.dll`: VA = offset + `0x10000c00`).
+- Menu automation note: the menu ignores synthetic `mouse_event` clicks; keyboard scodes sent with
+  `SendInput` (`local/menu.py press down|enter`) do reach the menu.
+- Local-VM caveat: `local/menu.py` and `local/registry-fc3-backup.reg` are artifacts on the owner's
+  machine and are not committed in this repo — recreate them from the registry values above if needed.
+
+## Launch bridge measured (2026-11-02, `scripts/fc3_launch_probe.py` + `scripts/fc3_upc_probe.py`)
+
+The stub does **not** run the game directly, and it does **not** silently discard the extra arguments — it
+hands them to Ubisoft Connect. Observed process tree from `TestFC3/bin/farcry3_d3d11.exe -language=Russian
+-quickstartup -host fc3_main -login coop1 -coop`:
+
+1. stub pid 25472 exits with code 0 after ~6 s.
+2. new process `C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\upc.exe`, pid 18080, command line with
+   **every argument preserved**: `-upc_uplay_id 46 -language=Russian -quickstartup -host fc3_main -login
+   coop1 -coop -upc_desktop_mode -upc_game_starter`.
+3. upc then starts the **canonical install** stub and drops the quick-launch arguments:
+   `"H:/Uplay/Far Cry 3/bin/farcry3_d3d11.exe" -language=Russian` (pid 31948, ppid 2068).
+
+⇒ the forwarding path is `upc.exe -upc_uplay_id <id> <switches> -upc_desktop_mode -upc_game_starter`; the
+drop happens only in upc's final game start. A trampoline in front of `TestFC3/bin/farcry3_d3d11.exe` that
+calls `upc.exe -upc_uplay_id <id> <args> …` is the candidate for option (b) — it needs the test copy's **own**
+uplay id (id 46 resolves to the store install) and the canonical game must not already be running (pid 31948
+made a later `upc` relaunch exit 0 within 6 s — the `OpenMutexA("FarCry3Instance")` single-instance guard).
+
+Also verified on 1.06: `FC3_d3d11.dll` imports **only `ShellExecuteA`** (`SHELL32.dll`, thunk `0x11be1720`, 2
+call sites `0x10c13882` and `0x10fc2382`, both shaped `6A 01 6A 00 6A 00 68 <url> 68 <verb> 6A 00
+FF 15 20 17 BE 11 C3`; verbs `open`/`reopen`/`read` at `0x11f5f210`), and both URLs are marketing links —
+`http://shop.ubi.com/store/ubiemea/html/pbPage.generic-Far-Cry-3-303-other…` at `0x1209f220`,
+`http://store.steampowered.com/app/220240` at `0x1202fcec`. `FC3_d3d11.dll` imports **no `ShellExecuteEx`
+and no `CreateProcess`**, so the earlier working note claiming "ShellExecuteEx at `0x11a4b404`" was a mis-read
+of a direct call inside a 1181-byte function (`0x11a4b…`..`0x11a4b4c5`, 30 direct calls, 0 indirect calls).
+The re-exec is performed by the launcher/UI layer through Ubisoft Connect, not by a `CreateProcess` in the
+game DLL.
+
+**Conclusion:** quick-launch co-op is impossible on this build without either (a) a 1.05 DRM-free executable,
+or (b) a launcher bridge — a stub/UPC trampoline that makes Ubisoft Connect start **our own** copy with the
+quick-launch arguments (the argument forwarding itself is now measured, above). Both need a decision from the
+owner.
+
+### Script and artifact locations / Размещение скриптов и артефактов
+
+Analysis scripts in this fork stay out of git by the owner's ignore rules
+Analysis scripts live in `scripts/` and are tracked (Bantila's own convention: `scripts/` is
+tracked, `/tools/` is ignored for external binaries like Ghidra or the packer). My session scripts
+are committed here: `fc3_dis.py`, `fc3_callers.py`, `fc3_addrmap.py`, `fc3_iat_reverse.py`,
+`fc3_strgrep.py`, `fc3_reloc_xref.py`, `fc3_trampoline.py`, `fc3_upc_probe.py`,
+`fc3_launch_probe.py`, `fc3_execlines_probe.py`. Disassembler caches (`fc3_dis_cache.json`), the
+agent harness scratch (`Temp/`) and private state (`local/`, `local/scratch/`) are gitignored.
+Scratch patterns in `.gitignore`: `*.scratch*`, `.scratch*`, `scratch_*`, `local/scratch/`.
+
+Canonical layout, the owner's scheme (`docs/workspace.md`, CLAUDE.md golden rule 2): everything
+under `E:\FarCryCoop` (`Downloads\<name>\`, `Tools\`, `Data\`, `Temp\`), C:\ untouched.
+`E:\FarCryCoop` does not exist on this machine: this repo sits at
+`D:\Projects\Co-op Anything\FarCry3Coop-bantila`, the test copy at `H:\FarCryCoop\TestFC3`, so the
+E:\ scheme still needs reconciliation with the owner. Carried-over scripts hardcode stale paths
+`DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`,
+`DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`. The agent harness writes its own temp
+work to `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` (delegate outputs, sandbox scripts),
+which contradicts golden rule 2 — flagged, not fixed (owner decision).
+
+Canonical layout, the owner's other scheme (`docs/workspace.md`, CLAUDE.md golden rule 2): everything under
+`E:\FarCryCoop` (`Downloads\<name>\`, `Tools\`, `Data\`, `Temp\`), C:\ untouched. `E:\FarCryCoop` does not exist on
+this machine — repos are at `D:\Projects\Co-op Anything\`, the test copy at `H:\FarCryCoop\TestFC3`, so the E:\ scheme
+still needs reconciliation with the owner. Carried-over bantila scripts hardcode stale paths
+`DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`, `DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`.
+The agent harness itself writes temp work to `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` (delegate outputs,
+sandbox scripts), which contradicts golden rule 2 — flagged, not fixed (owner decision).
+
+An undeletable stray file named `nul` sits at the workspace root and makes `git add -A` fail
+(`error: invalid path 'NUL'`); commit with explicit paths only.
+
+## TODO
+
+- [x] Confirm game version and install path with owner (1.06, H:/Uplay/Far Cry 3/)
+- [x] Set up test copy of FC3 outside store folder (H:/FarCryCoop/TestFC3/)
+- [x] Phase 2: verify game launches with -offline (confirmed, main menu shows)
+- [ ] Phase 2: navigate to Co-op menu, start host session, test client connect
+- [ ] Decompile `FUN_106518ba` (host) and `FUN_10651d10` (client) to understand the direct connect path
+- [ ] Decompile `0x108c4b09` to confirm the "not enough players" check hypothesis
+- [ ] Find what creates the session object and fills the slots in the single-player build
+- [ ] Owner downloads scubrah's mod (Nexus 220) for comparison
+- [x] Name the import at IAT slot `0x11be1618` (`FC3_d3d11.dll`) = `MSVCR100.dll:strstr`; `-exec` /
+  `-execline` are parsed by the game DLL itself (see the console-command section below)
+- [ ] Decide whether option (b) can be replaced by arg injection through `-exec` / `-execline`
+  (needs: which consumer executes the extracted string, and whether `Exec` `0x11fbda40` is reachable at launch)
+  — progress: `execLines` is now known to be a **session-operation parameter** registered at
+  `FC3.dll 0x113429ca` next to `map`/`mapId*`/`bfname`, and the `-exec` values land in the global
+  container `0x12829424`; the consumer is still unproven, and two new dead ends are recorded:
+  registration blocks `0x111f4eab` (fc3_d3d11, `exec`/`Game:Exec(%%)`) and `0x104e5f42`
+  (`CFCXRunBatchFileOperation`) have 0 E8 callers (CRT init), and the handler pointer at
+  `0x111f5c71` is passed in a register. Next probe: the 180-byte session-parameter struct at
+  `FC3.dll 0x11a8d0db` (`lea edx,[ebp+0x10]`) and the session object field `[obj+0x98]`.
+- [ ] Launch-bridge re-test with the **test copy's own uplay id**: `python -I games/far-cry-3/tools
+  /fc3_upc_probe.py --uplay-id <id> --wait 60`, run only after the canonical game process is closed
+  (`H:/Uplay/Far Cry 3/bin/farcry3_d3d11.exe` pid 31948 was still running on 2026-11-02, which made upc exit
+  0 immediately — the `OpenMutexA("FarCry3Instance")` single-instance guard).
+- [ ] Fix `scripts/fc3_reloc_xref.py`: its premise (disp32 global accesses need reloc walking) is wrong —
+  disp32 fields in `.text` are not relocation entries, so reloc lookups return 0. Replace the reloc-table
+  walk with a byte scan for the little-endian VA plus the ModRM forms (`8b/89/8d/83/81 + [05 0d 15 …]`,
+  `c7 05`, `ff 35`).
+- [ ] Enumerate the rest of the `Game.*` console-command table (`0x111cd3f5`..`0x111cf52f`) and find a
+  command that starts or joins a co-op session (`MissionSetState`, `SaveGame`, `Exec`, `RunBatch`)
+- [ ] Find the file behind `HubUtils.cpp (208) Test/dev args file present.` in the Ubisoft Connect log
+- [ ] Phase 3: story script patches for multi-player
