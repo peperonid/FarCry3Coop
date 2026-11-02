@@ -38,7 +38,7 @@ install (`H:\Uplay\Far Cry 3\` is read-only); work on the copy `H:\FarCryCoop\Te
 
 files go to ignored locations only (`local/scratch/`, `Temp/`, `*.scratch*`). If a step needs
 
-drive C:, stop and ask the owner. One deviation is unavoidable and already accepted by the owner:
+drive C:, stop and ask the owner. Scratch notes, scratch scripts and scratch summaries are written in English only (Russian is reserved for the shipped bilingual files `NOTES.md`/`NOTES.ru.md` and commit messages) — mixed-language scratch text costs review time. One deviation is unavoidable and already accepted by the owner:
 
 the agent harness writes its own temp files and delegate output under
 
@@ -52,7 +52,7 @@ the agent harness writes its own temp files and delegate output under
 
 `H:\FarCryCoop\TestFC3\`. Черновые файлы — только в папках вне git (`local/scratch/`, `Temp/`,
 
-`*.scratch*`). Если шаг требует диска C:, остановиться и спросить владельца. Одно отклонение
+`*.scratch*`). Если шаг требует диска C:, остановиться и спросить владельца. Черновые заметки, черновые скрипты и черновые выжимки — только на английском (русский только для поставляемых двуязычных файлов `NOTES.md`/`NOTES.ru.md` и сообщений коммита) — смешанный язык в черновниках тратит время на просмотр Одно отклонение
 
 неустранимо и принято владельцем: агентская программа пишет свои временные файлы и выводы
 
@@ -100,6 +100,9 @@ paste a long script into a tool call: write it to a file and run `python -I scri
 
 Read files by line ranges, not whole.
 
+Concretely: `Read(offset=42, limit=30, path="<file>")`; to jump to a region, `grep -n <pattern> <file>`
+first, then read from that line number.
+
 Model requests: launch ONE model-facing request at a time (sub-agent, web search, source check) and
 
 wait for its result before starting the next one — model requests are processed sequentially.
@@ -112,7 +115,8 @@ Owner rules are never rewritten by the agent silently: report the gap and let th
 
 (`python -I scripts/<имя>.py`), не вставлять код в вызов; читать файлы частями по номерам
 
-строк, не целиком.
+строк, не целиком. Пример записи: `Read(offset=42, limit=30, path="<файл>")`; чтобы найти область,
+сначала `grep -n <шаблон> <файл>`, потом читать от найденного номера строки.
 
 Запросы к модели: запускать ОДИН запрос к модели за раз (суб-агент, веб-поиск, проверка
 

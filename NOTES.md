@@ -323,7 +323,7 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
 - **1.06 command line / console-command mechanism (`FC3_d3d11.dll` launcher func `0x11aa2fe0`).** The
   switch test is `push <string>; call dword ptr [0x11be1618]` = `MSVCR100.dll:strstr`, so the game DLL
   parses its own command line. Switch strings: `-execline` `0x11fdbc3c`, `-exec` `0x11fdbc48`,
-  `-quickstartup` `0x11fdbc50`, `-bfname` `0x11fdbc34`; `-numclients` `0x11fb1e19`, `-splitscreen`
+  `-quickstartup` `0x11fdbc50`, `-bfname` `0x11fdbc34`; `-numclients` `0x11fb1e18`, `-splitscreen`
   `0x11f31d75`, `-splitscreen4` `0x11f31d85`, `-world` `0x11fdbf80`, ` -world=fc3_main` `0x11fdbdb1`,
   `optimal_splitscreen` `0x11f76040`, `execLines` `0x11fb4a80`. Value-extraction helper `0x11a1b940`
   (called at `0x11aa3082`, `0x11aa3170`), tokenizer `0x10001e40`, `strchr`-like helper `0x10037dc0`.
@@ -461,7 +461,7 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
 - **Lesson (2026-11-02):** registration routines reached only through the CRT initializer are invisible to a
   caller scan, and handler/callback pointers passed in registers are invisible to `code_refs()`. The
   remaining handle on the `-exec` consumer is the 180-byte session-parameter struct at
-  `FC3.dll 0x11a8d0db` plus the session object's `+0x98` field — probe those layouts next.
+  `FC3.dll 0x10a8d0db` plus the session object's `+0x98` field — probe those layouts next.
 - **ExecLines container is a global singleton (`FC3_d3d11.dll`).** A raw byte scan of `.text` for the
   disp32 `24 94 82 12` (0x12829424 in little-endian) gives **17 502 access sites**, overwhelmingly
   `8b 0d` (`mov r32,[g]`) pairs ~12 bytes apart — the `mov ecx,[g]` / `call fn` idiom — i.e. this global
@@ -484,7 +484,7 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   8 311 times in the binary, i.e. the generic container idiom. Next handle is dynamic: a `-exec`/`-execline`
   run against the test copy, or Ghidra decompilation of the thunks (`scripts/fc3_ghidra_dis.py`).
 - **1.06 co-op switches and the co-op quick-launch parser (`FC3_d3d11.dll`, 22:xx session).** The
-  string `-coop` lives at `0x11fdc0cd` (in the same contiguous switch block as `-perfhud` `0x11fdbc1c`,
+  string `-coop` lives at `0x11fdc0cc` (in the same contiguous switch block as `-perfhud` `0x11fdbc1c`,
   `-logFile` `0x11fdbc28`, `-bfname` `0x11fdbc34`, `-execline` `0x11fdbc3c`, `-exec` `0x11fdbc48`,
   `-quickstartup` `0x11fdbc50`, `-debugFramerateCameras` `0x11fdbcf8`). It is parsed in TWO functions:
   the main launch-argument parser entry `0x11aa0670` (`push ebx/[ebp+8]` prologue; `-coop` refs
@@ -498,9 +498,11 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   `gfx_NoPreRoundTimeOut 1` `0x11fdbc94`, `multi_DisableInitialSpawnDelay 1` `0x11fdbcac`,
   `hack_loadOutIsWaitingForMissionBlocks 0` `0x11fdbcd0`). Three E8 call sites into `0x11aa2fe0`:
   `0x117b565d`, `0x117b7003`, `0x11997f41`, plus one table slot `0x11f31b10`. `-splitscreen`
-  `0x11f31d75`, `-splitscreen4` `0x11f31d85` and `-numclients` `0x11fb1e19` have no immediate-operand
-  code reference: they are consumed through the string-table offsets, so a scan for `push imm32` /
-  `mov reg, imm32` finds nothing for them.
+  `0x11f31d75`, `-splitscreen4` `0x11f31d85` and `-numclients` `0x11fb1e18` have no immediate-operand
+  code reference in 1.06: `-splitscreen` and `-splitscreen4` have zero immediate references, while
+  `-numclients` does have one (`0x1135381e`, inside the session-operation registry chain that also
+  touches `mode`/`spawnPtId`/`keepPlayerState`). So `-numclients` is wired into the session-creation
+  path in 1.06, not just a dead string.
 - **1.06 `-password` handler and the BF password buffer:** function `0x117b5580`
   (`push ebp; mov ebp,esp; sub esp,8; mov eax,[ebp+8]`) builds a string from `[eax]` or `[eax+0xc]`
   (`0x117b5597 mov eax,0x11f31ea8` when empty), `0x117b55a6 mov eax,0x11f31d34 str='-password'`,
@@ -552,15 +554,80 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   `0x1105b6b3 mov byte ptr [0x1282a668],1` (`[ebp+8]` is the caller-supplied bundle name); a second
   site loads `0x11fdbc3c` (`-execline`) at `0x1105b6b0` in the same function. `-spawnangle`
   `0x11fdbea4` is consumed at `0x111e1e54`/`0x111e1e67` (`mov ecx,0x11fdbea4`; `mov esi,0x11fdbea4`,
-  `call 0x11057c60`, then `mov byte ptr [0x1282a6c8],al`) and applied at `0x111e2984 lea ecx,[edi+0x430]`
-  followed by `call 0x111e4140` / `call 0x10404f40` — that pair is the QuickLaunch spawn-angle writer
-  and is the closest analogue of a per-client spawn override. `spawn_angle` appears as a *stored*
-  session-field name at `0x11fa7000` (pushed as a name at `0x113429ca`, i.e. the same registry route as
-  `execLines`), so a per-slot spawn angle exists in the session descriptor. Re-measurement note: the
+  `call 0x11057c60`, then `mov byte ptr [0x1282a6c8],al`). The application half of that claim is **refuted**:
+  a full `.text` scan of `FC3_d3d11.dll` for `lea ecx,[edi+0x430]` finds none, and only four mov-family
+  instructions touch offsets `+0x430`/`+0x434` anywhere (`0x10544b8d` — a struct/float copy block reading
+  `[edi+0x4e8]`..`[edi+0x510]`; `0x10e6356d`/`0x10e63597` — distance math using `call 0x10007f80` (sqrt);
+  `0x1160ab44`), none of them spawn-related. `spawn_angle` does **not** exist as a string in 1.06 (0 occurrences) and the
+  `0x11fa7000` address from the older note is a `.rdata` pointer table, not a name: there is no
+  per-slot spawn angle in the session descriptor (see the spawn data-flow bullet below). Re-measurement note: the
   1.05-era `push <name>; push 0x1c; call 0x10a46480` shape is `FC3.dll` 1.05 code (`0x10a8d0db`), and its
   1.06 counterpart `push 0x11fb4a80; push 8; call 0x103173f0` uses type code 8 — the earlier "180-byte
   struct" reading came from a `.rdata` pointer-table entry being mistaken for a string, so treat that
   size claim as unverified.
+- **1.06 spawn-address audit and the GameContext spawn fields (verified by direct byte reads).**
+  `-spawn` is read at three places (`0x11aa0eb8`, `0x11aa15f3`, `0x11aa2777`), `-spawnpos` at
+  `0x11aa0f09`, `0x11aa1645`, `0x11aa27c1`, `-spawnangle` at `0x11aa0fbd`, `0x11aa16fb`, `0x11aa286b`
+  (main parser `0x11aa0670`, second parser `0x11aa1b90`, exec/console parser `0x11aa2fe0`). The
+  GameContext node-registry block holds the contiguous names `spawnAt` `0x11f4692c`, `spawnPos`
+  `0x11f46934`, `spawnAngle` `0x11f46940`, `usePosAngle` `0x11f4694c` and all four are read in one
+  function at `0x1170fdba`, `0x1170fdcf`, `0x1170fde7`, `0x1170fe03`; the session-operation registry
+  names `spawnPtId` `0x11fb4c98` (`0x11347f0b`), `keepPlayerState` `0x11fb4ca4` (`0x11347f20`),
+  `touched` `0x11fb4c90` (`0x11347e68`) and `mode` `0x11fb4c88` (`0x11347f6c`, `0x11347f9c`) are each
+  read once. Pre-spawned defaults exist as complete strings with values already substituted:
+  `' -spawnpos=333.63,964.5,124.465'` `0x11fdbdc4`, `' -spawnangle=0.0,0.0,0.0'` `0x11fdbde4`,
+  `' -spawnpos=-857.626,2317.1,119.752'` `0x11fdbe0c`, `' -spawnangle=0.0,0.0,-20.0'` `0x11fdbe30`,
+  `Gamescom` `0x11fdbe00` + `' -world=fc3_main'` `0x11fdbdb0`, referenced from `0x11aa2fe0`
+  (`0x11aa394c`, `0x11aa395f`, `0x11aa3aeb`, `0x11aa3afe`). Names the older note claimed are **not**
+  in 1.06 `.rdata` (0 occurrences): `sessionName`, `sessionDescription`, `sessionFilter1`,
+  `sessionFilter2`, `clientName`, `serverName`, `sessionExecFile`, `execFilenames2`, `bundleName`,
+  `bundleDir`, `bundlePath`, `sessionPath`, `sessionParams`, `spawn_angle` (the claim that the last
+  one lived at `0x11fdb658`..`0x11fdb680` is wrong; that region holds `-bfname`/`-execline`/`-exec`/
+  `-quickstartup` and their call sites). `sessionMode` `0x11f31ba8`, `netGame` `0x11f31b7c`,
+  `networkGame` `0x11f468e0`, `usePosAngle` `0x11f4694c` and `dedicatedConfig` `0x11f46900` are
+  present. Scripts: `local/scratch/audit_names.py`, `local/scratch/refs2.py`
+  (output `local/scratch/out/refs2.txt`).
+- **Spawn data flow solved (verified, researcher-confirmed by disassembly).** The four GameContext
+  spawn sites are a lazy descriptor-registration thunk `0x1170fd70` (guard `cmp byte [0x128299c8],0`):
+  `push <offset>; push <name VA>; mov eax,0x1282db10; call 0x11acaba0|0x11acac50|0x11acae60`. Node
+  `0x1282db10` field map: `world` +0x08, `mergedBigFileName` +0x10, `spawnAt` +0x0C (string),
+  `spawnPos` +0x14 (float triple), `spawnAngle` +0x20 (float triple), `usePosAngle` +0x2C (byte),
+  `loadingdepActive` +0x2D. A sibling thunk `0x1170fe40` registers `networkGame`/`host` on a different
+  struct (`0x1282daf8`). Writing happens only in the three parsers: chain is always
+  `strstr [0x11be1618]` → value extractor `call 0x11a1b940` → `sscanf [0x11be1398]` with `'%g,%g,%g'`
+  (`0x11f39f50`) → node accessor (`mov eax,[esi+0x9c]`; `mov edi,[eax+4]`; `mov eax,[edx+0x18]`;
+  `call eax`) → stores. `-spawn` → `call 0x11347550` (`0x11aa0eeb`, twin `0x11aa27a3`) stores a
+  refcounted string at node+0x0C; `-spawnpos` writes `movss [eax+0x14]/+0x18/+0x1c` and sets
+  `mov byte [eax+0x2c],1` with **no degree conversion** (`0x11aa0f8a`..`0x11aa0f9e`, also
+  `0x11aa16c8`.., `0x11aa2839`..); `-spawnangle` loads `0x11f32198` = 0.0174532924 (1 degree in
+  radians), `mulss` all three components and stores `movss [eax+0x20]/+0x24/+0x28` — i.e. the game
+  stores **radians** (`0x11aa1014`..`0x11aa1084`, also `0x11aa1723`.., `0x11aa288d`..). The exec
+  parser also builds complete literal command lines: `' -world=fc3_main'` `0x11fdbdb0` +
+  `' -spawnpos=-857.626,2317.1,119.752'` + `' -spawnangle=0.0,0.0,-20.0'` (variant A
+  `0x11aa3909`..`0x11aa3967`, then `call 0x11aa2630` @`0x11aa3989`, preceded by `'Gamescom'`
+  `0x11fdbe00`) and variant B `0x11aa3aaa`..`0x11aa3b06` with `333.63,964.5,124.465` /
+  `0.0,0.0,0.0`; neighbours `-benchmark` (`0x11fdbe4c` → `call 0x11aa14b0` @`0x11aa39ed`), `-host`
+  `0x11f31c7c`, `-client` `0x11f31d18`, `'multi_SkipIntroMovie 3'` `0x11fdbd30`,
+  `'starMatch_with_debugCameras 1'` `0x11fdbd10`. **There is no per-player spawn**: `spawnPtId`
+  `0x11fb4c98` and `keepPlayerState` `0x11fb4ca4` appear only inside `0x11347e40`, a one-shot
+  registration (guard `cmp byte [0x1282a610],0` → `jne 0x11347f2c`) that allocates exactly one
+  `0x10+0x20` record (`call 0x11790750`), appends it with a single `push 1` to the 4-byte-per-entry
+  array `[0x12852e2c]`/`[0x12852e30]` (different container from the `execLines` array
+  `[0x12852dcc]`/`[0x12852dd0]`), and registers fields off `lea esi,[edi+0x14]`: `world` +4, `pos`
+  `0x11f39450` +8, `spawnPtId` +0x18 (`call 0x11acaf10` @`0x11347f11`), `keepPlayerState` +0x20
+  (`call 0x11acac50` @`0x11347f24`). No loop, no index, no player-slot iteration → one global spawn.
+  RESOLVED (2026-11-02, local re-derivation with `capstone` over the `1.06` `.text`): the QuickLaunch
+  sites are **not** spawn consumers, and the `[edi+0x430]`/`[edi+0x434]` writer does not exist. Prologue
+  backtracking shows the claimed sites sit inside other functions: `0x111e2970` and `0x111e2984` belong to
+  the function at `0x111e27b0`, `0x111e4140` to `0x111e3f30`, while `0x11057c60` and `0x10404f40` have no
+  prologue within 0x900 bytes. `0x111e1e54` sits in a thin wrapper (`push ebp; mov ebp,esp; … mov
+  eax,[0x1282a7b4]; call 0x111e9bd0; ret 4`) and its callee `0x111e9bd0` is a pure dispatcher (`call
+  0x111e7300`, `0x102745d0`, `0x11706240`, `0x11310be0`, `0x1013b1c0`, `0x106bd910`) that never touches the
+  spawn offsets; `[0x1282a7b4]` is a session-config singleton (91 immediate references) and holds no data
+  pointer to the spawn node (`0x1282a7b4` appears 0 times outside `.text`). Node `0x1282db10` is
+  referenced 13 times, all in the registration/consumption chain (`0x1125ed11`, `0x1170f491`, `0x1170fc5b`,
+  `0x1170fc6d`, `0x1170fd8e`..`0x1170fe36`, `0x11bbb1f1`). Evidence: `local/scratch/ql_local.py`,
+  `ql2.py`, `ql3.py` with output in `local/scratch/out/ql_local.txt`, `out/ql2.txt`, `out/ql3.txt`.
 - **PE layout facts for `FC3_d3d11.dll` 1.06 (ImageBase `0x10000000`, EP RVA `0x700be8` = VA
   `0x10700be8`):** `.text` `0x10001000`–`0x11be01c1` (raw `0x400`–`0x1bdf600`), `.rdata`
   `0x11be1000`–`0x120b7347`, `.data` `0x120b8000`–`0x128bc788` with raw size only `0xe7c00`, `.rsrc`
@@ -663,7 +730,7 @@ An undeletable stray file named `nul` sits at the workspace root and makes `git 
   registration blocks `0x111f4eab` (fc3_d3d11, `exec`/`Game:Exec(%%)`) and `0x104e5f42`
   (`CFCXRunBatchFileOperation`) have 0 E8 callers (CRT init), and the handler pointer at
   `0x111f5c71` is passed in a register. Next probe: the 180-byte session-parameter struct at
-  `FC3.dll 0x11a8d0db` (`lea edx,[ebp+0x10]`) and the session object field `[obj+0x98]`.
+  `FC3.dll 0x10a8d0db` (`lea edx,[ebp+0x10]`) and the session object field `[obj+0x98]`.
 - [ ] Launch-bridge re-test with the **test copy's own uplay id**: `python -I games/far-cry-3/tools
   /fc3_upc_probe.py --uplay-id <id> --wait 60`, run only after the canonical game process is closed
   (`H:/Uplay/Far Cry 3/bin/farcry3_d3d11.exe` pid 31948 was still running on 2026-11-02, which made upc exit
@@ -675,6 +742,6 @@ An undeletable stray file named `nul` sits at the workspace root and makes `git 
 - [ ] Enumerate the rest of the `Game.*` console-command table (`0x111cd3f5`..`0x111cf52f`) and find a
   command that starts or joins a co-op session (`MissionSetState`, `SaveGame`, `Exec`, `RunBatch`)
 - [ ] Find the file behind `HubUtils.cpp (208) Test/dev args file present.` in the Ubisoft Connect log
-- [ ] Confirm what `-coop` (`0x11fdc0cd`, refs `0x11aa08d3` / `0x11aa0cfc`) enables in 1.06 and whether it is the flag the co-op quick-launch path uses; then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect log plus `screenshot\`
+- [ ] Confirm what `-coop` (`0x11fdc0cc`, refs `0x11aa08d3` / `0x11aa0cfc`) enables in 1.06 and whether it is the flag the co-op quick-launch path uses; then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect log plus `screenshot\`
 - [ ] Size the real 1.06 session-descriptor record: `push <name>; push <typecode>; call 0x103173f0` (48-byte records from `0x10+0x20`) and the arrays `[0x12852dcc]`/`[0x12852dd0]`, `[0x12852d54]`/`[0x12852d58]`
 - [ ] Phase 3: story script patches for multi-player
