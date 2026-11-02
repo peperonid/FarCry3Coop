@@ -56,7 +56,7 @@ locally on the owner's PC: see [docs/tools/rea.md](docs/tools/rea.md).
 
 ## Repo layout (session 2026-11-02, agent session)
 
-- `NOTES.md` / `NOTES.ru.md` — findings log. New findings are written to **both** files
+- `NOTES.md` / `NOTES.ru.md` - findings log. Every documentation pair has an English file and a `.ru.md` mirror (README.md, PLAN.md, NOTES.md, docs/*, scripts/README.md).
   (bilingual rule): English is the primary record, the Russian file mirrors it.
 - `NOTES.md` section order: the owner's granular Phase 1 sections stay first and are the
   authoritative Phase 1 record; agent-session sections are appended after them with a
