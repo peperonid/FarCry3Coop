@@ -706,6 +706,77 @@ fixed: a contradiction inside the owner's own rules is the owner's decision, not
 An undeletable stray file named `nul` sits at the workspace root and makes `git add -A` fail
 (`error: invalid path 'NUL'`); commit with explicit paths only.
 
+## Session-descriptor record tables (2026-11-03, both 1.06 modules)
+
+**How they were enumerated.** `python -I scripts/fc3_param_records.py <pe> <creator VA> … --window 64`
+scans `.text` for `e8 rel32` to a descriptor creator, then walks back `--window` bytes for
+`push imm32` (the name string VA) and `push imm8` (the type code). Registration shape in both modules:
+`push 3; push 0; push <descriptor VA>; push 0; push 0x21; mov eax, <name VA>; call <registrar>`. The
+look-back can cross function boundaries, so use `--ident-only` (`IDENT_RE = ^-?[A-Za-z][A-Za-z0-9_.]{1,39}$`)
+and keep only call sites inside the registration block: `FC3_d3d11.dll 0x11347xxx` / `0x11348xxx`,
+`FC3.dll 0x11341xxx` / `0x11342xxx`. Full dumps: `local/scratch/param_recs_session_block_d3d11.txt`
+(63 lines) and `local/scratch/param_recs_fc3dll_families.txt` (4118 lines).
+
+**Registrar families (corrected).** `FC3_d3d11.dll` 1.06: `0x11acaba0` / `0x11acac50` / `0x11acad00` /
+`0x11acb320` / `0x11acaf10` — these are **generic engine attribute registrars**, they also register
+`Name` `0x11f32188`, `Value` `0x11f333d4`, `Data` `0x11f32280`, `zoneId` `0x11f59698`, so filter by call
+site. `FC3.dll` 1.06 (callee histogram of `0x11341000..0x11343000`): `0x11ab6800` ×25, `0x11ab6750` ×9,
+`0x11ab6ed0` ×11, `0x11ab6ac0` ×8, `0x11ab68b0` ×6, `0x11ab6b70` ×2, `0x11ab6e20` ×1, `0x11ab6a10` ×1,
+plus `0x1003b4b0` ×25, `0x106f9ff0` ×21, `0x100945e0` ×9, `0x10a00be0` ×5, `0x10001ed0` ×5, `0x1030f2b0` ×2.
+The list recorded earlier (`0x11ab64c0` … `0x11ab70b0`) is **wrong** — enumerating with it gives
+`records with a name: 0   all creator call sites: 0`. `0x1030f2b0` (FC3.dll) / `0x103173f0`
+(FC3_d3d11.dll) are not registrars: they are `hkVirtual::operator new(0x1c)` (vtable `0x10bcd68`:
++0 `0x112f0e10` MemoryRealloc, +4 `0x112f0fa0` operator new, +8 `0x112f1530` MemoryDealloc).
+
+**The parameter list is a pointer array indexed by a count, not 48-byte records** (this supersedes the
+old "48-byte records from `0x10+0x20`" note). `FC3.dll` 0x113429d1..0x11342a00
+(`local/scratch/exec_records_dll.txt`): `mov byte ptr [0x12805494], 1` → `call 0x1030f2b0` (0x113429d8) →
+`mov ecx, [0x1282f900]` (count) → `mov eax, [0x1282f8fc]` (array base) → `lea eax, [eax + ecx*4]` →
+`push 1` → `mov esi, 0x1282f8fc` → `call 0x1003b4b0` (0x113429f7, the **exec-record creator**) →
+`push 3; push 0; mov dword ptr [eax], edi` (the hkVirtual descriptor is stored at offset 0 of the
+returned object). `FC3_d3d11.dll` mirror 0x11348251..0x1134828b (`local/scratch/exec_records_d3d11.txt`):
+`mov byte ptr [0x1282a60c], 1` → `call 0x103173f0` (0x11348258) → `mov ecx, [0x12852dd0]` →
+`mov eax, [0x12852dcc]` → `lea eax, [eax + ecx*4]` → `push 1` → `mov esi, 0x12852dcc` →
+`call 0x10638fb0` (**exec-record creator, new anchor**) → `push 3; push 0; mov dword ptr [eax], edi` →
+`push 0x48; push 0x11fb178c ('map'); mov eax, esi; call 0x11acaba0`.
+
+**Exec-related records exist in both modules** — `execLines` (FC3.dll push site `0x113429ca`,
+`call 0x1003b4b0` at `0x113429f7`, type `0x01`; FC3_d3d11 push site `0x1134824a`, `call 0x103173f0` at
+`0x11348258`, type `0x08`) and `execFilenames` (FC3.dll push site `0x11342a7f`, `call 0x1003b4b0` at
+`0x11342aa0`, type `0x01`; FC3_d3d11 push site `0x113482ff`, `call 0x11348306`, type `0x14`). Both
+creators are called with `push 1`, i.e. a one-element collection — this is why the exec records do not
+use the ordinary string/number registrars.
+
+**Session-descriptor names with their string VAs (FC3_d3d11.dll → FC3.dll mirror):**
+`abortEngineUpdateFlag 0x11fb4990` → `EngineUpdateFlag 0x11f909b4` (registrar `0x11ab6b70`, type `0x08`);
+`login 0x11fb49c0` → `0x11f90a30`; `password 0x11fb49d4`; `onlineKey 0x11fb49e0`; `primaryAccount 0x11fb49ec`;
+`accountFlags 0x11fb49fc`; `controllerIndex 0x11fb4a0c`; `platformSpecificId 0x11fb4a38`;
+`demoname 0x11fb4a4c` → `0x11f90abc`; `execLines 0x11fb4a80` → `0x11f90af0`; `mapIdLow 0x11fb4a8c` →
+`0x11f90afc`; `mapIdHigh 0x11fb4a98` → `0x11f90b08`; `versionIdHigh 0x11fb4aa4` → `0x11f90b14`;
+`versionIdLow 0x11fb4ab4` → `0x11f90b24`; `mapIdType 0x11fb4ac4` → `0x11f90b34`; `bfname 0x11fb4ad0` →
+`0x11f90b40`; `execFilenames 0x11fb4ad8` → `0x11f90b48`; `saveGameFilename 0x11fb4ae8` → `0x11f90b58`;
+`SearchIdAddress 0x11fb4b08` → `0x11f90b78`; `SearchSessionId 0x11fb4b18` → `0x11f90b88`;
+`JoinSessionId 0x11fb4b40` → `0x11f90bb0`; `DeleteSessionId 0x11fb4b50` → `0x11f90bc0`;
+`PlaylistId 0x11fb4b70` → `0x11f90be0`; `SessionRefId 0x11fb4b90` → `0x11f90c00`; `SessionType 0x11fb4ba0` →
+`0x11f90c10`; `NetEngineType 0x11fb4bac` → `0x11f90c1c`; `AccountType 0x11fb4bbc` → `0x11f90c2c`;
+`SearchRetries 0x11fb4bd8` → `0x11f90c48`; `SearchSlots 0x11fb4be8` → `0x11f90c58`;
+`SearchNeedSlots / SearchGameModes / Silent / DeleteCurrent / WasInvited / EmulatorProfileId /
+UseTicketRequestAttachment / FollowHost / DoNATTypeDetection / mode` in `0x11fb4bf8..0x11fb4c88`;
+`map 0x11fb178c` → `0x11f8d78c`; `world 0x11f46910` → `0x11f234e0`; `spawnPtId 0x11fb4c98` → `0x11f90d08`;
+FC3.dll-only `pos 0x11f15f68` (site `0x1134267f`, registrar `0x11ab6a10`, type `0x08`).
+Type codes seen with the ordinary registrars: `0x11ab6750` (`map` `0x48`, `bfname` `0x4c`, `login` `0x04`,
+`demoname` `0x0c`), `0x11ab6ac0` (`mapIdLow` `0x28`, `mapIdHigh` `0x20`, `versionIdHigh` `0x38`,
+`versionIdLow` `0x40`, `spawnPtId` `0x18`, `SearchSessionId` `0x10`), `0x11ab6ed0` (`PlaylistId` `0x34`,
+`SessionRefId` `0x20`, `SessionType` `0x38`, `NetEngineType` `0x3c`, `AccountType` `0x40`,
+`SearchRetries` `0x44`, `SearchSlots` `0x48`, `mapIdType` `0x30`), `0x11ab6800` (`0x10`/`0x20`/`0x4c`/`0x4e`/`0x4f`/`0x53`/`0x54`).
+
+**Open questions (this area):** decompile `0x10638fb0` (FC3_d3d11.dll) and `0x1003b4b0` (FC3.dll) to get
+the element type of an exec record; confirm that the consumers `FC3_d3d11.dll 0x11348360` /
+`FC3.dll 0x11342a2e` walk `[0x12852dcc]`/`[0x1282f8fc]` in registration order; who writes the parsed
+`-exec` string into the container `[0x12829424]` under the key `execLines` (known call site
+`0x11785e60`, return offset `[eax+0x28]`); and whether `Exec` (`0x11fbda40`, handler pointer stored at
+`0x111f5c71`) is reachable from that container at launch.
+
 ## TODO
 
 - [x] Confirm game version and install path with owner (1.06, H:/Uplay/Far Cry 3/)
@@ -735,13 +806,21 @@ An undeletable stray file named `nul` sits at the workspace root and makes `git 
   /fc3_upc_probe.py --uplay-id <id> --wait 60`, run only after the canonical game process is closed
   (`H:/Uplay/Far Cry 3/bin/farcry3_d3d11.exe` pid 31948 was still running on 2026-11-02, which made upc exit
   0 immediately — the `OpenMutexA("FarCry3Instance")` single-instance guard).
-- [ ] Fix `scripts/fc3_reloc_xref.py`: its premise (disp32 global accesses need reloc walking) is wrong —
-  disp32 fields in `.text` are not relocation entries, so reloc lookups return 0. Replace the reloc-table
-  walk with a byte scan for the little-endian VA plus the ModRM forms (`8b/89/8d/83/81 + [05 0d 15 …]`,
-  `c7 05`, `ff 35`).
+- [x] Fix `scripts/fc3_reloc_xref.py`: DONE 2026-11-03. The old premise (disp32 global accesses need
+  reloc walking) was wrong — disp32 fields in `.text` hold the default image-base VA verbatim (that is what
+  produced the 17 502 hits for `0x12829424`), while walking `.reloc` yields loader patch sites only, which is
+  why every lookup used to return 0. The rewritten tool scans the ModRM disp32 forms (`8b`/`89`/`8d`/`81`/`83`,
+  `c6`/`c7`, `ff /6`/`ff /7`, `ff /2`, `0f b6/b7/be/bf`, optional `66`/`f2`/`f3`), verifies every byte hit by
+  backward-decoding up to 15 bytes with capstone, scans writable sections for stored pointers, and reports
+  relocation patch sites separately (`--mode code|reloc|both`). `va2off()` was also fixed from
+  `off if off < min(rawsz, len(self.d))` to `off if ptr <= off < ptr + rawsz and off < len(self.d)`.
 - [ ] Enumerate the rest of the `Game.*` console-command table (`0x111cd3f5`..`0x111cf52f`) and find a
   command that starts or joins a co-op session (`MissionSetState`, `SaveGame`, `Exec`, `RunBatch`)
 - [ ] Find the file behind `HubUtils.cpp (208) Test/dev args file present.` in the Ubisoft Connect log
 - [ ] Confirm what `-coop` (`0x11fdc0cc`, refs `0x11aa08d3` / `0x11aa0cfc`) enables in 1.06 and whether it is the flag the co-op quick-launch path uses; then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect log plus `screenshot\`
-- [ ] Size the real 1.06 session-descriptor record: `push <name>; push <typecode>; call 0x103173f0` (48-byte records from `0x10+0x20`) and the arrays `[0x12852dcc]`/`[0x12852dd0]`, `[0x12852d54]`/`[0x12852d58]`
+- [x] Size the real 1.06 session-descriptor record: RESOLVED 2026-11-03 — the array is an array of 4-byte
+  pointers indexed by a count (`lea eax, [eax + ecx*4]`), FC3.dll `[0x1282f8fc]` + count `[0x1282f900]`,
+  FC3_d3d11.dll `[0x12852dcc]` + count `[0x12852dd0]`; the element object holds the hkVirtual descriptor at
+  offset 0. See the section "Session-descriptor record tables" above. Still open: the element size of an exec
+  record (creators `0x1003b4b0` / `0x10638fb0`).
 - [ ] Phase 3: story script patches for multi-player

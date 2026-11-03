@@ -34,6 +34,19 @@ strings), `fc3_args_scan.py` (marker scan in a directory or whole install),
 
 `fc3_cmdline_cluster.py` (switch-parsing cluster from a switch-string VA),
 `fc3_switchtable.py` (jump table behind the launch switch), `fc3_quicklaunch_map.py`,
+`fc3_switch_context.py` (find every site that pushes a switch string and calls the parser:
+raw `68 <switch VA> ... e8 <rel32>` scan plus a function-prologue walk that reports where the
+function body lands - `--mode prologue|raw|both`), `fc3_reloc_xref.py` (cross references of an absolute
+data VA - premise corrected 2026-11-03: disp32 fields in `.text` hold the default image-base VA
+verbatim, so the tool scans the ModRM disp32 forms and verifies each hit by backward decoding, while
+relocation patch sites are reported separately - `--mode code|reloc|both`),
+`fc3_param_records.py` (enumerate session-descriptor records: `push <name VA>; push <type code>;
+call <creator>` -> name, type code, call site. Creator VAs are POSITIONAL arguments (not `--creator`);
+`--window 64` is the look-back distance and `--ident-only` drops cross-function false positives. Use the
+corrected registrar families: `FC3_d3d11.dll` `0x11acaba0`/`0x11acac50`/`0x11acad00`/`0x11acb320`/
+`0x11acaf10`, `FC3.dll` `0x11ab6750`/`0x11ab6800`/`0x11ab68b0`/`0x11ab6ac0`/`0x11ab6b70`/`0x11ab6e20`/
+`0x11ab6ed0`, and the exec-record creators `0x1003b4b0` (FC3.dll) / `0x10638fb0` (FC3_d3d11.dll) -
+see NOTES.md "Session-descriptor record tables"),
 `fc3_func_dump.py` (function body: embedded strings + data references),
 `fc3_callers.py` (reverse callers of a function), `fc3_dataslot.py` (which data slot a
 absolute data reference points at), `fc3_reexec_probe.py` (1.06 re-exec bootstrap),

@@ -422,7 +422,80 @@ B4) структура параметров сессии по адресу `[ebp
   `SearchSessionId 0x11f90c…`, `FollowHost 0x11f90cd8`, `DoNATTypeDetection 0x11f90ce4`, `execLines
   0x11f90af0`) относилась не к тому билду: те адреса — dword-ы указательной таблицы `.rdata`, а не
   строки. Тип поля `execLines` — код `8` из `push` рядом с именем (строка/вектор); оценка «180 байт» из
-  прежней заметки тоже относилась не к этому билду и её нужно перемерить по 48-байтным записям.
+  прежней заметки тоже относилась не к этому билду; по 1.06 это указательный массив (см. раздел ниже).
+
+## Таблицы записей дескриптора сессии (2026-11-03, оба модуля 1.06)
+
+**Как это было перечислено.** `python -I scripts/fc3_param_records.py <pe> <VA создателя> … --window 64`
+сканирует `.text` на `e8 rel32` в создателя дескриптора, а затем назад на `--window` байт ищет
+`push imm32` (VA строки имени) и `push imm8` (код типа). Форма регистрации в обоих модулях:
+`push 3; push 0; push <VA дескриптора>; push 0; push 0x21; mov eax, <VA имени>; call <регистратор>`.
+Просмотр назад может захватывать чужую границу функции, поэтому нужен `--ident-only`
+(`IDENT_RE = ^-?[A-Za-z][A-Za-z0-9_.]{1,39}$`) и фильтр мест вызова по блоку регистрации:
+`FC3_d3d11.dll 0x11347xxx` / `0x11348xxx`, `FC3.dll 0x11341xxx` / `0x11342xxx`. Полные выгрузки:
+`local/scratch/param_recs_session_block_d3d11.txt` (63 строки) и
+`local/scratch/param_recs_fc3dll_families.txt` (4118 строк).
+
+**Семейства регистраторов (исправлено).** `FC3_d3d11.dll` 1.06: `0x11acaba0` / `0x11acac50` /
+`0x11acad00` / `0x11acb320` / `0x11acaf10` — это **регистраторы обычных атрибутов движка** (они же
+регистрируют `Name` `0x11f32188`, `Value` `0x11f333d4`, `Data` `0x11f32280`, `zoneId` `0x11f59698`),
+поэтому таблицу сессии надо отделять по месту вызова. `FC3.dll` 1.06 (по распределению вызовов в
+`0x11341000..0x11343000`): `0x11ab6800` ×25, `0x11ab6750` ×9, `0x11ab6ed0` ×11, `0x11ab6ac0` ×8,
+`0x11ab68b0` ×6, `0x11ab6b70` ×2, `0x11ab6e20` ×1, `0x11ab6a10` ×1, плюс `0x1003b4b0` ×25,
+`0x106f9ff0` ×21, `0x100945e0` ×9, `0x10a00be0` ×5, `0x10001ed0` ×5, `0x1030f2b0` ×2. Прежний список
+(`0x11ab64c0` … `0x11ab70b0`) **неверен** — с ним перечисление даёт
+`records with a name: 0   all creator call sites: 0`. `0x1030f2b0` (FC3.dll) и `0x103173f0`
+(FC3_d3d11.dll) — не регистраторы: это `hkVirtual::operator new(0x1c)` (таблица `0x10bcd68`:
++0 `0x112f0e10` MemoryRealloc, +4 `0x112f0fa0` operator new, +8 `0x112f1530` MemoryDealloc).
+
+**Список параметров — это массив 4-байтных указателей со счётчиком, а не 48-байтные записи**
+(заменяет прежнюю оценку). `FC3.dll` 0x113429d1..0x11342a00 (`local/scratch/exec_records_dll.txt`):
+`mov byte ptr [0x12805494], 1` → `call 0x1030f2b0` (0x113429d8) → `mov ecx, [0x1282f900]` (счётчик) →
+`mov eax, [0x1282f8fc]` (база массива) → `lea eax, [eax + ecx*4]` → `push 1` → `mov esi, 0x1282f8fc` →
+`call 0x1003b4b0` (**создатель exec-записей**) → `push 3; push 0; mov dword ptr [eax], edi`
+(дескриптор hkVirtual пишется в смещение 0 вернутого объекта). Зеркало `FC3_d3d11.dll`
+0x11348251..0x1134828b (`local/scratch/exec_records_d3d11.txt`): `mov byte ptr [0x1282a60c], 1` →
+`call 0x103173f0` (0x11348258) → `mov ecx, [0x12852dd0]` → `mov eax, [0x12852dcc]` →
+`lea eax, [eax + ecx*4]` → `push 1` → `mov esi, 0x12852dcc` → `call 0x10638fb0` (**создатель
+exec-записей, новый якорь**) → `push 3; push 0; mov dword ptr [eax], edi` →
+`push 0x48; push 0x11fb178c ('map'); mov eax, esi; call 0x11acaba0`.
+
+**Exec-записи есть в обоих модулях:** `execLines` (FC3.dll место `0x113429ca`, `call 0x1003b4b0` в
+`0x113429f7`, тип `0x01`; FC3_d3d11 место `0x1134824a`, `call 0x103173f0` в `0x11348258`, тип `0x08`) и
+`execFilenames` (FC3.dll место `0x11342a7f`, `call 0x1003b4b0` в `0x11342aa0`, тип `0x01`; FC3_d3d11
+место `0x113482ff`, `call 0x11348306`, тип `0x14`). Оба создателя вызываются с `push 1`, то есть как
+одноэлементная коллекция — именно поэтому exec-записи не используют обычные строковые/числовые
+регистраторы.
+
+**Имена сессии и VA их строк (FC3_d3d11.dll → зеркало FC3.dll):** `abortEngineUpdateFlag 0x11fb4990` →
+`EngineUpdateFlag 0x11f909b4` (регистратор `0x11ab6b70`, тип `0x08`); `login 0x11fb49c0` → `0x11f90a30`;
+`password 0x11fb49d4`; `onlineKey 0x11fb49e0`; `primaryAccount 0x11fb49ec`; `accountFlags 0x11fb49fc`;
+`controllerIndex 0x11fb4a0c`; `platformSpecificId 0x11fb4a38`; `demoname 0x11fb4a4c` → `0x11f90abc`;
+`execLines 0x11fb4a80` → `0x11f90af0`; `mapIdLow 0x11fb4a8c` → `0x11f90afc`; `mapIdHigh 0x11fb4a98` →
+`0x11f90b08`; `versionIdHigh 0x11fb4aa4` → `0x11f90b14`; `versionIdLow 0x11fb4ab4` → `0x11f90b24`;
+`mapIdType 0x11fb4ac4` → `0x11f90b34`; `bfname 0x11fb4ad0` → `0x11f90b40`; `execFilenames 0x11fb4ad8` →
+`0x11f90b48`; `saveGameFilename 0x11fb4ae8` → `0x11f90b58`; `SearchIdAddress 0x11fb4b08` → `0x11f90b78`;
+`SearchSessionId 0x11fb4b18` → `0x11f90b88`; `JoinSessionId 0x11fb4b40` → `0x11f90bb0`;
+`DeleteSessionId 0x11fb4b50` → `0x11f90bc0`; `PlaylistId 0x11fb4b70` → `0x11f90be0`;
+`SessionRefId 0x11fb4b90` → `0x11f90c00`; `SessionType 0x11fb4ba0` → `0x11f90c10`;
+`NetEngineType 0x11fb4bac` → `0x11f90c1c`; `AccountType 0x11fb4bbc` → `0x11f90c2c`;
+`SearchRetries 0x11fb4bd8` → `0x11f90c48`; `SearchSlots 0x11fb4be8` → `0x11f90c58`;
+`SearchNeedSlots / SearchGameModes / Silent / DeleteCurrent / WasInvited / EmulatorProfileId /
+UseTicketRequestAttachment / FollowHost / DoNATTypeDetection / mode` в `0x11fb4bf8..0x11fb4c88`;
+`map 0x11fb178c` → `0x11f8d78c`; `world 0x11f46910` → `0x11f234e0`; `spawnPtId 0x11fb4c98` → `0x11f90d08`;
+только в FC3.dll `pos 0x11f15f68` (место `0x1134267f`, регистратор `0x11ab6a10`, тип `0x08`).
+Коды типов обычных регистраторов: `0x11ab6750` (`map` `0x48`, `bfname` `0x4c`, `login` `0x04`,
+`demoname` `0x0c`), `0x11ab6ac0` (`mapIdLow` `0x28`, `mapIdHigh` `0x20`, `versionIdHigh` `0x38`,
+`versionIdLow` `0x40`, `spawnPtId` `0x18`, `SearchSessionId` `0x10`), `0x11ab6ed0` (`PlaylistId` `0x34`,
+`SessionRefId` `0x20`, `SessionType` `0x38`, `NetEngineType` `0x3c`, `AccountType` `0x40`,
+`SearchRetries` `0x44`, `SearchSlots` `0x48`, `mapIdType` `0x30`), `0x11ab6800` (`0x10`/`0x20`/`0x4c`/`0x4e`/`0x4f`/`0x53`/`0x54`).
+
+**Открытые вопросы этой области:** декомпилировать `0x10638fb0` (FC3_d3d11.dll) и `0x1003b4b0`
+(FC3.dll), чтобы получить тип элемента exec-записи; подтвердить, что потребители
+`FC3_d3d11.dll 0x11348360` / `FC3.dll 0x11342a2e` обходят `[0x12852dcc]` / `[0x1282f8fc]` в порядке
+регистрации; кто записывает разобранную строку `-exec` в контейнер `[0x12829424]` под ключом `execLines`
+(известно место вызова `0x11785e60`, возвращаемое смещение `[eax+0x28]`); и достижим ли `Exec`
+(`0x11fbda40`, указатель обработчика сохранён в `0x111f5c71`) из этого контейнера при запуске.
 
 ## TODO
 
