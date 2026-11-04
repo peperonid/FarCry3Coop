@@ -851,6 +851,58 @@ Type codes seen with the ordinary registrars: `0x11ab6750` (`map` `0x48`, `bfnam
   `0x11346cf0` (+0x28/+0x2c), `0x11346d00` (+0x18/+0x1c), `0x11346d10` (+0x10/+0x14), setters `0x11346d20` (+0x40),
   `0x11346d30` (+0x3c), `0x11346d40` (+0x38). All end with `ret` and sit in the padding region after the tick.
 
+### The class that owns the record tables: guarded factory + its vftable (2026-11-05)
+
+The dead end "the snapshot thunks `0x118531c0` / `0x11863de0` have no E8 callers and only one absolute reference
+each" is **resolved: those addresses are virtual-function slots**, so no slot table is listed in the PE data
+directories — the pointer lives in a vftable in `.rdata` that a factory in `.text` installs.
+
+| FC3.dll | FC3_d3d11.dll | role |
+|---|---|---|
+| `FUN_111e9540` (`0x111e9540`-`0x111e9597`) | `FUN_111eeed0` (`0x111eeed0`-`0x111eef27`) | guarded creator: allocates the object and installs its vftable |
+| `&PTR_FUN_11fbb2c0` (`.rdata 0x11fbb2c0`) | `&PTR_FUN_11fdf198` (`.rdata 0x11fdf198`) | the vftable it installs |
+| slots `+0x00 0x1039ed60`, `+0x04 0x1039ed00`, `+0x08 0x104833e0` | `0x103a5e90`, `0x103a5e30`, `0x10005920` | other virtual slots |
+| slot **`+0x0c` = `0x118531c0`** | slot **`+0x0c` = `0x11863de0`** | ensure-table thunk: builds the record table once, then returns the container global |
+| slots `+0x10 0x113418e0`, `+0x14 0x1033ebf0`, `+0x18 0x1039ed50`, `+0x1c 0x104833e0` | `0x11347160`, `0x1013e460`, `0x103a5e80`, `0x10005920` | remaining slots |
+| slot `+0x20 0x11853120` | slot `+0x20 0x11863d40` | sibling accessor |
+
+Factory pseudocode, index-for-index identical (`local/scratch/rea/pseudo-fc3dll-v2/functions/0x111e9540.c` ↔
+`pseudo-d3d11-v2/functions/0x111eeed0.c`):
+
+```c
+if (DAT_128042fc == '\0') FUN_11789a00();        if (DAT_128293f4 == '\0') FUN_1179a990();
+if (DAT_12162beb != '\0')                          if (DAT_12187c6b != '\0')
+  { if (FUN_1177f7c0() != 0) goto ok; }             { if (FUN_11790750() != 0) goto ok; }
+if (FUN_118db560() == 0) return 0;               if (FUN_118e8340() == 0) return 0;
+ok: puVar2 = FUN_11341d40();                     ok: puVar2 = FUN_113475c0();
+    *puVar2 = &PTR_FUN_11fbb2c0;                     *puVar2 = &PTR_FUN_11fdf198;
+    return puVar2;                                 return puVar2;
+```
+
+- Same gate triple as the descriptor wrappers documented above (`FUN_11789a00`/`FUN_1177f7c0`/`FUN_118db560` ↔
+  `FUN_1179a990`/`FUN_11790750`/`FUN_118e8340`), so this factory sits in the same initialize-once subsystem; the
+  allocator twins are `FUN_11341d40` ↔ `FUN_113475c0`.
+- The `+0x0c` thunk is guarded by a byte flag, FC3.dll `0x1280562f` ↔ FC3_d3d11.dll `0x1282a7a7`: `cmp byte
+  [flag],0; jne skip; call 0x11853140 / 0x11863d60; mov byte [flag],1; ret`, and the variant stored in the slot ends
+  with `mov eax,0x128334a0` / `mov eax,0x12856970` = **return the container global**. So the record table is built
+  **once, lazily, on the first virtual call of slot `+0x0c`**, and `0x11853140`/`0x11863d60` are the runners
+  (record builder + clone, above).
+- Class-descriptor strings sit next to the vftables: `CFCXGOContextNode`, `CFCXGOContextFlagsNode`, `IGameFileData`,
+  `CCampaignGameFileData`, `CFCXGameModeContextNode`, `CFCXGameModeContextFlagsNode`, `CFCXGameMode` (FC3.dll
+  `0x11fbb294`, `0x11fbb2a8`, `0x11fbb2e4`, `0x11fbb2f4`, `0x11fbb34c`, `0x11fbb364`, `0x11fbb384`; FC3_d3d11.dll
+  `0x11fdf16c`, `0x11fdf180`, `0x11fdf1bc`, `0x11fdf1cc`, `0x11fdf224`, `0x11fdf23c`). The record-table owner is in
+  the **game-object / game-file-data / game-mode context** family — the family that carries a session request, which
+  is why `-exec` / `-execline` values end up as session parameters (`execLines`) rather than being run as console
+  commands.
+- The referencing dword is in `.text` in both modules (FC3.dll `0x111e9588` → `0x11fbb2c0`, FC3_d3d11.dll
+  `0x111eef18` → `0x11fdf198`); it is the `mov *puVar2, offset …` operand of the factory, not a separate table.
+- A second `.text` reference to the sibling class descriptor: FC3.dll `0x1039edd4` → `0x11fbb2e4` (`IGameFileData`)
+  ↔ FC3_d3d11.dll `0x103a5f04` → `0x11fdf1bc`.
+- Probe files: `local/scratch/rd_reg_table_fc3.txt`, `local/scratch/rd_reg_table_d3d.txt`,
+  `local/scratch/rd_table_slot_scan.txt` (slot ownership + raw bytes), `local/scratch/rd_snapshot_callers.txt`
+  (guard-once thunks). Note `local/scratch/rd_disasm.py` needs **four** arguments `<pe> <start_va> <end_va>
+  <out_file>`; with three it prints nothing.
+
 **Open questions (this area):** ~~decompile `0x10638fb0` (FC3_d3d11.dll) and `0x1003b4b0` (FC3.dll) to get
 the element type of an exec record~~ — resolved: 4-byte pointers, appended by count. Confirm that the consumers `FC3_d3d11.dll 0x11348360` /
 `FC3.dll 0x11342a2e` walk `[0x12852dcc]`/`[0x1282f8fc]` in registration order; who writes the parsed
@@ -883,7 +935,16 @@ the element type of an exec record~~ — resolved: 4-byte pointers, appended by 
   container `0x12829424`; the consumer is still unproven, and two new dead ends are recorded:
   registration blocks `0x111f4eab` (fc3_d3d11, `exec`/`Game:Exec(%%)`) and `0x104e5f42`
   (`CFCXRunBatchFileOperation`) have 0 E8 callers (CRT init), and the handler pointer at
-  `0x111f5c71` is passed in a register. Next probe: the 180-byte session-parameter struct at
+  `0x111f5c71` is passed in a register.
+- Still open: who calls vftable slot `+0x0c` (`0x118531c0` ↔ `0x11863de0`) — a virtual call has no `E8` near-call
+  form, so the next probe is the callers of the factory (`FUN_111e9540` ↔ `FUN_111eeed0`), and the session-creation
+  call the coop knowledge base maps as **vftable slot `+0x74`** of the session object (`FC3.dll 0x11a8d0c5`-
+  `0x11a8d0eb`: `call 0x11341dc0`; `mov ecx,[eax]`; `mov eax,[ecx]`; `mov eax,[eax+0x74]`; `call eax`; session
+  destructor `0x11343640`, vftable `0x11f90644`, fields freed at `[obj+0x98]`/`[obj+0x9c]`).
+- The FC3_d3d11 functions `0x111eed50`, `0x111eedf0`, `0x111eec50`, `0x111eecb0` all read/write fields `+0x98` and
+  `+0xa4` (`if (*(int *)(in_ECX + 0xa4) == -1 && *(int *)(in_ECX + 0x98) != 0) { *(undefined4 *)(in_ECX + 0xa4) =
+  *(undefined4 *)(*(int *)(in_ECX + 0x98) + 0x10); … }`), which matches the session object's `[obj+0x98]` layout —
+  this is the family to pair next. Next probe: the 180-byte session-parameter struct at
   `FC3.dll 0x10a8d0db` (`lea edx,[ebp+0x10]`) and the session object field `[obj+0x98]`.
 - [ ] Launch-bridge re-test with the **test copy's own uplay id**: `python -I games/far-cry-3/tools
   /fc3_upc_probe.py --uplay-id <id> --wait 60`, run only after the canonical game process is closed

@@ -574,6 +574,58 @@ UseTicketRequestAttachment / FollowHost / DoNATTypeDetection / mode` в `0x11fb4
 - Доступные по этому же адресу accessor-танки FC3.dll: `0x11341430` (`mov dword ptr [eax + 4], ecx`) и
   `0x11341440` (`mov al, byte ptr [eax + 0x5c]`).
 
+### Владелец реестровых таблиц: guarded-фабрика и её vftable (2026-11-05)
+
+Тупик «у thunk-обёрток `0x118531c0` / `0x11863de0` нет E8-вызывающих, только по одной абсолютной ссылке на
+каждую» **решён: это слоты виртуальной таблицы**, поэтому записи о таблице слотов в data directories PE нет —
+указатель лежит в vftable в `.rdata`, которую устанавливает фабрика из `.text`.
+
+| FC3.dll | FC3_d3d11.dll | роль |
+|---|---|---|
+| `FUN_111e9540` (`0x111e9540`-`0x111e9597`) | `FUN_111eeed0` (`0x111eeed0`-`0x111eef27`) | guarded-создатель: выделяет объект и ставит его vftable |
+| `&PTR_FUN_11fbb2c0` (`.rdata 0x11fbb2c0`) | `&PTR_FUN_11fdf198` (`.rdata 0x11fdf198`) | vftable, которую она устанавливает |
+| слоты `+0x00 0x1039ed60`, `+0x04 0x1039ed00`, `+0x08 0x104833e0` | `0x103a5e90`, `0x103a5e30`, `0x10005920` | другие виртуальные слоты |
+| слот **`+0x0c` = `0x118531c0`** | слот **`+0x0c` = `0x11863de0`** | thunk «обеспечь таблицу»: строит таблицу реестров один раз, затем возвращает глобал-контейнер |
+| слоты `+0x10 0x113418e0`, `+0x14 0x1033ebf0`, `+0x18 0x1039ed50`, `+0x1c 0x104833e0` | `0x11347160`, `0x1013e460`, `0x103a5e80`, `0x10005920` | остальные слоты |
+| слот `+0x20 0x11853120` | слот `+0x20 0x11863d40` | соседний accessor |
+
+Pseudocode фабрики, идентичный по строкам индексов (`local/scratch/rea/pseudo-fc3dll-v2/functions/0x111e9540.c` ↔
+`pseudo-d3d11-v2/functions/0x111eeed0.c`):
+
+```c
+if (DAT_128042fc == '\0') FUN_11789a00();        if (DAT_128293f4 == '\0') FUN_1179a990();
+if (DAT_12162beb != '\0')                          if (DAT_12187c6b != '\0')
+  { if (FUN_1177f7c0() != 0) goto ok; }             { if (FUN_11790750() != 0) goto ok; }
+if (FUN_118db560() == 0) return 0;               if (FUN_118e8340() == 0) return 0;
+ok: puVar2 = FUN_11341d40();                     ok: puVar2 = FUN_113475c0();
+    *puVar2 = &PTR_FUN_11fbb2c0;                     *puVar2 = &PTR_FUN_11fdf198;
+    return puVar2;                                 return puVar2;
+```
+
+- Тот же тройной гейт, что и у описанных выше дескриптор-обёрток (`FUN_11789a00`/`FUN_1177f7c0`/`FUN_118db560` ↔
+  `FUN_1179a990`/`FUN_11790750`/`FUN_118e8340`): фабрика лежит в той же подсистеме «инициализировать один раз»;
+  двойники алкаторa — `FUN_11341d40` ↔ `FUN_113475c0`.
+- Thunk слота `+0x0c` охраняется флаг-байтом, FC3.dll `0x1280562f` ↔ FC3_d3d11.dll `0x1282a7a7`: `cmp byte
+  [flag],0; jne skip; call 0x11853140 / 0x11863d60; mov byte [flag],1; ret`, а вариант, который хранится в слоте,
+  заканчивается `mov eax,0x128334a0` / `mov eax,0x12856970` = **вернуть глобал-контейнер**. Таблица реестров
+  строится **один раз, лениво, при первом виртуальном вызове слота `+0x0c`**; `0x11853140`/`0x11863d60` —
+  исполнители (построение записи + копия, выше).
+- Рядом с vftable идут строки описателей классов: `CFCXGOContextNode`, `CFCXGOContextFlagsNode`, `IGameFileData`,
+  `CCampaignGameFileData`, `CFCXGameModeContextNode`, `CFCXGameModeContextFlagsNode`, `CFCXGameMode` (FC3.dll
+  `0x11fbb294`, `0x11fbb2a8`, `0x11fbb2e4`, `0x11fbb2f4`, `0x11fbb34c`, `0x11fbb364`, `0x11fbb384`; FC3_d3d11.dll
+  `0x11fdf16c`, `0x11fdf180`, `0x11fdf1bc`, `0x11fdf1cc`, `0x11fdf224`, `0x11fdf23c`). Владелец реестровых таблиц —
+  семейство **game-object / game-file-data / game-mode context**, то есть семейство, которое несёт запрос сессии;
+  поэтому значения `-exec` / `-execline` попадают в параметры сессии (`execLines`), а не выполняются как консольная
+  команда.
+- Ссылающийся dword лежит в `.text` в обоих модулях (FC3.dll `0x111e9588` → `0x11fbb2c0`, FC3_d3d11.dll
+  `0x111eef18` → `0x11fdf198`); это операнд `mov *puVar2, offset …` самой фабрики, а не отдельная таблица.
+  Вторая `.text`-ссылка на соседний описатель: FC3.dll `0x1039edd4` → `0x11fbb2e4` (`IGameFileData`) ↔ FC3_d3d11.dll
+  `0x103a5f04` → `0x11fdf1bc`.
+- Файлы проб: `local/scratch/rd_reg_table_fc3.txt`, `local/scratch/rd_reg_table_d3d.txt`,
+  `local/scratch/rd_table_slot_scan.txt` (принадлежность слотов + сырые байты),
+  `local/scratch/rd_snapshot_callers.txt` (guarded-одноразовые thunks). `local/scratch/rd_disasm.py` требует
+  **четыре** аргумента `<pe> <start_va> <end_va> <out_file>`; с тремя он не печатает ничего.
+
 **Открытые вопросы этой области:** ~~декомпилировать `0x10638fb0` (FC3_d3d11.dll) и `0x1003b4b0`
 (FC3.dll), чтобы получить тип элемента exec-записи~~ — решено: 4-байтовые указатели, добавляются по
 количеству. Подтвердить, что потребители
@@ -584,6 +636,17 @@ UseTicketRequestAttachment / FollowHost / DoNATTypeDetection / mode` в `0x11fb4
 (`byte [this + 0x21]`), а тик, который они охраняют — `FC3.dll FUN_11341340` ↔
 `FC3_d3d11 FUN_11346bc0`; и достижим ли `Exec`
 (`0x11fbda40`, указатель обработчика сохранён в `0x111f5c71`) из этого контейнера при запуске.
+- Осталось: кто вызывает слот vftable `+0x0c` (`0x118531c0` ↔ `0x11863de0`) — у виртуального вызова нет формы
+  ближнего `E8`, поэтому следующий шаг — вызывающие фабрики (`FUN_111e9540` ↔ `FUN_111eeed0`) и вызов создания
+  сессии, который база знаний coop-anything относит к **слоту vftable `+0x74`** объекта сессии (FC3.dll
+  `0x11a8d0c5`-`0x11a8d0eb`: `call 0x11341dc0`; `mov ecx,[eax]`; `mov eax,[ecx]`; `mov eax,[eax+0x74]`;
+  `call eax`; деструктор сессии `0x11343640`, vftable `0x11f90644`, освобождаемые поля `[obj+0x98]`/`[obj+0x9c]`).
+- Функции FC3_d3d11 `0x111eed50`, `0x111eedf0`, `0x111eec50`, `0x111eecb0` читают и пишут поля `+0x98` и `+0xa4`
+  (`if (*(int *)(in_ECX + 0xa4) == -1 && *(int *)(in_ECX + 0x98) != 0) { *(undefined4 *)(in_ECX + 0xa4) =
+  *(undefined4 *)(*(int *)(in_ECX + 0x98) + 0x10); … }`) — это совпадает с раскладкой `[obj+0x98]` объекта сессии; их
+  pairить следующими. Дальнейший шаг: 180-байтовый struct параметров сессии в `FC3.dll 0x11f31d8c` ↔
+  `FC3_d3d11.dll 0x11f54b70` либо `0x11f31a80` ↔ `0x11f548a0` — выгрузить диапазон и декодировать его dword как
+  пары строка/указатель.
 
 ## TODO
 
