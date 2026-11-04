@@ -770,8 +770,74 @@ Type codes seen with the ordinary registrars: `0x11ab6750` (`map` `0x48`, `bfnam
 `SessionRefId` `0x20`, `SessionType` `0x38`, `NetEngineType` `0x3c`, `AccountType` `0x40`,
 `SearchRetries` `0x44`, `SearchSlots` `0x48`, `mapIdType` `0x30`), `0x11ab6800` (`0x10`/`0x20`/`0x4c`/`0x4e`/`0x4f`/`0x53`/`0x54`).
 
-**Open questions (this area):** decompile `0x10638fb0` (FC3_d3d11.dll) and `0x1003b4b0` (FC3.dll) to get
-the element type of an exec record; confirm that the consumers `FC3_d3d11.dll 0x11348360` /
+**Pseudocode pairs confirmed in both 1.06 modules** (`local/scratch/rea/pseudo-fc3dll-v2/functions/`,
+`local/scratch/rea/pseudo-d3d11-v2/functions/`). Address map FC3.dll ↔ FC3_d3d11.dll:
+`0x11342200`↔`0x11347bc0`/`0x11347c60`/`0x11347da0` (array copy builder, FC3_d3d11 exports two identical twins),
+`0x113423e0`↔`0x11347c60`, `0x11342480`↔`0x11347d00`, `0x113425c0`↔`0x11348480`, `0x11342740`↔`0x11347fc0`,
+`0x113429b0`↔`0x11348230`, `0x11342af0`↔`0x11348370`, `0x1030f2b0`↔`0x103173f0`, `0x1030f250`↔`0x10317390`,
+`0x1030f310`↔`0x10317450`, `0x1030f130`↔`0x10317270`, `0x1030f200`↔`0x10317340`, `0x1030f430`↔`0x10317570`,
+`0x1003b4b0`↔`0x10638fb0`, `0x11ab6750`↔`0x11acaba0`, `0x11ab6a10`↔`0x11acafc0`,
+`0x11ab6ac0`↔`0x11acaf10`, `0x11ab6800`↔`0x11acac50`, `0x11ab68b0`↔`0x11acad00`, `0x11ab6e20`↔`0x11acb270`,
+`0x11ab6ed0`↔`0x11acb320`.
+
+- `0x1003b4b0` / `0x10638fb0` are vector **append** helpers that take the element count: pseudocode is
+  `puVar2 = FUN_10638fb0(1); *puVar2 = uVar1;` and, in the copy builder, `sVar1 = DAT_12845d90 * 4;
+  pvVar3 = FUN_10638fb0((int)sVar1 >> 2); memcpy(pvVar3, pvVar2, sVar1);`. So the record element type is a
+  **4-byte pointer** and each registration appends one pointer.
+- Copy builder (`FC3.dll 0x11342200`): `pvVar2 = DAT_12820c1c; if (DAT_1280548f == '\0') { sVar1 = DAT_12820c20 * 4;
+  pvVar3 = FUN_1003b4b0((int)sVar1 >> 2); memcpy(pvVar3, pvVar2, sVar1); DAT_1280548f = 1; } pvVar2 = DAT_1282f884;
+  sVar1 = DAT_1282f888 * 4; pvVar3 = FUN_1003b4b0((int)sVar1 >> 2); memcpy(...)`. FC3_d3d11 twin: same shape with
+  `DAT_12845d8c`/`DAT_12845d90` under guard `DAT_1282a607`, then `DAT_12852d54`/`DAT_12852d58`. ⇒ the named static
+  arrays are one-time *templates*; the vectors are the live record lists that the builders then register into.
+- Exec-record builder (`FC3_d3d11.dll 0x11348230`, guard `DAT_1282a60c`; FC3.dll twin `0x113429b0`, guard
+  `DAT_12805494`, calls `0x113423e0` first): `uVar1 = FUN_103173f0(8,"execLines"); puVar2 = FUN_10638fb0(1);
+  *puVar2 = uVar1; FUN_11acaba0(&DAT_11fb178c /* "map" */,0x48,0,3); FUN_11acaf10("mapIdLow",0x28,0,3);
+  FUN_11acaf10("mapIdHigh",0x20,0,3); FUN_11acaf10("versionIdHigh",0x38,0,3); FUN_11acaf10("versionIdLow",0x40,0,3);
+  FUN_11acb320("mapIdType",0x30,0,3); FUN_11acaba0("bfname",0x4c,0,3); uVar1 = FUN_103173f0(0x14,"execFilenames");
+  puVar2 = FUN_10638fb0(1); *puVar2 = uVar1; FUN_11acaba0("saveGameFilename",0x50,0,3);
+  FUN_11acac50(0x54,0,&DAT_12852dcc,0,3);` — so the descriptor *sizes* are `execLines` = 8 and
+  `execFilenames` = 0x14, and `&DAT_11fb178c`/`&DAT_11f8d78c` are the string `map`.
+- Account builder (`0x11348370` ↔ `0x11342af0`): `login` 4, `password` 8, `onlineKey` 0xc, `primaryAccount` 0x14,
+  `accountFlags` 0x18, `controllerIndex` 0x1c (registrar `0x11acb270`↔`0x11ab6e20`), `platformSpecificId` 0x20, plus
+  anonymous offsets `0x10`/`0x1d`/`0x1e` on `&DAT_12852d9c` ↔ `&DAT_1282f8cc`.
+- Gate chain that must pass before **any** descriptor is created, in two wrappers per module (`FC3.dll
+  0x1030f2b0` → `0x1030f430`, `FC3.dll 0x1030f250` → `0x1030f310`; FC3_d3d11 twins `0x103173f0` → `0x10317570`
+  and `0x10317390` → `0x10317450`). FC3.dll body: `if (DAT_128042fc == '\0') FUN_11789a00(); if (DAT_12162beb
+  != '\0') { iVar1 = FUN_1177f7c0(); if (iVar1 != 0) goto create; } if (FUN_118db560() == 0) return 0; create:
+  return FUN_1030f430(size, name);` (`0x1030f2b0` takes `(size, name)`, `0x1030f250` takes none). FC3_d3d11
+  body: gates `DAT_128293f4`→`FUN_1179a990()`, `DAT_12187c6b`→`FUN_11790750()`, `FUN_118e8340()` →
+  `FUN_10317450()` (`0x103173f0` takes `(size, name)`, `0x10317390` takes none).
+- World/spawn builder (`FC3.dll 0x113425c0`, guard `DAT_12805498`): pushes the object returned by `FUN_1030f200`
+  (0 if the gates fail) and writes `world` 4, `pos` 8 (`&DAT_11f15f68`, registrar `0x11ab6a10`), `spawnPtId` 0x18,
+  anonymous `0x21` on `&DAT_1282f95c` and `0x20` as `iVar1 + 0x14`. FC3_d3d11 twin `0x11348480` (guard
+  `DAT_1282a609`) writes `abortEngineUpdateFlag` 0x14 (registrar `0x11acafc0`) + anonymous
+  `0x10`/`0x18`/`0x19`/`0x1a`/`0x1b` on `&DAT_12852d84`.
+- **Descriptor ctor family** (identical slot layout in both modules; slot *n* = object + 0x<*n*4>):
+  `0x1030f310` ↔ `0x10317450` writes slot1 = `"GameOpInfos"`, slot2 = strlen helper `FUN_11788030` ↔
+  `FUN_11798fc0` applied to that name, slot3 = 0 (flag byte), slot4 = 3, slot5 = 4, slot7 = `"infos"`, slot9 =
+  data pointer `&DAT_11f167b6` ↔ `&DAT_11f31ea8`, slot10 = `0xffffffff`, vtable `&PTR_FUN_11f90de0` ↔
+  `&PTR_FUN_11fb4d70`, purecall thunk `&PTR_purecall_11f0ebec` ↔ `&PTR_purecall_11f321ac`. `0x1030f430` ↔
+  `0x10317570` is the same shape with slot1 = the caller-supplied name, slot5 = `param_1`, slot7 = the literal
+  `"command"`. `0x1030f130` ↔ `0x10317270` is the destructor: for object slots `0x12`/`0x13`/`0x14` it runs
+  `LOCK(); iVar1 = *piVar2; *piVar2 = *piVar2 + -1; UNLOCK(); if (iVar1 == 1) FUN_100945e0();` ↔
+  `FUN_10174710()`, then two `FUN_11788aa0()` ↔ `FUN_11799a30()` calls and resets the vtable to
+  `&PTR_FUN_11f0e9c4` ↔ `&PTR_FUN_11f31f88` ⇒ intrusive `lock xadd` refcounts at object +0x48/+0x4c/+0x50.
+- The record object itself (`FC3.dll 0x1030f200` ↔ `FC3_d3d11.dll 0x10317340` — **not** `0x10317450`): sets
+  vtable `&PTR_FUN_11f90dac`, `slot4 = 3`, and `slot9 = &LAB_11341420` ↔ `&LAB_11346ca0`, i.e. a *code* pointer
+  stored at object +0x24. The FC3_d3d11 target sits inside exported **`FUN_11346bc0`** (Ghidra export range
+  `0x11346bc0-0x11346c97`, but the real function runs to `0x11346d53 ret` + `int3` padding — Ghidra splits it,
+  which is why filename-based address searches miss it; bounded disassembly `0x11346c00..0x11346d60` is saved
+  in `local/scratch/rd_11346c00.txt`). FC3.dll `0x11341030.c` / `0x11341420.c` are **not** exported in
+  `pseudo-fc3dll-v2/functions/`, so FC3.dll's copy of that tick is still unexported; the twin pairing is settled.
+- `FC3_d3d11 FUN_11346bc0` (the slot-9 tick, called with `this` in `ECX`) is a per-object **update/execute**
+  step driven by flag bytes at +0x55, +0x5f, +0x19, +0x1a, +0x5e, +0x17, +0x1c, +0x57, +0x26, +0x5d; it calls
+  the vtable slot at object +0x54, `FUN_11345a40`, `FUN_11345460`, `FUN_11644220(100)`, `FUN_11346b00`,
+  `FUN_10c4d740`, and logs the wide literal **`L"ExecuteEvent"`** through `FUN_10317cd0` (clearing the +0x57
+  flag after logging). Its last block gates on the singleton `DAT_1282a2f8`: reads `(*(DAT_1282a2f8 + 4) + 0x205)`
+  as a byte, calls vtable slot +0x28 on that object, and on success sets **`DAT_1282afba = 1`**.
+
+**Open questions (this area):** ~~decompile `0x10638fb0` (FC3_d3d11.dll) and `0x1003b4b0` (FC3.dll) to get
+the element type of an exec record~~ — resolved: 4-byte pointers, appended by count. Confirm that the consumers `FC3_d3d11.dll 0x11348360` /
 `FC3.dll 0x11342a2e` walk `[0x12852dcc]`/`[0x1282f8fc]` in registration order; who writes the parsed
 `-exec` string into the container `[0x12829424]` under the key `execLines` (known call site
 `0x11785e60`, return offset `[eax+0x28]`); and whether `Exec` (`0x11fbda40`, handler pointer stored at
