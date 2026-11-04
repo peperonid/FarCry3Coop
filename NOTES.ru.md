@@ -621,6 +621,27 @@ ok: puVar2 = FUN_11341d40();                     ok: puVar2 = FUN_113475c0();
   `0x111eef18` → `0x11fdf198`); это операнд `mov *puVar2, offset …` самой фабрики, а не отдельная таблица.
   Вторая `.text`-ссылка на соседний описатель: FC3.dll `0x1039edd4` → `0x11fbb2e4` (`IGameFileData`) ↔ FC3_d3d11.dll
   `0x103a5f04` → `0x11fdf1bc`.
+- **Как доходит до фабрики.** У `FUN_111e9540` / `FUN_111eeed0` — 0 вызовов `E8` и 9 абсолютных ссылок, по одной
+  на каждый элемент реестра родственных-классов in `.rdata`. FC3.dll `0x11fbaf44` (файл `0x1fba144`) ↔
+  FC3_d3d11.dll `0x11fdee1c` (файл `0x1fdd41c`), шаг `0x28`, элементы `af44, af6c, af94, afbc, afe4, bb00c,
+  bb034, bb05c, bb084` ↔ `ee1c, ee44, ee6c, ee94, eebc, eee4, ef0c, ef34, ef5c`; реестр лежит на `0x37c` байт
+  раньше vftable. Элемент 0 FC3.dll `111e9540 111e94e0 1030d1d0 1039e3c0 104833e0 111e9fd0 111e8e10 113433b0
+  111e9460 111e95a0` ↔ FC3_d3d11 `111eeed0 111eee70 103a56f0 103a5470 10005920 111ef960 111ee7a0 11348c30
+  111eedf0 111eef30`: поле 0 = guarded-создатель, поле 1 = его смежная точка входа, поля 4 (`0x104833e0` ↔
+  `0x10005920`), 7 (`0x113433b0` ↔ `0x11348c30`) и 9 (`0x111e95a0` ↔ `0x111eef30`) одинаковы в элементах 0-7,
+  поле 2 = `0x1030d1d0` ×4 / `0x1039e640` ×3 ↔ `0x103a56f0` ×4 / `0x103a5750` ×3, поле 3 идёт по серии с шагом
+  `0x50` (`0x1039e3c0,410,460,4b0,500,550,5a0,5f0` ↔ `0x103a5470,4c0,510,560,5b0,600,650,6a0`). **Элемент 8 —
+  другое семейство** (FC3.dll `100519c0 1030df50 10122130 104ef020 1039e780 103feb40 102dac70 100055a0` ↔
+  FC3_d3d11 `1027d850 102a8ea0 10241570 1046b300 103a5890 10104c00 10316060 10005880`). Форма — один создатель
+  на девять родственных-классов — соответствует именам описателей выше (`CFCXGOContextNode`,
+  `CFCXGOContextFlagsNode`, `IGameFileData`, `CCampaignGameFileData`, `CFCXGameModeContextNode`,
+  `CFCXGameModeContextFlagsNode`, `CFCXGameMode`). Файл пробы: `local/scratch/fc3_region_dump.py` — выводит диапазон `.rdata` в виде dword-ов
+  с декодированием names/strings (`<pe> <va_start> <va_end> <out>`); нужен image base (оба modules 1.06 —
+  `0x10000000`, PE32 magic `0x10b`), потому что таблица секций хранит RVAs — FC3.dll `.rdata`
+  = VA `0x11bcb000`..`0x12092d21` from file `0x1bca200`, FC3_d3d11.dll `.rdata` = VA
+  `0x11be1000`..`0x120b7347` from file `0x1bdf600`. Открытые вопросы этой области: какой из девяти
+  элементов владеет реестровой таблицей (`0x118531c0` ↔ `0x11863de0` — её слот `+0x0c`), кто итерирует реестр по адресам
+  `0x11fbaf44` ↔ `0x11fdee1c` во время выполнения, и что собой представляет семейство элемента 8.
 - Файлы проб: `local/scratch/rd_reg_table_fc3.txt`, `local/scratch/rd_reg_table_d3d.txt`,
   `local/scratch/rd_table_slot_scan.txt` (принадлежность слотов + сырые байты),
   `local/scratch/rd_snapshot_callers.txt` (guarded-одноразовые thunks). `local/scratch/rd_disasm.py` требует

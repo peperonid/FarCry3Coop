@@ -898,10 +898,27 @@ ok: puVar2 = FUN_11341d40();                     ok: puVar2 = FUN_113475c0();
   `0x111eef18` → `0x11fdf198`); it is the `mov *puVar2, offset …` operand of the factory, not a separate table.
 - A second `.text` reference to the sibling class descriptor: FC3.dll `0x1039edd4` → `0x11fbb2e4` (`IGameFileData`)
   ↔ FC3_d3d11.dll `0x103a5f04` → `0x11fdf1bc`.
+- **How the creator is reached.** `FUN_111e9540` / `FUN_111eeed0` have **0 `E8` callers and 9 absolute references**,
+  one per entry of a sibling-class registry in `.rdata`: FC3.dll `0x11fbaf44` (file `0x1fba144`) ↔ FC3_d3d11.dll
+  `0x11fdee1c` (file `0x1fdd41c`), stride `0x28`, entries `af44, af6c, af94, afbc, afe4, bb00c, bb034, bb05c, bb084`
+  ↔ `ee1c, ee44, ee6c, ee94, eebc, eee4, ef0c, ef34, ef5c` — the registry is `0x37c` bytes before the vftable. Entry 0
+  FC3.dll `111e9540 111e94e0 1030d1d0 1039e3c0 104833e0 111e9fd0 111e8e10 113433b0 111e9460 111e95a0` ↔ FC3_d3d11
+  `111eeed0 111eee70 103a56f0 103a5470 10005920 111ef960 111ee7a0 11348c30 111eedf0 111eef30`: field 0 = the guarded
+  creator, field 1 = its sibling entry point, and fields 4 (`0x104833e0` ↔ `0x10005920`), 7 (`0x113433b0` ↔
+  `0x11348c30`) and 9 (`0x111e95a0` ↔ `0x111eef30`) are identical in entries 0-7, while field 2 is `0x1030d1d0` ×4 /
+  `0x1039e640` ×3 ↔ `0x103a56f0` ×4 / `0x103a5750` ×3 and field 3 walks an `0x50`-strided series (`0x1039e3c0,410,
+  460,4b0,500,550,5a0,5f0` ↔ `0x103a5470,4c0,510,560,5b0,600,650,6a0`). **Entry 8 is a different family** (FC3.dll
+  `100519c0 1030df50 10122130 104ef020 1039e780 103feb40 102dac70 100055a0` ↔ FC3_d3d11 `1027d850 102a8ea0 10241570
+  1046b300 103a5890 10104c00 10316060 10005880`). This shape — one creator shared by nine sibling classes — matches the
+  descriptor names documented above (`CFCXGOContextNode`, `CFCXGOContextFlagsNode`, `IGameFileData`,
+  `CCampaignGameFileData`, `CFCXGameModeContextNode`, `CFCXGameModeContextFlagsNode`, `CFCXGameMode`).
 - Probe files: `local/scratch/rd_reg_table_fc3.txt`, `local/scratch/rd_reg_table_d3d.txt`,
   `local/scratch/rd_table_slot_scan.txt` (slot ownership + raw bytes), `local/scratch/rd_snapshot_callers.txt`
   (guard-once thunks). Note `local/scratch/rd_disasm.py` needs **four** arguments `<pe> <start_va> <end_va>
-  <out_file>`; with three it prints nothing.
+  <out_file>`; with three it prints nothing. `local/scratch/fc3_region_dump.py` dumps a `.rdata` range as dwords with
+  the name/string decoding: `<pe> <va_start> <va_end> <out>`; it needs the image base (both 1.06 modules are
+  `0x10000000`, PE32 magic `0x10b`) because the section table stores RVAs — FC3.dll `.rdata` = VA `0x11bcb000`..`0x12092d21`
+  from file `0x1bca200`, FC3_d3d11.dll `.rdata` = VA `0x11be1000`..`0x120b7347` from file `0x1bdf600`.
 
 **Open questions (this area):** ~~decompile `0x10638fb0` (FC3_d3d11.dll) and `0x1003b4b0` (FC3.dll) to get
 the element type of an exec record~~ — resolved: 4-byte pointers, appended by count. Confirm that the consumers `FC3_d3d11.dll 0x11348360` /
@@ -910,7 +927,9 @@ the element type of an exec record~~ — resolved: 4-byte pointers, appended by 
 `0x11785e60`, return offset `[eax+0x28]`); ~~which FC3.dll function owns the slot-9 code pointer~~ — resolved:
 `0x11341420` ↔ `0x11346ca0` are byte-identical flag getters (`byte [this + 0x21]`), and the tick they guard is
 `FC3.dll FUN_11341340` ↔ `FC3_d3d11 FUN_11346bc0`; and whether `Exec` (`0x11fbda40`, handler pointer stored at
-`0x111f5c71`) is reachable from that container at launch.
+`0x111f5c71`) is reachable from that container at launch. **New:** which of the nine registry entries owns the record
+table (`0x118531c0` ↔ `0x11863de0` is its slot `+0x0c`), who iterates the registry at `0x11fbaf44` ↔ `0x11fdee1c` at
+time, and what entry 8's family is.
 
 ## TODO
 
