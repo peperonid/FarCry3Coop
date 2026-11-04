@@ -109,6 +109,14 @@ wait for its result before starting the next one — model requests are processe
 
 Owner rules are never rewritten by the agent silently: report the gap and let the owner decide.
 
+**NEVER invent a tool, command or program name.** Call only the tools this session actually declares; if a capability is not declared, say so and use a declared alternative — a guessed tool name burns the turn and produces nothing.
+
+**NEVER write tool-call markup as message text.** A `tool_call`/`parameter` block typed into the reply (instead of a real tool call) is a lost turn. One real tool call per tool used.
+
+Shell surface on this session: the plain shell tool is not available (`Shell not available: unavailable in this session`). Shell commands run through `ctx_execute` with `language: "shell"`, and that shell is **PowerShell, not bash** — `cd a && b`, `$(…)`-substitutions and bash-isms fail with `InvalidEndOfLine`. Chain with `;`, quote Windows paths, or prefer `language: "javascript"` / `"python"`.
+
+`ctx_execute` / `ctx_execute_file` `timeout` is taken as **milliseconds** here (`timeout: 60` → 60 ms → the run dies before the shell even starts). Omit it, or pass a large value (`120000`).
+
 **RU:** Вызовы инструментов: один блок на ход, один инструмент в блоке, аргументы не больше
 
 ~4 КБ. Длинные probe-скрипты писать в файл и запускать короткой командой
@@ -125,6 +133,24 @@ Owner rules are never rewritten by the agent silently: report the gap and let th
 последовательно. Правила владельца не переписывать молча: сообщать о расхождении и решать
 
 владельцу.
+
+**НИКОГДА не выдумывать имена инструментов, команд и программ.** Вызывать только те инструменты,
+которые реально объявлены в сессии; если нужной возможности нет — сообщить и использовать объявленную
+альтернативу. Выдуманное имя сжигает ход и даёт пустой результат.
+
+**НИКОГДА не печатать разметку вызова инструмента как текст сообщения.** Блок вида `tool_call` /
+`parameter`, набранный в ответе вместо настоящего вызова, — потерянный ход. Один настоящий вызов на
+один использованный инструмент.
+
+Оболочка в этой сессии: обычный shell-инструмент недоступен (`Shell not available: unavailable in
+this session`). Команды выполнять через `ctx_execute` с `language: "shell"`, и этот shell —
+**PowerShell, а не bash**: `cd a && b`, подстановки `$(…)` и прочие bash-измы падают с
+`InvalidEndOfLine`. Цеплять через `;`, кавычить виндовые пути, либо использовать
+`language: "javascript"` / `"python"`.
+
+Параметр `timeout` у `ctx_execute` / `ctx_execute_file` здесь понимается как **миллисекунды**
+(`timeout: 60` → 60 мс → процесс умирает до запуска оболочки). Либо не указывать его, либо давать
+большое значение (`120000`).
 
 ## Repo layout / Раскладка репозитория
 
