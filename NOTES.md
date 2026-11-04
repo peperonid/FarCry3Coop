@@ -822,25 +822,42 @@ Type codes seen with the ordinary registrars: `0x11ab6750` (`map` `0x48`, `bfnam
   `LOCK(); iVar1 = *piVar2; *piVar2 = *piVar2 + -1; UNLOCK(); if (iVar1 == 1) FUN_100945e0();` ↔
   `FUN_10174710()`, then two `FUN_11788aa0()` ↔ `FUN_11799a30()` calls and resets the vtable to
   `&PTR_FUN_11f0e9c4` ↔ `&PTR_FUN_11f31f88` ⇒ intrusive `lock xadd` refcounts at object +0x48/+0x4c/+0x50.
-- The record object itself (`FC3.dll 0x1030f200` ↔ `FC3_d3d11.dll 0x10317340` — **not** `0x10317450`): sets
-  vtable `&PTR_FUN_11f90dac`, `slot4 = 3`, and `slot9 = &LAB_11341420` ↔ `&LAB_11346ca0`, i.e. a *code* pointer
-  stored at object +0x24. The FC3_d3d11 target sits inside exported **`FUN_11346bc0`** (Ghidra export range
-  `0x11346bc0-0x11346c97`, but the real function runs to `0x11346d53 ret` + `int3` padding — Ghidra splits it,
-  which is why filename-based address searches miss it; bounded disassembly `0x11346c00..0x11346d60` is saved
-  in `local/scratch/rd_11346c00.txt`). FC3.dll `0x11341030.c` / `0x11341420.c` are **not** exported in
-  `pseudo-fc3dll-v2/functions/`, so FC3.dll's copy of that tick is still unexported; the twin pairing is settled.
-- `FC3_d3d11 FUN_11346bc0` (the slot-9 tick, called with `this` in `ECX`) is a per-object **update/execute**
-  step driven by flag bytes at +0x55, +0x5f, +0x19, +0x1a, +0x5e, +0x17, +0x1c, +0x57, +0x26, +0x5d; it calls
-  the vtable slot at object +0x54, `FUN_11345a40`, `FUN_11345460`, `FUN_11644220(100)`, `FUN_11346b00`,
-  `FUN_10c4d740`, and logs the wide literal **`L"ExecuteEvent"`** through `FUN_10317cd0` (clearing the +0x57
-  flag after logging). Its last block gates on the singleton `DAT_1282a2f8`: reads `(*(DAT_1282a2f8 + 4) + 0x205)`
-  as a byte, calls vtable slot +0x28 on that object, and on success sets **`DAT_1282afba = 1`**.
+- The record object itself (`FC3.dll 0x1030f200` ↔ `FC3_d3d11.dll 0x10317340` — **not** `0x10317450`), from
+  bounded disassembly `local/scratch/rd_fc3_1030f1f0.txt` / `local/scratch/rd_d3d_10317330.txt`: purecall vtable
+  `0x11f0ebec` ↔ `0x11f321ac`, then the name literal **`"Data"`** at object +4 (`0x11f0ecc0` ↔ `0x11f32280`),
+  the length helper call `0x11788030` ↔ `0x11798fc0` stored at +8, intermediate vtable `0x11f0edfc` ↔
+  `0x11f323bc` with `+0x10 = 3` and the helper's return copied into `+0x14`, `+0x18`, `+0x1c`, `+0x20`, then the
+  real vtable `&PTR_FUN_11f90dac` ↔ `&PTR_FUN_11fb4d3c`, and object +0x24 = `0x11341420` ↔ `0x11346ca0`.
+- That +0x24 target is a **3-byte thiscall getter**, identical in both modules:
+  `mov al, byte ptr [ecx + 0x21]; ret` (FC3.dll `0x11341420`, FC3_d3d11.dll `0x11346ca0`) — a flag predicate, not
+  a tick. Ghidra does not export either thunk as a pseudocode file, so the pairing came from `region_dump.py`.
+- The per-object **update/execute** tick is `FC3.dll FUN_11341340` ↔ `FC3_d3d11 FUN_11346bc0` (`this` in `ECX`,
+  Ghidra ranges `0x11341340-0x11341417` ↔ `0x11346bc0-0x11346c97`, real epilogue `ret 4` at `0x11341415` /
+  `0x11346c95`; padding then holds the accessor thunks). Their pseudocode is line-for-line identical: flag bytes
+  +0x55, +0x5f, +0x19, +0x1a, +0x5e, +0x17, +0x1c, +0x57, +0x26, +0x5d; calls `FUN_113401c0` ↔ `FUN_11345a40`,
+  the object vtable slot +0x54, `FUN_1133fbe0` ↔ `FUN_11345460`, `FUN_116332b0(100)` ↔ `FUN_11644220(100)`,
+  `FUN_11341280` ↔ `FUN_11346b00`, logs the wide literal **`L"ExecuteEvent"`** via `FUN_1030fb90` ↔
+  `FUN_10317cd0` (clearing +0x57), then `FUN_10c47220` ↔ `FUN_10c4d740`. Its last block gates on the singleton
+  `DAT_12805180` ↔ `DAT_1282a2f8`: reads byte `(*(singleton + 4) + 0x205)`, calls that object's vtable slot +0x28,
+  and on success sets **`DAT_12805e42 = 1`** ↔ **`DAT_1282afba = 1`**.
+- Consumers of that flag pair: `FC3.dll 0x10c47320`/`0x10c473b0`/`0x10c477c0`/`0x10c47a00` ↔ `FC3_d3d11.dll`
+  `0x10c4d840`/`0x10c4d8d0`/`0x10c4dce0`/`0x10c4df20` (reads/clears `DAT_12805e41`/`DAT_12805e42` ↔
+  `DAT_1282afb9`/`DAT_1282afba`). Inside `FUN_10c473b0` ↔ `FUN_10c4d8d0` the gated path calls
+  `FUN_1069fbe0` ↔ its twin and `FUN_10504b50(handle, L"ExecuteEvent")` ↔ its twin — the scripted-event
+  execution path, once per object (it sets the guard byte at object +0xe8).
+- Adjacent accessor thunks (FC3.dll ↔ FC3_d3d11.dll): `0x11341420` ↔ `0x11346ca0` (`mov al, byte ptr [ecx + 0x21]`),
+  `0x11341430` ↔ `0x11346cb0` (`mov dword ptr [eax + 4], ecx`), `0x11341440` ↔ `0x11346cc0` (`mov al, byte ptr
+  [eax + 0x5c]`), then FC3_d3d11-only `0x11346cd0` (set byte +0x5c), `0x11346ce0` (`add eax, 0x30`), pair getters
+  `0x11346cf0` (+0x28/+0x2c), `0x11346d00` (+0x18/+0x1c), `0x11346d10` (+0x10/+0x14), setters `0x11346d20` (+0x40),
+  `0x11346d30` (+0x3c), `0x11346d40` (+0x38). All end with `ret` and sit in the padding region after the tick.
 
 **Open questions (this area):** ~~decompile `0x10638fb0` (FC3_d3d11.dll) and `0x1003b4b0` (FC3.dll) to get
 the element type of an exec record~~ — resolved: 4-byte pointers, appended by count. Confirm that the consumers `FC3_d3d11.dll 0x11348360` /
 `FC3.dll 0x11342a2e` walk `[0x12852dcc]`/`[0x1282f8fc]` in registration order; who writes the parsed
 `-exec` string into the container `[0x12829424]` under the key `execLines` (known call site
-`0x11785e60`, return offset `[eax+0x28]`); and whether `Exec` (`0x11fbda40`, handler pointer stored at
+`0x11785e60`, return offset `[eax+0x28]`); ~~which FC3.dll function owns the slot-9 code pointer~~ — resolved:
+`0x11341420` ↔ `0x11346ca0` are byte-identical flag getters (`byte [this + 0x21]`), and the tick they guard is
+`FC3.dll FUN_11341340` ↔ `FC3_d3d11 FUN_11346bc0`; and whether `Exec` (`0x11fbda40`, handler pointer stored at
 `0x111f5c71`) is reachable from that container at launch.
 
 ## TODO
