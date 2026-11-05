@@ -20,6 +20,12 @@ What the scan actually covers:
     false positives coming from data that coincidentally looks like the VA.
   * pointer tables: every writable section is scanned for the packed VA used as a stored pointer.
   * relocation patch sites are reported separately (--mode reloc) as loader evidence, not as xrefs.
+    Each site is reported with the value stored there *before* the loader patches it, which for an
+    image left at its default image base is the absolute VA that the slot points at. That is what
+    makes --mode reloc worth asking: "which table stores a pointer to this VA?"
+    (The previous version returned the field VA twice as the target, so every query matched its own
+    own patch site and the answer was always a false positive; the type names came from the ARM64
+    table, so a 32-bit HIGHLOW entry was printed as HIGH_ABS.)
 
 Read-only: the target PE is opened for reading, nothing is written, and no game file is modified.
 
@@ -36,7 +42,8 @@ try:
 except Exception:
     print("capstone missing: python -m pip install capstone"); sys.exit(1)
 
-RELOC_TYPES = {0: "ABS", 3: "HIGH_ABS", 5: "DIR64", 6: "HIGH_ABS32", 10: "DIR32"}
+RELOC_TYPES = {0: "ABSOLUTE(padding)", 1: "HIGH", 2: "LOW", 3: "HIGHLOW", 4: "HIGHADJ",
+               5: "MIPS_JMPADDR", 10: "DIR64"}
 IMAGE_FILE_MACHINE_NAMES = {0x14C: "x86 (32-bit)", 0x8664: "x86_64"}
 
 
@@ -104,7 +111,9 @@ class PE:
         return None
 
     def reloc_entries(self):
-        """(field VA, target VA, type name) for every relocation entry in the image."""
+        """(patch-site VA, value stored there at load time, type name) for every real relocation
+        entry in the image. Type 0 (ABSOLUTE) is padding and is skipped. The stored value is read
+        from the site itself: for an image at its default image base it is the target VA."""
         out = []
         for nm in self.order:
             if nm != ".reloc":
@@ -120,8 +129,17 @@ class PE:
                     ent = struct.unpack_from("<H", blob, pos + 8 + i * 2)[0]
                     typ = ent >> 12
                     off = ent & 0xFFF
-                    out.append((self.base + page_rva + off, self.base + page_rva + off,
-                                 RELOC_TYPES.get(typ, "type%d" % typ)))
+                    if typ == 0:
+                        continue                                    # padding, nothing patched
+                    site_va = self.base + page_rva + off
+                    site = self.va2off(site_va)
+                    stored = None
+                    if site is not None:
+                        if typ == 10 and site + 8 <= len(self.d):   # DIR64
+                            stored = struct.unpack_from("<Q", self.d, site)[0]
+                        elif site + 4 <= len(self.d):               # HIGH/LOW/HIGHLOW/HIGHADJ
+                            stored = struct.unpack_from("<I", self.d, site)[0]
+                    out.append((site_va, stored, RELOC_TYPES.get(typ, "type%d" % typ)))
                 pos += block_size
         return out
 
@@ -246,10 +264,12 @@ def main():
             for nm, va in ptrs[:a.max_print]:
                 print("      %s 0x%08x" % (nm, va))
         if a.mode in ("reloc", "both"):
-            rl = [(f, tv, ty) for f, tv, ty in pe.reloc_entries() if tv == target]
-            print("   relocation patch sites whose target VA is the global: %d" % len(rl))
+            relocs = pe.reloc_entries()
+            rl = [(f, tv, ty) for f, tv, ty in relocs if tv == target]
+            print("   relocation entries: %d; patch sites whose stored value points at the global: %d"
+                  % (len(relocs), len(rl)))
             for f, tv, ty in rl[:a.max_print]:
-                print("      patch site 0x%08x (%s)" % (f, ty))
+                print("      patch site 0x%08x (%s) stores 0x%08x" % (f, ty, tv))
 
 
 if __name__ == "__main__":
