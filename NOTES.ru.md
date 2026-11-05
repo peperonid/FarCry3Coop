@@ -428,7 +428,8 @@ product 1089053420; MD5 FC3_d3d11 `916c6d4b876d8be5f0ad68f50719a838`, FC3
   запасной `0x12173ffc`); пара `-coop`/`-dash` на `0x1216a00c` / `0x1216a010`; `0x9ba82025` повторяется
   через `0x12163450` .. `0x121636e8`; `0xd2fd0a6b` ещё и на `0x1216cab0`. Открытым остаётся, что
   выбирает каждая таблица и кто их обходит.
-- **Вторая цепочка сравнения имён режима (`FC3.dll`, `0x11a8c944` .. `0x11a8c9c1`)** (`-deathmatch`
+- **Вторая цепочка сравнения имён режима (`FC3.dll`, `0x11a8c944` .. `0x11a8c9c1`)** (начало фукции —
+  `0x11a8c8b0`, см. запись в конце файла) (`-deathmatch`
   `0x11a8c944`, `-coop` `0x11a8c95d`, `-domination` `0x11a8c977`, `-headquarters` `0x11a8c991`,
   `-firestorm` `0x11a8c9a7`, `-dash` `0x11a8c9c1`); у `-online` есть ещё ссылки на `0x11a8b8d3`,
   `0x11a8b91f`, `0x11a8cd09`. Открытым остаётся, что выбирает эта цепочка.
@@ -577,8 +578,7 @@ B4) структура параметров сессии по адресу `[ebp
   `0x11aa0d55 mov ecx, [0x1218fffc]` = `0xf66ffb87` → `0x11aa0d5b`; `-dash` → `0x11aa0d6f mov edx,
   [0x12190004]` = `0x2100ced7` → `0x11aa0d75`; резерв `[0x1219000c]` = `0x6c2b3868`. Зеркало в `FC3.dll`
   подтверждено только по строкам (`-coop` `0x11a8c95d`, `-domination` `0x11a8c977`, `-headquarters`
-  `0x11a8c991`, `-firestorm` `0x11a8c9c1`): интервал `0x11a8c944 .. 0x11a8c9c1` начинается в середине
-  инструкции, поэтому точку входа этой функции надо сначала найти.
+  `0x11a8c991`, `-firestorm` `0x11a8c9c1`): интервал `0x11a8c944 .. 0x11a8c9c1` — это часть функции с началом в **`0x11a8c8b0`** (RESOLVED 2026-11-06); см. запись «Вторая цепочка launch-режимов, вход RESOLVED» в конце файла.
 - **Флаг `-coop` и разбор запуска.`FC3_d3d11.dll`** строка `-coop` лежит в `0x11fdc0cc` — в том же
   связном блоке переключателей, что `-perfhud` `0x11fdbc1c`, `-logFile` `0x11fdbc28`, `-bfname`
   `0x11fdbc34`, `-execline` `0x11fdbc3c`, `-exec` `0x11fdbc48`, `-quickstartup` `0x11fdbc50`,
@@ -1019,3 +1019,82 @@ imm32`, поэтому для этих глобалов надёжен reloc-р�
 - [ ] Динамическая зацепка для исполнителя `execLines`: запустить тестовую копию с `-exec <файл>`
   (или `-execline`) и зафиксировать, как строка попадает в 180-байтную структуру сессии; параллельно
   разобрать в Ghidra accessor-thunkи `0x11bc8a80`..`0x11bc8ad0` и `0x10004d70`
+- **Таблица регистрации launch-режимов `FC3.dll 0x1119dec0 .. 0x1119df9a` и `0x1119f910 .. 0x1119fa42`**
+  (проверено 2026-11-06, `local/scratch/probe36.txt`, `probe37.txt`). `0x1119dec0` кладет id-глобалы в
+  объект `[0x12804acc]`: на каждый вызов `mov eax, dword ptr [0x12804acc]` + `add eax,4` +
+  `push <VA id-глобалы>` + `call 0x1029eb00` (хелпер `0x1029eb00` = регистрация id). Порядок такой же,
+  как в таблице `0x1111e390` / `0x1111e860`: `0x1216caac` (`0x1119dec6`), `0x1216ca9c` (`0x1119ded8`),
+  `0x1216ca90` (`0x1119deea`), `0x1216caa4` (`0x1119defc`), `0x1216caa8` (`0x1119df0e`), **`0x1216aee4`
+  `-coop` (`0x1119df20`)**, `0x1216aedc` (`0x1119df32`), `0x1216af0c` (`0x1119df44`), `0x1216aeec`
+  (`0x1119df56`), `0x1216aef4` (`0x1119df68`), `0x1216aefc` (`0x1119df7a`), `0x1216af04` (`0x1119df8c`),
+  `pop ecx; ret` в `0x1119df99`. `0x1119f910` привязывает обработчик к id: `mov esi, dword ptr
+  [0x12804acc]` + `add esi,4` + `push <VA обработчика>` + `push <VA id-глобалы>` + `call 0x1029edc0`
+  (парами: `0x11152dd0`↔`0x1216caac` в `0x1119f91d`, `0x11152f50`↔`0x1216ca9c` в `0x1119f935`,
+  `0x11a7a2e0`↔`0x1216ca90` в `0x1119f94d`, `0x11a5a290`↔`0x1216caa4` в `0x1119f965`, `0x11a5a0b0` ↔
+  `0x1216caa8` в `0x1119f97d`, **`0x11a5a6e0`↔`0x1216aee4` (co-op, `0x1119f995` / `0x1119f99f`)**,
+  `0x11a7aff0`↔`0x1216aedc` в `0x1119f9ad`, `0x11a7aa00`↔`0x1216af0c` в `0x1119f9c5`, `0x11a7ae80` ↔
+  `0x1216aeec` в `0x1119f9dd`, `0x11a7ad00`↔`0x1216aef4` в `0x1119f9f5`, `0x11a7ab80`↔`0x1216aefc` в
+  `0x1119fa0d`, `0x11a5a560`↔`0x1216af04` в `0x1119fa25`, `pop esi; ret` в `0x1119fa42`).
+- **Конструктор co-op режима `FC3.dll 0x11a5a6e0 .. 0x11a5a772`** (обработчик, привязанный к `-coop`):
+  шлюзы `cmp byte ptr [0x128042fc],0` → `call 0x11789a00` (`0x11a5a6ea..0x11a5a6f2`) и `cmp byte ptr
+  [0x12162beb],0` (`0x11a5a6f7`); размер объекта `mov edx,0x10; lea ecx,[edx+0x30]` (=0x40) +
+  `call 0x1177f7c0` (`0x11a5a6ff..0x11a5a707`, запасной путь `mov eax,0x10; lea edi,[eax+0x30];` +
+  `call 0x118db560` в `0x11a5a710..0x11a5a718`); инициализация `[obj] = 0x11f23408` (`0x11a5a721`),
+  поля `+4`..`+0x2c` обнуляются, `+0x30 = 0xffffffff` (`0x11a5a748`), `+0x34` (слово) и `+0x36` (байт)
+  тоже 0; затем виртуальная таблица → **`0x11fbb838`** (`0x11a5a756`) и `mov ecx, [0x1216aee4]` (`0x11a5a75c`) →
+  `mov dword ptr [eax + 0x30], ecx` (`0x11a5a762`); при отказе шлюза возвращает 0 (`0x11a5a76b`).
+  Смещение `+0x30` — ровно то, что читают co-op проверки: `[0x12804acc]` → `+0x68` →
+  `mov eax,[eax+0x30]` → `cmp eax,[0x1216aee4]` в `0x1111e4d4/0x1111e4e3` и
+  `0x1111e907/0x1111e916/0x1111e91e`.
+- **Вторая цепочка launch-режимов, вход RESOLVED: `FC3.dll 0x11a8c8b0 .. 0x11a8d110`** (ранний
+  «mid-instruction» диапазон `0x11a8c944 .. 0x11a8c9c1` — внутри этой функции). Аргументы разбираются
+  через `mov edi, dword ptr [0x11bcb5c0]` (`0x11a8c8bc`) + `call edi`: `-login` `0x11fb8170`
+  (`0x11a8c8c2`); путь ошибки `push 0x11fb81b4` = `'Invalid parameters for -host, missing (-login)'`
+  (`0x11a8c8d6`, `0x11a8c8e6`) → `call 0x10a00be0` / `call 0x10001ed0` → `xor al,al; ret 0xc`
+  (`0x11a8c8f2..0x11a8c8fa`); далее `-host` `0x11f0e6ac` (`0x11a8c90b`, геттер `call 0x11a08190`),
+  `-bfname` `0x11fb7d64` (`0x11a8c919`), `-dedicated` `0x11f0e7dc` (`0x11a8c927`), `-sessionuid`
+  `0x11fb81f0` (`0x11a8c935`), `-deathmatch` (`0x11a8c943`), `-coop` `0x11fb81fc` (`0x11a8c95c`),
+  `-domination` `0x11fb8204` (`0x11a8c976`), `-headquarters` `0x11fb8210` (`0x11a8c990`), `-firestorm`
+  `0x11fb8220` (`0x11a8c9a6`), `-dash` `0x11fb822c` (`0x11a8c9c0`). Id режима попадает в локальный слот
+  `[ebp+0xc]` (`-coop`: `0x11a8c96b mov ecx,[0x1216aee4]` затем `0x11a8c971 mov [ebp+0xc],ecx`;
+  `-deathmatch`: `0x11a8c952 mov eax,[0x1216aedc]` затем `jmp 0x11a8c9df`; default `0x11a8c9da
+  mov eax,[0x1216af0c]` затем `0x11a8c9df mov [ebp+0xc],eax`) и сохраняется в launch-объект:
+  `0x11a8c9e2 mov ecx,[ebp+0xc]` → **`0x11a8c9ea mov dword ptr [esi + 0xa4], ecx`**, дальше виртуальные
+  вызовы `[+0x14]` и `[+0x18]` (`0x11a8c9e5..0x11a8c9fb`), `push [ebp+0x10]; mov edi,esi;` +
+  `call 0x119696d0` (`0x11a8c9fd..0x11a8ca03`), `lea edx,[esi+4]; push edx; push ebx;` +
+  `call 0x11a8bdc0` (`0x11a8ca08..0x11a8ca0d`), `mov eax,[esi+0x9c]; lea edi,[ebp-0xc];` +
+  `call 0x11341c60` (`0x11a8ca12..0x11a8ca1b`), `mov ecx,[edi+0x9c]; add eax,0x4c; cmp ecx,eax`
+  (`0x11a8ca20..0x11a8ca2c`). Co-op ветка: `0x11a8cabb mov ecx,[ebp+0xc]` → `0x11a8cabe cmp ecx, dword
+  ptr [0x1216aee4]` → `0x11a8cac4 jne 0x11a8cb17` → **`0x11a8cac6 push 0x11fb7fb8` = `-class`** →
+  `push ebx;` + `call dword ptr [0x11bcb5c0]` (`0x11a8cacb..0x11a8cacc`) — `-coop` запрашивает имя
+  класса режима; дальше `lea eax,[ebp+0xc]` + `mov dword ptr [ebp+0xc],0` + `call 0x11a08190`
+  (`0x11a8cad9..0x11a8cae9`), поиск имени `mov eax,[esi+0x9c]` + `lea edi,[ebp+0xc]` + `call 0x11341b80`
+  (`0x11a8caee..0x11a8cafa`), освобождение ссылки `lock xadd dword ptr [eax], edx` (`0x11a8cb09`) и
+  `mov eax,edi; call 0x100945e0` (`0x11a8cb10..0x11a8cb12`), следующий аргумент `-spawn` `0x11fb7fc0`
+  (`0x11a8cb17..0x11a8cb1d`).
+- **Геттеры реестра режимов и маска доступности (проверено 2026-11-06)**: `FC3.dll 0x117094a0` и
+  `0x117094d0` находят запись реестра по id режима — `ecx` = VA id-глобалы, `eax` = контейнер
+  (`[0x128048c0]`): `mov edx, dword ptr [ecx]` (id), количество `mov ecx, dword ptr [eax+8]`, база
+  массива `mov esi, dword ptr [eax+4]`, `lea ecx, [esi+ecx*4]`, цикл `cmp dword ptr [esi+0x20], edx`
+  (`0x117094b4` / `0x117094e7`), при совпадении `mov eax, dword ptr [edx+0x24]` (`0x117094c7` /
+  `0x117094fa`) — поле записи **`+0x24`**, которое `0x117094d0` проверяет маской: `test dword ptr
+  [ebp+8], eax; setne al; ret 4` (`0x117094fd..0x11709504`), при промахе `xor eax,eax` и та же проверка
+  (`0x11709507..0x1170950f`). Цикл шлюза по режимам — `FC3.dll 0x10f3cd30 .. 0x10f3d260`: маска из
+  **`[ebx + 0xc4]`** (`0x10f3cfd0`, `0x10f3cff3`, `0x10f3d015`, `0x10f3d03c`, `0x10f3d063`), реестр
+  `mov eax, dword ptr [0x128048c0]` (`0x10f3cfc9`, `0x10f3d01c`, `0x10f3d042`, `0x10f3d069`),
+  кандидаты `0x1216af04` (`-dash`, `0x10f3cfd7`), `0x1216af0c` default (`0x10f3cffa`), `0x1216aeec`
+  (`-domination`, `0x10f3d021`), `0x1216aef4` (`-headquarters`, `0x10f3d048`), `0x1216aefc`
+  (`-firestorm`, `0x10f3d06f`); при успехе `push <VA id>` + `push edi` + `mov ecx, ebx` +
+  `call 0x11258cc0` (`0x10f3d00d..0x10f3d010`), входной тест `cmp dword ptr [esp+0x20], 1`
+  (`0x10f3cfc4`), конец `mov eax, edi; call 0x11257550` (`0x10f3d08a`). Это связано с `gamemodemask 128`
+  в `worlds/downloadcontent/mp_dlc1/toc.rml` (обе co-op карты) — именно такую форму сравнивают поле
+  записи `+0x24` и маска вызывающего `[obj+0xc4]`.
+- [ ] Расшифровать, что разрешает аргумент `-class` в co-op ветке `0x11a8c8b0` (`0x11a8cac6..0x11a8cb17`)
+- [ ] Найти вызывающих конструктор co-op режима `0x11a5a6e0` и кто пишет в `[0x12162beb]` / `[0x128042fc]`
+  (его шлюзы)
+- [ ] Прочитать `FC3.dll 0x1119fa50 .. 0x111a0a90` (третий потребитель id-глобал, 400 инструкций, даётся
+  в `local/scratch/probe36.txt`) и поорежимные конструкторы объектов `0x11a5a0b0`, `0x11a5a290`, `0x11a5a560`,
+  `0x11a7a2e0`, `0x11a7aa00`, `0x11a7ab80`, `0x11a7ad00`, `0x11a7ae80`, `0x11a7aff0`
+- [ ] Проверить, `[0x12804acc]` (контейнер регистрации launch-режимов) — тот же ли это объект, который
+  читают co-op проверки (`0x1111e4d4`, `0x1111e907`): регистрация кладёт **адреса** id-глобал
+  (`push 0x1216aee4`), а co-op проверка сравнивает **значение** id — формы разные

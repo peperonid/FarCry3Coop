@@ -416,7 +416,8 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   `-dash 0x1217400c`, default `0x12173ffc`); a `-coop`/`-dash` pair at `0x1216a00c` / `0x1216a010`;
   `0x9ba82025` repeats through `0x12163450 .. 0x121636e8`; `0xd2fd0a6b` also at `0x1216cab0`.
   Open: what each table selects and who iterates them.
-- **Second mode-name comparison chain (FC3.dll) at `0x11a8c944 .. 0x11a8c9c1`** (`-deathmatch`
+- **Second mode-name comparison chain (FC3.dll) at `0x11a8c944 .. 0x11a8c9c1`** (function start now
+  `0x11a8c8b0`, see the item at the end of this file) (`-deathmatch`
   `0x11a8c944`, `-coop` `0x11a8c95d`, `-domination` `0x11a8c977`, `-headquarters` `0x11a8c991`,
   `-firestorm` `0x11a8c9a7`, `-dash` `0x11a8c9c1`); `-online` also has refs at `0x11a8b8d3`,
   `0x11a8b91f`, `0x11a8cd09`. Open: what this chain selects.
@@ -1144,7 +1145,7 @@ time, and what entry 8's family is.
   `FC3_d3d11.dll 0x11aa0cfc .. 0x11aa0d7a` (the same flag set, with the id written into local slot
   `[ebp+0xc]`). Still open: what the second chain `FC3.dll 0x11a8c944 .. 0x11a8c9c1` selects (that
   range is mid-instruction, so the enclosing function entry has to be found first), and whether the
-  mode id reaches the session-descriptor registry.
+  mode id reaches the session-descriptor registry: RESOLVED 2026-11-06 - it is registered into the launch/mode object `[0x12804acc]` by the pair `0x1119dec0` / `0x1119f910` (see the launch-mode registration item below).
   Then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect
   log plus `screenshot\`
 - [x] Size the real 1.06 session-descriptor record: RESOLVED 2026-11-03 — the array is an array of 4-byte
@@ -1188,4 +1189,93 @@ time, and what entry 8's family is.
   the pair `push <name>` + `call 0x10a00be0`, and a whole-`.text` scan counts 1817 such calls with 842
   distinct names (`local/scratch/console_cmds.txt`). Consequence for patching: the mode ids live only in
   `FC3.dll` while `FC3.exe` is a 213 KB stub, so a co-op-enabling patch belongs in `FC3.dll`, not `FC3.exe`.
+
+- **Launch-mode registration table `FC3.dll 0x1119dec0 .. 0x1119df9a` and `0x1119f910 .. 0x1119fa42`**
+  (the link between the cascade ids and the game object **`[0x12804acc]`**): the first function pushes
+  each id address into the object with `mov eax, dword ptr [0x12804acc]` + `add eax, 4` +
+  `push <id VA>` + `call 0x1029eb00`, in order `0x1216caac` (`0x1119dec6`), `0x1216ca9c` (`0x1119ded8`),
+  `0x1216ca90` (`0x1119deea`), `0x1216caa4` (`0x1119defc`), `0x1216caa8` (`0x1119df0e`), `0x1216aee4`
+  `-coop` (`0x1119df20`), `0x1216aedc` `-deathmatch` (`0x1119df32`), `0x1216af0c` default (`0x1119df44`),
+  `0x1216aeec` `-domination` (`0x1119df56`), `0x1216aef4` `-headquarters` (`0x1119df68`), `0x1216aefc`
+  `-firestorm` (`0x1119df7a`), `0x1216af04` `-dash` (`0x1119df8c`), ends `pop ecx; ret` (`0x1119df99`).
+  The second registers one handler per id with `mov esi, dword ptr [0x12804acc]` + `add esi, 4` +
+  `push <handler>` + `push <id VA>` + `call 0x1029edc0`: `0x11152dd0` pairs `0x1216caac` (`0x1119f927`),
+  `0x11152f50` pairs `0x1216ca9c` (`0x1119f93f`), `0x11a7a2e0` pairs `0x1216ca90` (`0x1119f957`),
+  `0x11a5a290` pairs `0x1216caa4` (`0x1119f96f`), `0x11a5a0b0` pairs `0x1216caa8` (`0x1119f987`),
+  **`0x11a5a6e0` pairs `0x1216aee4` `-coop`** (`0x1119f99f`), `0x11a7aff0` pairs `0x1216aedc`
+  (`0x1119f9b7`), `0x11a7aa00` pairs `0x1216af0c` (`0x1119f9cf`), `0x11a7ae80` pairs `0x1216aeec`
+  (`0x1119f9e7`), `0x11a7ad00` pairs `0x1216aef4` (`0x1119f9ff`), `0x11a7ab80` pairs `0x1216aefc`
+  (`0x1119fa17`), `0x11a5a560` pairs `0x1216af04` (`0x1119fa2f`), ends `pop esi; ret` (`0x1119fa41`).
+  New helpers: `0x1029eb00` (register id), `0x1029edc0` (register handler).
+- **Co-op mode constructor `FC3.dll 0x11a5a6e0 .. 0x11a5a772`** (the handler bound to `-coop`): gates on
+  `cmp byte ptr [0x128042fc], 0` then `call 0x11789a00` (`0x11a5a6ea..0x11a5a6f2`) and
+  `cmp byte ptr [0x12162beb], 0` (`0x11a5a6f7`); allocates with `mov edx,0x10; lea ecx,[edx+0x30];` +
+  `call 0x1177f7c0` (`0x11a5a6ff..0x11a5a707`, fallback `mov eax,0x10; lea edi,[eax+0x30];` +
+  `call 0x118db560` at `0x11a5a710..0x11a5a718`); initializes `[obj] = 0x11f23408` (`0x11a5a721`),
+  `[+4]..[+0x2c] = 0`, `[+0x30] = 0xffffffff` (`0x11a5a748`), `[+0x34]` word and `[+0x36]` byte = 0; then
+  rewrites the vtable to **`0x11fbb838`** (`0x11a5a756`) and stores the launch id:
+  `mov ecx, dword ptr [0x1216aee4]` (`0x11a5a75c`) then `mov dword ptr [eax + 0x30], ecx` (`0x11a5a762`);
+  returns 0 when a gate fails (`0x11a5a76b`). Field **`+0x30`** is the field both coop tests read
+  (`[0x12804acc]` then `+0x68`, then `mov eax,[eax+0x30]`, then `cmp eax,[0x1216aee4]` at
+  `0x1111e4d4/0x1111e4e3` and `0x1111e907/0x1111e916/0x1111e91e`).
+- **Second launch-mode chain, entry RESOLVED: `FC3.dll 0x11a8c8b0 .. 0x11a8d110`** (the previously
+  "mid-instruction" range `0x11a8c944 .. 0x11a8c9c1` is inside this function). Arguments are parsed
+  through `mov edi, dword ptr [0x11bcb5c0]` (`0x11a8c8bc`) + `call edi`: `-login` `0x11fb8170`
+  (`0x11a8c8c2`); error path `push 0x11fb81b4` = `'Invalid parameters for -host, missing (-login)'`
+  (`0x11a8c8d6`, `0x11a8c8e6`) then `call 0x10a00be0` / `call 0x10001ed0` then `xor al,al; ret 0xc`
+  (`0x11a8c8f2..0x11a8c8fa`); then `-host` `0x11f0e6ac` (`0x11a8c90b`, getter `call 0x11a08190`),
+  `-bfname` `0x11fb7d64` (`0x11a8c919`), `-dedicated` `0x11f0e7dc` (`0x11a8c927`), `-sessionuid`
+  `0x11fb81f0` (`0x11a8c935`), `-deathmatch` (`0x11a8c943`), `-coop` `0x11fb81fc` (`0x11a8c95c`),
+  `-domination` `0x11fb8204` (`0x11a8c976`), `-headquarters` `0x11fb8210` (`0x11a8c990`), `-firestorm`
+  `0x11fb8220` (`0x11a8c9a6`), `-dash` `0x11fb822c` (`0x11a8c9c0`). The mode id lands in the local slot
+  `[ebp+0xc]` (`-coop` `0x11a8c96b mov ecx,[0x1216aee4]` then `0x11a8c971 mov [ebp+0xc],ecx`;
+  `-deathmatch` `0x11a8c952 mov eax,[0x1216aedc]` then `jmp 0x11a8c9df`; default `0x11a8c9da
+  mov eax,[0x1216af0c]` then `0x11a8c9df mov [ebp+0xc],eax`) and is then stored into the launch object
+  and dispatched: `0x11a8c9e2 mov ecx,[ebp+0xc]` then `0x11a8c9ea mov dword ptr [esi + 0xa4], ecx`,
+  `mov edx,[esi]` / `mov eax,[edx+0x14]` / `mov ecx,esi` / `call eax` (`0x11a8c9e5..0x11a8c9f2`),
+  `mov eax,[edx+0x18]; call eax` (`0x11a8c9f6..0x11a8c9fb`), `push [ebp+0x10]; mov edi,esi;` +
+  `call 0x119696d0` (`0x11a8c9fd..0x11a8ca03`), `lea edx,[esi+4]; push edx; push ebx;` +
+  `call 0x11a8bdc0` (`0x11a8ca08..0x11a8ca0d`), `mov eax,[esi+0x9c]; lea edi,[ebp-0xc];` +
+  `call 0x11341c60` (`0x11a8ca12..0x11a8ca1b`), `mov ecx,[edi+0x9c]; add eax,0x4c; cmp ecx,eax`
+  (`0x11a8ca20..0x11a8ca2c`). Coop-specific branch: `0x11a8cabb mov ecx,[ebp+0xc]` then
+  `0x11a8cabe cmp ecx, dword ptr [0x1216aee4]` then `0x11a8cac4 jne 0x11a8cb17` then
+  `0x11a8cac6 push 0x11fb7fb8` = **`-class`**, `push ebx;` + `call dword ptr [0x11bcb5c0]`
+  (`0x11a8cacb..0x11a8cacc`) — `-coop` asks for a mode-class name here.
+- **Mode-registry getters and the availability mask (verified 2026-11-06)**: `FC3.dll 0x117094a0` and
+  `0x117094d0` resolve one registry record by mode id — `ecx` = id-global VA, `eax` = registry container
+  (`[0x128048c0]`): `mov edx, dword ptr [ecx]` (the id), count `mov ecx, dword ptr [eax+8]`, array base
+  `mov esi, dword ptr [eax+4]`, `lea ecx, [esi+ecx*4]`, loop `mov esi, [eax]` / `cmp dword ptr [esi+0x20],
+  edx` (`0x117094b4` / `0x117094e7`), on match `mov edx, [eax]` then `mov eax, dword ptr [edx+0x24]`
+  (`0x117094c7` / `0x117094fa`) — record field **`+0x24`**, which `0x117094d0` ANDs against its second
+  argument: `test dword ptr [ebp+8], eax; setne al; ret 4` (`0x117094fd..0x11709504`), and on miss
+  `xor eax,eax` then the same test (`0x11709507..0x1170950f`). `0x117094a0` returns the field directly
+  (`ret` at `0x117094ca`, `xor eax,eax; ret` at `0x117094cb`). The per-mode gate loop is
+  `FC3.dll 0x10f3cd30 .. 0x10f3d260`: mask source **`mov <reg>, dword ptr [ebx + 0xc4]`** (`0x10f3cfd0`,
+  `0x10f3cff3`, `0x10f3d015`, `0x10f3d03c`, `0x10f3d063`) pushed as the mask argument, registry
+  `mov eax, dword ptr [0x128048c0]` (`0x10f3cfc9`, `0x10f3d01c`, `0x10f3d042`, `0x10f3d069`), candidate
+  ids `mov ecx, 0x1216af04` (`-dash`, `0x10f3cfd7`), `0x1216af0c` default (`0x10f3cffa`), `0x1216aeec`
+  (`-domination`, `0x10f3d021`), `0x1216aef4` (`-headquarters`, `0x10f3d048`), `0x1216aefc` (`-firestorm`,
+  `0x10f3d06f`), each `call 0x117094d0` + `test al,al`; on success `push <id VA>` (`0x10f3cfe9`,
+  `0x10f3d008`, `0x10f3d02f`, `0x10f3d056`, `0x10f3d07d`) + `push edi` + `mov ecx, ebx` +
+  `call 0x11258cc0` (`0x10f3d00d..0x10f3d010` and siblings), gate `cmp dword ptr [esp+0x20], 1`
+  (`0x10f3cfc4`), end `mov eax, edi; call 0x11257550` (`0x10f3d08a`). Other id reads:
+  `mov edx, dword ptr [ecx*4 + 0x1216b114]` (8-entry id table). Note the shipped 1.06 data uses
+  `gamemodemask 128` on both `FCXCoop` maps (`worlds/downloadcontent/mp_dlc1/toc.rml`, see the
+  "co-op exists as a game mode" item above), which is the shape this record field `+0x24` / caller mask
+  `[obj+0xc4]` compares against.
+- [ ] Decode what `-class` resolves in the coop branch of `0x11a8c8b0`: verified that `push 0x11fb7fb8`
+  (`-class`) + `push ebx` + `call dword ptr [0x11bcb5c0]` at `0x11a8cac6..0x11a8cacc` is the argument
+  presence test, that the value fetch is `lea eax,[ebp+0xc]` + `mov dword ptr [ebp+0xc],0` +
+  `call 0x11a08190` (`0x11a8cad9..0x11a8cae9`), the name lookup `mov eax,[esi+0x9c]` + `lea edi,[ebp+0xc]`
+  + `call 0x11341b80` (`0x11a8caee..0x11a8cafa`), then a reference-count release `lock xadd dword ptr
+  [eax], edx` (`0x11a8cb09`) and `mov eax,edi; call 0x100945e0` (`0x11a8cb10..0x11a8cb12`); the next
+  argument is `-spawn` `0x11fb7fc0` (`0x11a8cb17..0x11a8cb1d`)
+- [ ] Find the callers of the co-op mode constructor `0x11a5a6e0` and what writes `[0x12162beb]` /
+  `[0x128042fc]` (its two gates)
+- [ ] Read `FC3.dll 0x1119fa50 .. 0x111a0a90` (third mode-id consumer region, 400 instructions, already
+  dumped in `local/scratch/probe36.txt`) and the per-mode object builders `0x11a5a0b0`, `0x11a5a290`,
+  `0x11a5a560`, `0x11a7a2e0`, `0x11a7aa00`, `0x11a7ab80`, `0x11a7ad00`, `0x11a7ae80`, `0x11a7aff0`
+- [ ] Check whether `[0x12804acc]` (the container the launch-mode registration writes) is the same object
+  the coop tests read (`0x1111e4d4`, `0x1111e907`) or a different launch object — the registration writes
+  id-global addresses (`push 0x1216aee4`), the coop test compares the id VALUE, so the two shapes differ
 - [ ] Phase 3: story script patches for multi-player
