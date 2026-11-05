@@ -282,6 +282,69 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   `-ip` `0x11fdc124`, `-bfname` `0x11fdbc34`, `-offline` `0x11f5a654`.
   What is **absent** in 1.06: the 1.05 debug-menu strings
   "Not enough players", "Local Coop", "Coop Story".
+- **Resolved (2026-11-05, re-verified with `scripts/fc3_mode_cascade.py`): the mode-flag cascade.**
+  The cascade is a chain of `push <flag string>` / `push esi` / `call edi` (`strstr`), `add esp,8`,
+  `test eax,eax`, `je <next flag>`; a match reads a **static mode id** global into `[ebp+8]`.
+- **Cascade body location (FC3.dll): `0x11a8c440`**
+  (`push ebp` / `mov ebp,esp` / `sub esp,0x2c` / `push ebx` / `mov ebx,[ebp+0x14]` /
+  `mov esi,[ebp+0xc]` / `push edi` / `mov edi,[0x11bcb5c0]` = `MSVCR100.dll:strstr`). The previously
+  recorded range `0x11a8c533 .. 0x11a8c567` is a fragment of this body.
+- **Flag order and match sites (FC3.dll, `0x11a8c440 .. 0x11a8c5b1`):** `-login` `0x11a8c455`,
+  `-ip` `0x11a8c464`, `Missing -login or -ip for -client.` `0x11a8c476`, `-online` `0x11a8c49d`,
+  `-password` `0x11a8c4ac`, `Trying to launch an online client, but missing password (-password)`
+  `0x11a8c4be`, `-ip` `0x11a8c4f0`, `-bfname` `0x11a8c4fe`, `-sessionuid` `0x11a8c50c`,
+  `-deathmatch` `0x11a8c51a` (reads `[0x1216aedc]`), `-coop` `0x11a8c533` (reads `[0x1216aee4]`),
+  `-domination` `0x11a8c54d` (`[0x1216aeec]`), `-headquarters` `0x11a8c567` (`[0x1216aef4]`),
+  `-firestorm` `0x11a8c57d` (`[0x1216aefc]`), `-dash` `0x11a8c597` (`[0x1216af04]`), fallback
+  `[0x1216af0c]` at `0x11a8c5b1`.
+- **Mode-id values (FC3.dll `0x1216aed0 .. 0x1216af10`, byte-identical to FC3_d3d11.dll
+  `0x1218ffd0 .. 0x12190010`):** `0x9ba82025` first entry (`0x1216aed0` and `0x1216aed4`),
+  `-deathmatch 0x8b40f692`, `-coop 0x43521e6f`, `-domination 0xab4fc8e2`, `-headquarters 0x9991daec`,
+  `-firestorm 0xf66ffb87`, `-dash 0x2100ced7`, default `0x6c2b3868`; each id is followed by a
+  `0xffffffff` pair word, and an extra id `0xd2fd0a6b` sits just before the block (`0x1216aecc` /
+  `0x1218ffcc`). Two corrections to the earlier note: `-deathmatch` reads `0x1216aedc` (not
+  `0x1216aed4`), and the id recorded as "unknown" (`0xf66ffb87`) is **`-firestorm`**.
+- **The cascade reads the ids, it does not write them:** the values are static `.data`
+  initializers present in both 1.06 modules, so `-coop` is a live mode id, not a stripped string.
+  `-online` is a separate selector: `[ebp-0xc]` is set to `3` at `0x11a8c5bf` by default and to `2`
+  at `0x11a8c5cf` when `-online` matches (consistent with the host-model finding "session type = 3
+  without `-online`").
+- **Consumer of the cascade id (FC3.dll `0x11a8c5d6 .. 0x11a8c5f0`):** `mov ecx,[ebp+8]` →
+  `mov edx,[ebx]` → `mov eax,[edx+0x14]` → **`mov [ebx+0xa4],ecx`** (the mode id lands in object
+  field `+0xa4`) → `mov ecx,ebx` / `call eax`, then `mov eax,[edx+0x18]`, `mov ecx,ebx`, `call eax`.
+  FC3_d3d11.dll mirrors the chain (`-domination` `0x11aa08ed`, `-headquarters` `0x11aa0907`,
+  `-firestorm` `0x11aa091d`, `-dash` `0x11aa0937`, `-online` `0x11aa0959`) and the `+0x14` dispatch
+  at `0x11aa0976`.
+- **Mode ids occur in three other FC3.dll data tables** (the next candidates for the
+  session-descriptor registry): `0x1216aa2c .. 0x1216aa44` (`-deathmatch 0x1216aa2c`, default
+  `0x1216aa30`, `-firestorm 0x1216aa34`, `-domination 0x1216aa38`, `-headquarters 0x1216aa3c`,
+  `-coop 0x1216aa40`, `-dash 0x1216aa44`); `0x12173ff0 .. 0x1217400c` (`-domination 0x12173ff0`,
+  `-coop 0x12173ff4`, `-deathmatch 0x12173ff8`, `-headquarters 0x12174000`, `-firestorm 0x12174008`,
+  `-dash 0x1217400c`, default `0x12173ffc`); a `-coop`/`-dash` pair at `0x1216a00c` / `0x1216a010`;
+  `0x9ba82025` repeats through `0x12163450 .. 0x121636e8`; `0xd2fd0a6b` also at `0x1216cab0`.
+  Open: what each table selects and who iterates them.
+- **Second mode-name comparison chain (FC3.dll) at `0x11a8c944 .. 0x11a8c9c1`** (`-deathmatch`
+  `0x11a8c944`, `-coop` `0x11a8c95d`, `-domination` `0x11a8c977`, `-headquarters` `0x11a8c991`,
+  `-firestorm` `0x11a8c9a7`, `-dash` `0x11a8c9c1`); `-online` also has refs at `0x11a8b8d3`,
+  `0x11a8b91f`, `0x11a8cd09`. Open: what this chain selects.
+- **Reloc-mode site counts for the mode-id and container globals (`scripts/fc3_reloc_xref.py
+  --mode reloc`, 772159 entries per module).** The `-coop` mode-id global FC3.dll `0x1216aee4` has **30**
+  sites whose stored value points at it, and FC3_d3d11.dll `0x1218ffe4` has the same **30**; the mode-name
+  string has **2** in each module (FC3.dll `0x11fb81fc` -> `0x11a8c534`, `0x11a8c95d`; FC3_d3d11.dll
+  `0x11fdc0cc` -> `0x11aa08d4`, `0x11aa0cfd`). FC3.dll accessor base `0x1282f6cc` has **4** HIGHLOW sites
+  (`0x1199cdcb`, `0x1199cddd`, `0x1199cf76`, `0x11bb33f1`) while the container global `0x12829424` has
+  **0**: it is reached only through `disp32` accesses, which the loader never patches, so the 17 502 hits
+  recorded above come from the byte-pattern scan, not from `.reloc`. Full site lists are kept in
+  `local/scratch/xref_sites_fc3.txt` and `local/scratch/xref_sites_d3d11.txt`.
+- **Lesson (2026-11-05): the mode ids are not `hash(name)`.** Recomputing `-deathmatch`, `-coop`,
+  `-domination`, `-headquarters`, `-firestorm`, `-dash` and the default mode name with FNV-1a, FNV-1,
+  djb2, sdbm, ELF and CRC32 (in the 26 name variants already tested) gave **0** matches in either module,
+  so the ids are constants in a game table, not values derived from the flag strings.
+- **Lesson (2026-11-05): `scripts/fc3_reloc_xref.py` code mode cannot see `push imm32`.** For the two
+  `push <mode-name VA>` sites inside the cascade body, code mode printed `verified instructions: 0` and
+  `rejected (no instruction ends at the field): 2`, while `--mode reloc` found both sites: for
+  `push imm32` arguments only the reloc mode is reliable.
+- Open: whether the co-op id reaches the session-descriptor registry.
 - Renaming `bin/upc_r1_loader.dll` does not free the stub: the game exits silently ~25 s after
   launch (no window, no WER event) — the Ubisoft Connect loader is a hard start-up dependency.
 - `HKLM` writes are not available to the current user (not elevated), so the registry cannot be
@@ -980,7 +1043,14 @@ time, and what entry 8's family is.
 - [ ] Enumerate the rest of the `Game.*` console-command table (`0x111cd3f5`..`0x111cf52f`) and find a
   command that starts or joins a co-op session (`MissionSetState`, `SaveGame`, `Exec`, `RunBatch`)
 - [ ] Find the file behind `HubUtils.cpp (208) Test/dev args file present.` in the Ubisoft Connect log
-- [ ] Confirm what `-coop` (`0x11fdc0cc`, refs `0x11aa08d3` / `0x11aa0cfc`) enables in 1.06 and whether it is the flag the co-op quick-launch path uses; then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect log plus `screenshot\`
+- [x] Confirm what `-coop` (`0x11fdc0cc`, refs `0x11aa08d3` / `0x11aa0cfc`) enables in 1.06: RESOLVED
+  2026-11-05 in the launch-mode cascade body `FC3.dll 0x11a8c440` (`-coop` compare at `0x11a8c533`, mode
+  id `0x43521e6f` read from `[0x1216aee4]`, written to `[ebp+8]`, then stored into object field
+  `[ebx+0xa4]` before the dispatch `call`); mirrored in `FC3_d3d11.dll` at `0x11aa08d4` (reads
+  `[0x1218ffe4]`) and in the second chain at `0x11a8c95d`. Still open: what the second chain
+  `0x11a8c944 .. 0x11a8c9c1` selects, and whether the mode id reaches the session-descriptor registry.
+  Then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect
+  log plus `screenshot\`
 - [x] Size the real 1.06 session-descriptor record: RESOLVED 2026-11-03 — the array is an array of 4-byte
   pointers indexed by a count (`lea eax, [eax + ecx*4]`), FC3.dll `[0x1282f8fc]` + count `[0x1282f900]`,
   FC3_d3d11.dll `[0x12852dcc]` + count `[0x12852dd0]`; the element object holds the hkVirtual descriptor at
