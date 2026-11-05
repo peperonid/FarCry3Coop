@@ -53,7 +53,13 @@ absolute data reference points at), `fc3_reexec_probe.py` (1.06 re-exec bootstra
 `fc3_drm_probe.py` (DRM/UPC bootstrap), `fc3_gate_probe.py` (gate/lock check),
 `fc3_reg_keys.py` (which code reads `HKCU\Software\Ubisoft\Far Cry 3`),
 `fc3_dis.py` (annotating capstone disassembler: callers, imported names, string
-references - the main RE tool of the 1.06 findings).
+references - the main RE tool of the 1.06 findings),
+`fc3_mode_cascade.py` (disassemble a launch-mode cascade in one PE: the mode-name strings it matches,
+the `cmp`/`test` gates, the mode-id globals it reads together with the value stored in each global,
+and the local slot the chosen id is written to. Usage `python -I scripts/fc3_mode_cascade.py <pe>
+<start VA> [--end <VA> | --limit N] [--no-strings] [--json]`; a bare module name resolves against
+`H:/FarCryCoop/TestFC3/bin/`. Verified on FC3.dll `0x11a8c440 .. 0x11a8c5f0` and FC3_d3d11.dll
+`0x11aa08d0 .. 0x11aa0980`; see NOTES.md "the mode-flag cascade").
 
 ## Launch helpers (run things)
 
@@ -69,7 +75,12 @@ exact command line), `fc3_test_startargs.py` (check whether the hub forwards the
 `manifest_diff.py`, `edit_playlist.py`, `names.py`, `names_ext.py`, `find.py`,
 `findpats.py`, `patchctx.py`, `reg_fields.py`, `peinfo.py`, `patch_dll.py` (byte patches
 of a **copy** of FC3.dll / FC3_d3d11.dll), `fc3_trampoline.py` (14-byte jmp stub writer;
-`install --apply` never run here - owner decision pending).
+`install --apply` never run here - owner decision pending),
+`fc3_accessor_thunks.py` (census the `mov eax, imm32` + `jmp <accessor helper>` thunks of one PE,
+group them into contiguous runs and report the stride of each container base global; the parity check
+behind the accessor chain in NOTES.md. Usage `python -I scripts/fc3_accessor_thunks.py <pe>
+[--helper 0x10004b70] [--min-count 3] [--range START:END] [--show-va <VA>] [--json]`; verified: 3228
+thunks in 523 runs in both 1.06 modules).
 
 ## Caches and ignored files
 

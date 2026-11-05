@@ -44,7 +44,13 @@ el beginnings функций, который сообщает, куда попа
 `fc3_gate_probe.py` (проверка gates и mutex-ов), `fc3_reg_keys.py` (кто читает
 `HKCU/Software/Ubisoft/Far Cry 3`), `fc3_dis.py` (разбирающий дизассемлер capstone с
 аннотациями: вызывающие, импортируемые имена, ссылки на строки — главный инструмент всех
-наблюдений по 1.06).
+наблюдений по 1.06),
+`fc3_mode_cascade.py` (разбирает каскад флагов запуска в одном PE: какие имена режимов сопоставляются,
+какие проверки `cmp`/`test` встречаются, какие globals с id режима читаются и что лежит в каждом, и в
+какую локальную ячейку пишется выбранный id. Запуск: `python -I scripts/fc3_mode_cascade.py <pe>
+<стартовый VA> [--end <VA> | --limit N] [--no-strings] [--json]`; голое имя модуля разрешается через
+`H:/FarCryCoop/TestFC3/bin/`. Проверено на `FC3.dll` `0x11a8c440 .. 0x11a8c5f0` и на `FC3_d3d11.dll`
+`0x11aa08d0 .. 0x11aa0980`; см. NOTES.md, «каскад флагов запуска»).
 
 ## Запуск (реально что-то запускают)
 
@@ -60,7 +66,12 @@ el beginnings функций, который сообщает, куда попа
 `edit_playlist.py`, `names.py`, `names_ext.py`, `find.py`, `findpats.py`, `patchctx.py`,
 `reg_fields.py`, `peinfo.py`, `patch_dll.py` (правит байты **копии** FC3.dll / FC3_d3d11.dll),
 `fc3_trampoline.py` (14-байтовый jmp-трамполин; `install --apply` здесь не запускался — решение
-за владельцем).
+за владельцем),
+`fc3_accessor_thunks.py` (переписывает thunk-ы вида `mov eax, imm32` + `jmp <helper-aksesora>` одного
+PE, группирует их в непрерывные прогоны и печатает шаг базовой глобальной ячейки каждого контейнера;
+проверка парности цепочки accessor-ов из NOTES.md. Запуск: `python -I
+scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--range START:END]
+[--show-va <VA>] [--json]`; проверено: 3228 thunk-ов в 523 прогонах в обоих модулях 1.06).
 
 ## Кэши и игнорируемые файлы
 
