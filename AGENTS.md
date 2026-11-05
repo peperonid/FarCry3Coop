@@ -86,6 +86,81 @@ Claude Code is not installed here. The Python scripts in `scripts/` stay the fal
 средством для зондов только на чтение. `rea doctor --client pi --provider ghidra` сообщает, что всё
 в порядке (проверено 2026-11-03).
 
+## Hub tools and documents / Инструменты и документы хаба
+
+**EN:** `D:\Projects\Co-op Anything\coop-anything\` is a **source of tools and documents for this
+project**, not only the issue tracker. Look there before writing a new tool or writing a claim about
+the game:
+
+- `playbook/` (33 guides): methodology `methods.md`, `research.md`, `triage.md`, `lessons.md`;
+  architecture `how-coop-mods-work.md`, `engine-families.md`, `effect-capture-story-sync.md`;
+  reverse engineering `reverse-engineering.md`, `decomp-and-recomp.md`, `patching-a-closed-mod-exe.md`;
+  networking `networking.md`, `networking-steam-spacewar.md`, `in-game-bridge.md`; testing
+  `multi-instance-testing.md`, `automated-qa.md`, `network-chaos-testing.md`, `fuzzing-coop-sync.md`,
+  `desync-hunting.md`, `actor-ownership.md`, `animation-sync-checks.md`, `fake-world-testing.md`,
+  `bots-and-playbooks.md`, `hot-reloading-your-mod.md`, `fast-iteration.md`; plus
+  `shipping-to-players.md`, `split-screen.md`, `console-emulators.md`, `switch.md`, `mcp.md`,
+  `tools.md`.
+- `tools/` (game-agnostic sync test tools): `chaos`, `flight`, `fuzz`, `ownership`, `fakeworld`,
+  `gameslot`, `gamepool`, `scenarios`, `bots`, `bridge`, `inspect`, `hotreload`, `mutants`,
+  `buildlock`, `animcheck`, plus the hub's own `build_directory.py` and `mcp/`. Each tool runs its own
+  tests with `python -I tools/<name>/run_tests.py` and prints `ALL OK`; `python -I tools/test_all.py`
+  runs them all. `tools/README.md` says what each tool checks.
+- `.agents/skills/` and `.claude/skills/` (13 skills): `coop-triage`, `coop-research`,
+  `coop-reverse-engineer`, `coop-build-from-zero`, `coop-networking`, `coop-sync-testing`, `coop-qa`,
+  `coop-revive`, `coop-decomp-port`, `coop-console-emulator`, `coop-switch`, `coop-contribute`,
+  `triage-contributions`. Read the `SKILL.md` that matches the task.
+- `games/far-cry-3/README.md` — the published Far Cry 3 entry (game identity, 1.05 and 1.06 SHA-256
+  hashes, the known co-op attempts, QA level); `games/far-cry/` and `games/far-cry-2/` are the siblings
+  that already have co-op. Also `data/directory.yaml` + `data/SCHEMA.md`, `DIRECTORY.md`,
+  `templates/game.md`, `research/reference-repos.md`.
+- The MCP server `coop_anything` (`search_directory`, `detect_engine`, `game_identity`, `list_docs`,
+  `read_playbook`, `get_skill`, `get_game`, `get_test_tool`, `validate_entry`) queries the hub
+  read-only.
+
+Read the hub, do not edit it from this project: a hub change goes into the hub's own repo following its
+`CONTRIBUTING.md`. The hub's own `AGENTS.md` rules apply here as well: ask before installing or
+downloading anything, never touch the owner's game install or saves, verify before claiming, record the
+game identity before following someone else's notes, and never put private paths or names in a pull
+request.
+
+**RU:** `D:\Projects\Co-op Anything\coop-anything\` — это **источник инструментов и документов для
+этого проекта**, а не только трекер задач. Обращаться к нему раньше, чем писать новый инструмент или
+формулировать утверждение об игре:
+
+- `playbook/` (33 руководства): методология (`methods.md`, `research.md`, `triage.md`, `lessons.md`);
+  устройство (`how-coop-mods-work.md`, `engine-families.md`, `effect-capture-story-sync.md`);
+  реверс-инжиниринг (`reverse-engineering.md`, `decomp-and-recomp.md`, `patching-a-closed-mod-exe.md`);
+  сеть (`networking.md`, `networking-steam-spacewar.md`, `in-game-bridge.md`); тестирование
+  (`multi-instance-testing.md`, `automated-qa.md`, `network-chaos-testing.md`, `fuzzing-coop-sync.md`,
+  `desync-hunting.md`, `actor-ownership.md`, `animation-sync-checks.md`, `fake-world-testing.md`,
+  `bots-and-playbooks.md`, `hot-reloading-your-mod.md`, `fast-iteration.md`); плюс
+  `shipping-to-players.md`, `split-screen.md`, `console-emulators.md`, `switch.md`, `mcp.md`,
+  `tools.md`.
+- `tools/` (универсальные инструменты проверки синхронизации): `chaos`, `flight`, `fuzz`, `ownership`,
+  `fakeworld`, `gameslot`, `gamepool`, `scenarios`, `bots`, `bridge`, `inspect`, `hotreload`,
+  `mutants`, `buildlock`, `animcheck`, плюс собственные инструменты хаба `build_directory.py` и
+  `mcp/`. Тесты каждого: `python -I tools/<name>/run_tests.py` (успех — строка `ALL OK`);
+  `python -I tools/test_all.py` запускает их все. `tools/README.md` описывает, что проверяет каждый
+  инструмент.
+- `.agents/skills/` и `.claude/skills/` (13 навыков): `coop-triage`, `coop-research`,
+  `coop-reverse-engineer`, `coop-build-from-zero`, `coop-networking`, `coop-sync-testing`, `coop-qa`,
+  `coop-revive`, `coop-decomp-port`, `coop-console-emulator`, `coop-switch`, `coop-contribute`,
+  `triage-contributions`. Если задача подходит под навык, прочитать его `SKILL.md`.
+- `games/far-cry-3/README.md` — опубликованная запись Far Cry 3 (личность игры, SHA-256 хеши версий
+  1.05 и 1.06, известные попытки co-op, уровень проверки качества); `games/far-cry/` и
+  `games/far-cry-2/` — соседи, у которых co-op уже есть. Ещё `data/directory.yaml` + `data/SCHEMA.md`,
+  `DIRECTORY.md`, `templates/game.md`, `research/reference-repos.md`.
+- MCP-сервер `coop_anything` (`search_directory`, `detect_engine`, `game_identity`, `list_docs`,
+  `read_playbook`, `get_skill`, `get_game`, `get_test_tool`, `validate_entry`) обращается к хабу только
+  на чтение.
+
+Хаб читать, а не править из этого проекта: правку хаба делать в его собственном репозитории по правилам
+его `CONTRIBUTING.md`. Правила из `AGENTS.md` самого хаба действуют и здесь: спросить перед установкой
+или скачиванием, не трогать папку установленной игры и сохранения владельца, проверить прежде чем
+утверждать, записать личность игры прежде чем следовать чужим заметкам, и не помещать личные пути или
+имена в pull request.
+
 ## Communication / Общение
 
 **EN:** Chat with the owner in Russian.
@@ -199,7 +274,7 @@ this session`). Команды выполнять через `ctx_execute` с `l
 |---|---|
 | `D:\Projects\Co-op Anything\FarCry3Coop-bantila\` | This repo (agent fork of Bantila/FarCry3Coop) |
 | `D:\Projects\Co-op Anything\FarCryCoop\` | Multi-game hub clone (per-game notes under `games/<slug>/`) |
-| `D:\Projects\Co-op Anything\coop-anything\` | Upstream hub repo (issue tracker, playbook) |
+| `D:\Projects\Co-op Anything\coop-anything\` | Upstream hub repo (issue tracker, playbook, tools, skills) |
 | `H:\Uplay\Far Cry 3\` | Real Uplay 1.06 install — read-only (golden rule 2) |
 | `H:\FarCryCoop\TestFC3\` | Working copy of the 1.06 build: disassembly probes, menu runs, test mods |
 | `H:\FarCryCoop\` | Scratch working folder (not a git repo): `TOOLS.md`, screenshots, UI-automation helpers, `tools\fc3_stub_probe.py` |
@@ -257,10 +332,13 @@ of the project without re-reading all the docs.
 ## Read first in every session / Что читать в начале сессии
 
 **EN:** `NOTES.md` (findings log, including the TODO list at the end), `PLAN.md`, `scripts/README.md`,
-`AGENTS.md`. Do not re-derive a finding that is already written in `NOTES.md`.
+`AGENTS.md`. Do not re-derive a finding that is already written in `NOTES.md`. When the task is
+about testing, networking, sync tools, or packaging, also read the hub's `playbook/` and its
+`tools/README.md`.
 
 **RU:** `NOTES.md` (журнал находок, список TODO в конце), `PLAN.md`, `scripts/README.md`,
-`AGENTS.md`. Не заново выводить то, что уже записано в `NOTES.md`.
+`AGENTS.md`. Не заново выводить то, что уже записано в `NOTES.md`. Если задача про тестирование,
+сеть, инструменты синхронизации или сборку — читать и хабовский `playbook/` с `tools/README.md`.
 
 ## Tooling gotchas on this machine / Особенности инструментов на этом ПК
 

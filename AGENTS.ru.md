@@ -29,7 +29,40 @@ style, revert.
 есть Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) и Temurin JDK 21.0.13+9 (`C:\tools\jdk-21.0.13+9`);
 Claude Code отсутствует. Скрипты из `scripts/` остаются запасным средством для зондов только на
 чтение.
-## Общение
+## Инструменты и документы хаба
+`D:\Projects\Co-op Anything\coop-anything\` — это источник инструментов и документов для этого проекта, а
+не только трекер задач. Обращаться к нему раньше, чем писать новый инструмент или формулировать
+утверждение об игре:
+
+- `playbook/` (33 руководств): методология (`methods.md`, `research.md`, `triage.md`, `lessons.md`);
+устройство (`how-coop-mods-work.md`, `engine-families.md`, `effect-capture-story-sync.md`);
+реверс-инжиниринг (`reverse-engineering.md`, `decomp-and-recomp.md`, `patching-a-closed-mod-exe.md`);
+сеть (`networking.md`, `networking-steam-spacewar.md`, `in-game-bridge.md`); тестирование
+(`multi-instance-testing.md`, `automated-qa.md`, `network-chaos-testing.md`, `fuzzing-coop-sync.md`,
+`desync-hunting.md`, `actor-ownership.md`, `animation-sync-checks.md`, `fake-world-testing.md`,
+`bots-and-playbooks.md`, `hot-reloading-your-mod.md`, `fast-iteration.md`); плюс
+`shipping-to-players.md`, `split-screen.md`, `console-emulators.md`, `switch.md`, `mcp.md`, `tools.md`.
+- `tools/` (универсальные инструменты проверки синхронизации): `chaos`, `flight`, `fuzz`, `ownership`,
+`fakeworld`, `gameslot`, `gamepool`, `scenarios`, `bots`, `bridge`, `inspect`, `hotreload`, `mutants`,
+`buildlock`, `animcheck`, плюс собственные инструменты хаба `build_directory.py` и `mcp/`. Тесты
+каждого: `python -I tools/<name>/run_tests.py` (успех — строка `ALL OK`); `python -I tools/test_all.py`
+запускает их все. `tools/README.md` описывает, что проверяет каждый инструмент.
+- `.agents/skills/` и `.claude/skills/` (13 навыков): `coop-triage`, `coop-research`,
+`coop-reverse-engineer`, `coop-build-from-zero`, `coop-networking`, `coop-sync-testing`, `coop-qa`,
+`coop-revive`, `coop-decomp-port`, `coop-console-emulator`, `coop-switch`, `coop-contribute`,
+`triage-contributions`. Если задача подходит под навык, прочитать его `SKILL.md`.
+- `games/far-cry-3/README.md` — опубликованная запись Far Cry 3 (личность игры, SHA-256 хеши версий
+1.05 и 1.06, известные попытки co-op, уровень проверки качества); `games/far-cry/` и `games/far-cry-2/`
+— соседи, у которых co-op уже есть. Ещё `data/directory.yaml` + `data/SCHEMA.md`, `DIRECTORY.md`,
+`templates/game.md`, `research/reference-repos.md`.
+- MCP-сервер `coop_anything` (`search_directory`, `detect_engine`, `game_identity`, `list_docs`,
+`read_playbook`, `get_skill`, `get_game`, `get_test_tool`, `validate_entry`) обращается к хабу только на
+чтение.
+Хаб читать, а не править из этого проекта: правку хаба делать в его собственном репозитории по правилам
+его `CONTRIBUTING.md`. Правила из `AGENTS.md` самого хаба действуют и здесь: спросить перед установкой
+или скачиванием, не трогать папку установленной игры и сохранения владельца, проверить прежде чем
+утверждать, записать личность игры прежде чем следовать чужим заметкам, и не помещать личные пути или
+имена в pull request.## Общение
 С владельцем общаться по-русски.
 ## Механика сессии
 Вызовы инструментов: один блок на ход, один инструмент в блоке, аргументы не больше ~4 КБ. Длинные
@@ -63,7 +96,7 @@ probe-скрипты писать в файл и запускать коротк
 |---|---|
 | `D:\Projects\Co-op Anything\FarCry3Coop-bantila\` | Этот репозиторий (форк агента для Bantila/FarCry3Coop) |
 | `D:\Projects\Co-op Anything\FarCryCoop\` | Клон многоигрового хаба (копии игр в `games/<slug>/` и записки по ним) |
-| `D:\Projects\Co-op Anything\coop-anything\` | Репозиторий-хаб (трекер задач, playbook) |
+| `D:\Projects\Co-op Anything\coop-anything\` | Репозиторий-хаб (трекер задач, playbook, инструменты, навыки) |
 | `H:\Uplay\Far Cry 3\` | Реальная установка Uplay 1.06 — только чтение (золотое правило 2) |
 | `H:\FarCryCoop\TestFC3\` | Рабочая копия сборки 1.06: зонды дизасана, запуски меню, тестовые моды |
 | `H:\FarCryCoop\` | Черновая рабочая папка (не git): `TOOLS.md`, скриншоты, помощники UI-автоматизации, `tools\fc3_stub_probe.py` |
@@ -95,7 +128,8 @@ probe-скрипты писать в файл и запускать коротк
 
 ## Что читать в начале сессии
 `NOTES.md` (журнал находок, список TODO в конце), `PLAN.md`, `scripts/README.md`, `AGENTS.md`.
-Не выводить заново то, что уже записано в `NOTES.md`.
+Не выводить заново то, что уже записано в `NOTES.md`. Если задача про тестирование, сеть, инструменты синхронизации или сборку — читать и
+хабовский `playbook/` с `tools/README.md`.
 
 ## Особенности инструментов на этом ПК
 - Инструменты `ctx_*` работают под PowerShell: `&&` и `||` — синтаксическая ошибка, `>` пишет в UTF-16,
