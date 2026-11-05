@@ -355,6 +355,40 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   are pointers whose field `+0x20` holds an id — distinct from the execLines container `[0x12829424]`.
   Open: what `[0x128048c0]` is, and whether the cascade's `+0xa4` value is ever matched against an
   entry's `+0x20`.
+- **Consumers of the launch-mode id located** (whole-`.text` scan of every instruction that reads a
+  mode-id global, dump in `local/scratch/modeid_sites.txt`: only 3 functions read them in `FC3.dll`):
+  `0x1111e390` (`cmp eax,[0x1216aee4]` at `0x1111e4e3`), `0x1111e860` (`cmp eax,[0x1216aee4]` at
+  `0x1111e91e`), `0x1181c440` (default id at `0x1181ce50`, `-domination` at `0x1181cf0b`). In
+  `0x1111e390`: `mov eax,[edi+0x10]` (`0x1111e399`) holds the mode id, `mov ecx,[ebx+0x154]`
+  (`0x1111e3bc`) is the container it searches, `call 0x10260770` (`0x1111e3c7`) is the id→record lookup
+  (`cmp byte ptr [ecx+0x5c],0` `0x10260773`, `cmp dword ptr [ecx+0x54],0` `0x1026077b`,
+  `mov eax,[ecx+0x50]` `0x10260781`, `call 0x1025fee0` `0x1026078a`, `cmp dword ptr [eax+4],2`
+  `0x1026079a`, `cmp ecx,[edi+0xc]` `0x102607a3`, returns the record or 0), and the record's field
+  `+0xcc` (`0x1111e3d8` `mov eax,[eax+0xcc]`) yields the container the record belongs to.
+- **The coop test reads through a second singleton (`FC3.dll 0x1111e4ce .. 0x1111e517`)**:
+  `mov edx,[0x12804acc]` (`0x1111e4ce`) → `mov eax,[edx+0x68]` (`0x1111e4d4`) → `mov eax,[eax+0x30]`
+  (`0x1111e4db`) → `or eax,0xffffffff` when the accessor is null (`0x1111e4e0`) → `cmp eax,[0x1216aee4]`
+  (`0x1111e4e3`) → `mov ecx,[ebx+0x154]` (`0x1111e4ef`) → `mov eax,[ecx]` → `mov eax,[eax+0x68]` →
+  `call eax` with `[esp+0x18]` (`0x1111e4fe`) → `mov eax,[edx+0x24]` (`0x1111e508`) → `call eax`
+  (`0x1111e50b`) → `test al,al` → `cmp byte ptr [esp+0xb],al` → `cmp dword ptr [0x12835c94],0`
+  (`0x1111e517`). New globals: **`[0x12804acc]`** (accessor at `+0x68`, vtable slots `+0x30` and `+0x24`)
+  and **`[0x12835c94]`**.
+- **Container `[0x128048c0]` owner (`local/scratch/container_sites.txt`, 13 functions)**: creator
+  `0x10048230` publishes it twice (`0x10048289`, `0x10048297 mov dword ptr [0x128048c0], eax`); readers
+  `0x10f0c770` `0x10f0c7ca`, `0x10f0ea50` `0x10f0ec39`, `0x10f0ed30` `0x10f0ef19`, `0x113224c0`
+  `0x11322514`, `0x113235d0` `0x113236a9`, `0x11340560` `0x113408f8` + `0x11340bdb`, `0x11709440`
+  `0x11709450`, `0x1181c440`, `0x118227d0` `0x11822875`, `0x119288b0` `0x11928dee`, `0x11997720`
+  `0x11997723` (that read is the function's first instruction, so it looks like a getter). Creator
+  anatomy: guards `cmp byte ptr [0x128042fc], bl` (`0x1004823a`) and `cmp byte ptr [0x12162beb], bl`
+  (`0x10048247`), `call 0x11789a00` (`0x10048242`), 0x20-byte allocation `mov edx,0x10` /+ `lea
+  ecx,[edx+0x10]` / `call 0x1177f7c0` (`0x1004824f`, `0x10048254`, `0x10048257`), vtable `mov dword ptr
+  [eax], 0x11f224c4` (`0x10048271`), fields `+4 +8 +0xc +0x10 +0x14 +0x18` zeroed.
+- **`[0x128048c0]` vtable `0x11f224c4` gates its slots on flag bits of `+0x10`** (dump in
+  `local/scratch/probe8.py` output): slot 1 `0x100a5df0` (`test byte ptr [ecx+0x10],1` `0x100a5df3`,
+  `mov esi,[ecx+0x14]`, `add esi,[ebp+8]`, `cmp dword ptr [ecx+8],-1`, `lea eax,[ecx+4]`,
+  `mov eax,[edx+0x20]` → `call eax` at `0x100a5e14`), slot 2 `0x100a5e30` (bit 2), slot 3 `0x100a5e70`
+  (bit 4); slot 0 `0x100a5b10` bounds-checks `esi` against `[0x121bbff8]` (`0x100a5b25`) and
+  `[0x121a7fdc]` (`0x100a5b2d`) after `call 0x117097d0`.
 - **Mode ids occur in three other FC3.dll data tables** (the next candidates for the
   session-descriptor registry): `0x1216aa2c .. 0x1216aa44` (`-deathmatch 0x1216aa2c`, default
   `0x1216aa30`, `-firestorm 0x1216aa34`, `-domination 0x1216aa38`, `-headquarters 0x1216aa3c`,
