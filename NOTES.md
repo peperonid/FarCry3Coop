@@ -1047,8 +1047,11 @@ time, and what entry 8's family is.
   2026-11-05 in the launch-mode cascade body `FC3.dll 0x11a8c440` (`-coop` compare at `0x11a8c533`, mode
   id `0x43521e6f` read from `[0x1216aee4]`, written to `[ebp+8]`, then stored into object field
   `[ebx+0xa4]` before the dispatch `call`); mirrored in `FC3_d3d11.dll` at `0x11aa08d4` (reads
-  `[0x1218ffe4]`) and in the second chain at `0x11a8c95d`. Still open: what the second chain
-  `0x11a8c944 .. 0x11a8c9c1` selects, and whether the mode id reaches the session-descriptor registry.
+  `[0x1218ffe4]`) and in the second chain at `0x11a8c95d`, whose fully decoded mirror is
+  `FC3_d3d11.dll 0x11aa0cfc .. 0x11aa0d7a` (the same flag set, with the id written into local slot
+  `[ebp+0xc]`). Still open: what the second chain `FC3.dll 0x11a8c944 .. 0x11a8c9c1` selects (that
+  range is mid-instruction, so the enclosing function entry has to be found first), and whether the
+  mode id reaches the session-descriptor registry.
   Then test `-execline` / `-exec` on the test copy `H:\FarCryCoop\TestFC3\` and watch the Ubisoft Connect
   log plus `screenshot\`
 - [x] Size the real 1.06 session-descriptor record: RESOLVED 2026-11-03 — the array is an array of 4-byte
