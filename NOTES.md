@@ -373,6 +373,25 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   (`0x1111e50b`) → `test al,al` → `cmp byte ptr [esp+0xb],al` → `cmp dword ptr [0x12835c94],0`
   (`0x1111e517`). New globals: **`[0x12804acc]`** (accessor at `+0x68`, vtable slots `+0x30` and `+0x24`)
   and **`[0x12835c94]`**.
+- **The same coop test appears a second time inside `0x1111e860` (`FC3.dll 0x1111e860 .. 0x1111ecb0`,
+  dump `local/scratch/r1_out.txt`)**: `mov eax,[0x12804acc]` (`0x1111e902`) → `mov eax,[eax+0x68]`
+  (`0x1111e907`) → `mov eax,[eax+0x30]` (`0x1111e916`) / `or eax,0xffffffff` (`0x1111e91b`) →
+  `cmp eax,[0x1216aee4]` (`0x1111e91e`) → `sete al` (`0x1111e924`) → `mov byte ptr [esp+0x13],al`
+  (`0x1111e927`) → `test al,al` → `jne 0x1111e98e` (`0x1111e92d`); the negative branch tests
+  `cmp dword ptr [ecx+0xc],0` (`0x1111e932`), `cmp dword ptr [0x12835c94],0` (`0x1111e938`),
+  `call 0x10003cd0` (`0x1111e94a`), `call 0x10002aa0` (`0x1111e961`), `call 0x10425d20`
+  (`0x1111e96e`, `cmp eax,ebx` → `je 0x1111e98e`), `mov ecx,[0x12805434]` (`0x1111e97f`),
+  `call 0x11363ab0` (`0x1111e985`). Shared shape of both functions: `mov ebx,[ebp+8]` + `add ebx,0x108`
+  (`0x1111e8ad`) or `mov ecx,[ebx+0x154]` (`0x1111e3bc`, `0x1111e437`) as the searched container,
+  `call 0x10425d20` (`0x1111e8b8`, `0x1111e96e`) with the `cmp eax,ebx` end-of-container sentinel, entry
+  field read `mov eax,[eax+0x20]` (`0x1111e8c5` — the same `+0x20` id field as the `[0x128048c0]`
+  entries), `mov ecx,[0x12805434]` (`0x1111e8c8`), `call 0x11363b10` (`0x1111e8de`),
+  `cmp dword ptr [ebp+0x14],2` (`0x1111e98e`) and `cmp dword ptr [ebp+0x14],1` (`0x1111ea44`) as the
+  mode selector, `call 0x104245c0` (`0x1111e9a5`), and the final gate `mov ecx,[0x12805180]`
+  (`0x1111ea72`) → `mov eax,[ecx+4]` (`0x1111ea78`) → `mov edx,[eax+0x11c]` (`0x1111ea7b`) →
+  `mov ecx,[eax+0x118]` (`0x1111ea81`) → `push edx; push ecx; push eax` → `call 0x102000d0`
+  (`0x1111ea8a`) → `test al,al` → `je 0x1111eb48` (`0x1111ea91`). Open: what `[0x12805180]`,
+  `[0x12805434]`, `0x102000d0`, `0x10425d20` are, and who calls `0x1111e390`/`0x1111e860`.
 - **Container `[0x128048c0]` owner (`local/scratch/container_sites.txt`, 13 functions)**: creator
   `0x10048230` publishes it twice (`0x10048289`, `0x10048297 mov dword ptr [0x128048c0], eax`); readers
   `0x10f0c770` `0x10f0c7ca`, `0x10f0ea50` `0x10f0ec39`, `0x10f0ed30` `0x10f0ef19`, `0x113224c0`
