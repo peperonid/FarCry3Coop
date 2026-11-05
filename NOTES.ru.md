@@ -21,6 +21,46 @@ English version: [NOTES.md](NOTES.md)
 
 ## Что известно
 
+- [x] Найти реестр игровых режимов и routine заполнения: ЗАКРЫТО 2026-11-06 — контейнер `[0x128048c0]`
+  заполняется из `engine\gamemodes\GameModesConfig.xml` (строка `0x11f16940` в `FC3.dll`; загрузчик
+  `0x117568a0`, вызываемый из `0x117569f0`, который затем запрашивает `GameModeProperties` `0x11f16968`
+  через `mov edx,[eax+0x58]` / `call edx` на `0x117569ba..0x117569c5`); заполнение выполняет
+  `0x11709af0 .. 0x11709ca0`: количество потомков `[ecx]+0x4c` (`0x11709b03`), потомок по индексу
+  `[eax]+0x50` (`0x11709b1c`), проверка имени `push 0x11f10d78 'GameMode'` + vtable `[edx+0x14]`
+  (`0x11709b35..0x11709b3d`), выделение записи `mov edx,0x10; lea ecx,[edx+0x30]; call 0x1177f7c0`
+  (`0x11709b5c..0x11709b64`), инициализация записи: vtable `mov dword ptr [eax], 0x11f224b4`
+  (`0x11709b86`), `mov dword ptr [eax+0x20], 0xffffffff` (`0x11709ba1`, идентификатор режима, который
+  ищет `cmp dword ptr [ebx+0x20], esi` на `0x1181cf13`), `movss [eax+0x28], xmm0` из `[0x11ef3764]`,
+  `mov word ptr [eax+0x34], 0x100` (`0x11709bb6`), `mov byte ptr [eax+0x36], 1` (`0x11709bbc`), затем
+  `call 0x11969740` (`0x11709bcc`). Остается открытым: какой атрибут XML пишет идентификатор в
+  `[eax+0x20]`.
+- [x] Проверить, есть ли ко-оп как игровой режим в поставляемых данных 1.06: ЗАКРЫТО 2026-11-06 — да.
+  `H:\FarCryCoop\TestFC3\data_win32\worlds\downloadcontent\mp_dlc1\toc.rml` (1989 байт) содержит
+  `GameModes Desc FCXCoop`, и обе карты DLC помечены `gamemodemask 128`: `mpdlc1_aegir` (`id 3001`,
+  `presenceId 690271114`) и `mpdlc1_idun` (`id 3002`, `presenceId 3534781404`); там же регистрируется
+  `ClassService CharacterAppearancesCoopULC` с `yuriy_ulc_2`, `leonard_ulc_2`, `tisha_ulc_2`,
+  `callum_ulc2`. `FCXCoop` встречается и внутри пакетов: `multicommon/multicommon.dat` — 1 совпадение
+  (`_FCXCoop.207146615258375806` на смещении 407859421), плюс `MZoneEntity_Coop_Island.2070649460439908519`
+  (350109489) и `MZoneEntity_Coop_ToRockets.2077132487061948236` (350279600) среди 331 совпадений `Coop`;
+  `downloadcontent/mp_dlc1/mp_dlc1.dat` — 5 совпадений (`DynLoad/ … Mode/FCXCoop)` на смещениях 68659542,
+  69112499, 120652426, 121131557 и `_FCXCoop.2077257745930653048` на 160905944); `fc3_main/fc3_main.dat`
+  (3496061837 байт) — 1 совпадение на смещении 2379019038 в той же форме `DynLoad/ … Mode/FCXCoop)` плюс
+  331 совпадений `Coop`, в том числе категории DOMINO `<Display Category="Coop|Group" …` (1304419581,
+  1304592795) и функции DOMINO `Coop/Group/AddTo…` (400798582), `Coop/Entity/Is…` (1030651053),
+  `Coop/AllP…` (1088269141, 1312711018). Отрицательный результат: `grep -a -c -i gamemodesconfig` по всем
+  `data_win32/*.dat` и `*.fat` дал 0 совпадений, то есть сам XML в этом экземпляре в открытом виде не
+  хранится.
+- [x] Подтвердить, что классы ко-оп обращаются кодом, а не только присутствуют строками: ЗАКРЫТО
+  2026-11-06 — `CFCXCoopService` `0x11fc3d3c` передается через `push` на `0x103ca3aa`, `0x11020fe9`,
+  `0x11021004`; `CFCXCoopGateService` `0x11fc5384` на `0x103d141a`, `0x11833c19`, `0x11833c34`;
+  `CFCXCompetitiveCoop` `0x11ff136c` на `0x10466e1a`, `0x11047bd1`, `0x11047bec`;
+  `CFCXCompetitiveCoopNetFunc…` `0x11ff1334` на `0x10466c80`, `0x10467704`; `CoopBarks` `0x11fd9c1c` на
+  `0x11120455`; `SupportedGameModes` `0x11fa84bc` на `0x10351eb7` и на
+  `0x10351ebe mov dword ptr [esi + 4], 0x11fa84bc`. Имена служб и консольных команд регистрируются парой
+  `push <имя>` + `call 0x10a00be0`, а сканирование всего `.text` насчитывает 1817 таких вызовов и 842
+  различных имен (`local/scratch/console_cmds.txt`). Следствие для патчинга: идентификаторы режимов живут
+  только в `FC3.dll`, а `FC3.exe` — заглушка на 213 КБ, поэтому патч запуска ко-оп нужен в `FC3.dll`, а не
+  в `FC3.exe`.
 - Штатный кооп: отдельная кампания из 6 миссий, до 4 игроков онлайн https://co-optimus.com/article/8473/far-cry-3-follow-up-questions-plus-new-co-op-campaign-trailer-and-images.html . Мод: Open World Co-op (scubrah), без сюжетных миссий, альфа https://www.nexusmods.com/farcry3/mods/220 (каталог coop-anything).
 
 ## Фаза 1: распаковка данных игры (2026-10-24)

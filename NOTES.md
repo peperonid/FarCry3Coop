@@ -1133,4 +1133,40 @@ time, and what entry 8's family is.
   FC3_d3d11.dll `[0x12852dcc]` + count `[0x12852dd0]`; the element object holds the hkVirtual descriptor at
   offset 0. See the section "Session-descriptor record tables" above. Still open: the element size of an exec
   record (creators `0x1003b4b0` / `0x10638fb0`).
+- [x] Locate the game-mode registry and its fill routine: RESOLVED 2026-11-06 — the container
+  `[0x128048c0]` is filled from `engine\gamemodes\GameModesConfig.xml` (string `0x11f16940` in `FC3.dll`;
+  loader `0x117568a0`, called from `0x117569f0`, which then asks the loaded record for
+  `GameModeProperties` `0x11f16968` through `mov edx,[eax+0x58]` / `call edx` at `0x117569ba..0x117569c5`);
+  the fill routine is `0x11709af0 .. 0x11709ca0`: child count `[ecx]+0x4c` (`0x11709b03`), child by index
+  `[eax]+0x50` (`0x11709b1c`), name check `push 0x11f10d78 'GameMode'` + vtable `[edx+0x14]`
+  (`0x11709b35..0x11709b3d`), entry allocation `mov edx,0x10; lea ecx,[edx+0x30]; call 0x1177f7c0`
+  (`0x11709b5c..0x11709b64`), entry initialization `mov dword ptr [eax], 0x11f224b4` (`0x11709b86`),
+  `mov dword ptr [eax+0x20], 0xffffffff` (`0x11709ba1`, the id the `cmp dword ptr [ebx+0x20], esi` scan at
+  `0x1181cf13` matches), `movss [eax+0x28], xmm0` from `[0x11ef3764]`, `mov word ptr [eax+0x34], 0x100`
+  (`0x11709bb6`), `mov byte ptr [eax+0x36], 1` (`0x11709bbc`), then `call 0x11969740` (`0x11709bcc`).
+  Still open: which XML attribute writes the mode id into `[eax+0x20]`.
+- [x] Check whether co-op exists as a game mode in the shipped 1.06 data: RESOLVED 2026-11-06 — yes.
+  `H:\FarCryCoop\TestFC3\data_win32\worlds\downloadcontent\mp_dlc1\toc.rml` (1989 bytes) contains
+  `GameModes Desc FCXCoop`, and both of its maps carry `gamemodemask 128`: `mpdlc1_aegir` (`id 3001`,
+  `presenceId 690271114`) and `mpdlc1_idun` (`id 3002`, `presenceId 3534781404`); the same file registers
+  `ClassService CharacterAppearancesCoopULC` with `yuriy_ulc_2`, `leonard_ulc_2`, `tisha_ulc_2`,
+  `callum_ulc2`. `FCXCoop` also appears inside the packages: `multicommon/multicommon.dat` has 1 hit
+  (`_FCXCoop.207146615258375806` at file offset 407859421) plus `MZoneEntity_Coop_Island.2070649460439908519`
+  (350109489) and `MZoneEntity_Coop_ToRockets.2077132487061948236` (350279600) among 331 `Coop` hits;
+  `downloadcontent/mp_dlc1/mp_dlc1.dat` has 5 hits (`DynLoad/ … Mode/FCXCoop)` at offsets 68659542,
+  69112499, 120652426, 121131557 and `_FCXCoop.2077257745930653048` at 160905944); `fc3_main/fc3_main.dat`
+  (3496061837 bytes) has 1 hit at offset 2379019038 in the same `DynLoad/ … Mode/FCXCoop)` shape plus 331
+  `Coop` hits, among them DOMINO reflection-box categories `<Display Category="Coop|Group" …` (1304419581,
+  1304592795) and DOMINO script functions `Coop/Group/AddTo…` (400798582), `Coop/Entity/Is…` (1030651053),
+  `Coop/AllP…` (1088269141, 1312711018). Negative result: `grep -a -c -i gamemodesconfig` across every
+  `data_win32/*.dat` and `*.fat` returned 0 hits, so the XML itself is not stored as plaintext in this copy.
+- [x] Confirm the co-op classes are referenced by code, not only present as strings: RESOLVED 2026-11-06 —
+  `CFCXCoopService` `0x11fc3d3c` is pushed at `0x103ca3aa`, `0x11020fe9`, `0x11021004`; `CFCXCoopGateService`
+  `0x11fc5384` at `0x103d141a`, `0x11833c19`, `0x11833c34`; `CFCXCompetitiveCoop` `0x11ff136c` at
+  `0x10466e1a`, `0x11047bd1`, `0x11047bec`; `CFCXCompetitiveCoopNetFunc…` `0x11ff1334` at `0x10466c80`,
+  `0x10467704`; `CoopBarks` `0x11fd9c1c` at `0x11120455`; `SupportedGameModes` `0x11fa84bc` at `0x10351eb7`
+  and at `0x10351ebe mov dword ptr [esi + 4], 0x11fa84bc`. Service and console names are registered through
+  the pair `push <name>` + `call 0x10a00be0`, and a whole-`.text` scan counts 1817 such calls with 842
+  distinct names (`local/scratch/console_cmds.txt`). Consequence for patching: the mode ids live only in
+  `FC3.dll` while `FC3.exe` is a 213 KB stub, so a co-op-enabling patch belongs in `FC3.dll`, not `FC3.exe`.
 - [ ] Phase 3: story script patches for multi-player
