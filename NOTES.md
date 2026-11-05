@@ -315,6 +315,46 @@ No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:
   FC3_d3d11.dll mirrors the chain (`-domination` `0x11aa08ed`, `-headquarters` `0x11aa0907`,
   `-firestorm` `0x11aa091d`, `-dash` `0x11aa0937`, `-online` `0x11aa0959`) and the `+0x14` dispatch
   at `0x11aa0976`.
+- **What the cascade function does after the id is set (`FC3.dll 0x11a8c5f0 .. 0x11a8c6b9`,
+  `local/scratch/cascade_tail.txt`):** it calls `0x119696d0` (`0x11a8c5f7`) and `0x11a8bdc0`
+  (`0x11a8c601`), runs a ref-count block built from `[ebx+0x9c] + 0x4c` and `[ebp+0x14]` (`cmp`
+  `0x11a8c612`, `lock xadd [edx], 1` `0x11a8c62d`, `lock xadd [edx], -1` `0x11a8c645`,
+  `call 0x100945e0` `0x11a8c64f`), sets a byte flag `[ecx+0xd] = 1` (`0x11a8c668`), reads the string
+  global `-sessionuid` `0x11fb81e4` (`0x11a8c696`), then writes launch-record fields
+  `[ebx+0x64] = 0xfffffffd` (`0x11a8c69c`), `[ebx+0x40] = eax` (`0x11a8c6a3`), `[ebx+0x44] = edx`
+  (`0x11a8c6a6`) and `[ebx+0x74] = 6` (`0x11a8c6b2`). The mode id travels inside a
+  vtable-dispatched object; no record is registered from this path.
+- **`+0xa4` census (`FC3.dll .text` walk with `local/scratch/probe5.py`, output
+  `local/scratch/a4sites.txt` 93637 bytes):** 832 functions touch a `[reg+0xa4]` slot (835 refs) but
+  exactly one also touches a mode-id global, `0x1181c440`, and that one turned out to be UI code (next
+  bullet). `+0xa4` is not a unique fingerprint of the launch mode, so the consumer search must follow
+  the vtable dispatch instead.
+- **Dead end: `FC3.dll 0x1181c440` is a FlowGraph UI handler named `customMapEvaluation`.** Its `+0xa4`
+  refs are stack slots (`mov [esp+0xa4],4` `0x1181d09e`, `mov [esp+0xa4],0x190` `0x1181d101`); the body
+  loads its name `mov esi, 0x1201b27c` (`0x1181c45b`, a UTF-16 string right after the `CFCX` fourcc at
+  `0x1201b276`); `scripts/fc3_callers.py` reports `0 E8 callers` plus one absolute data ref at
+  `0x1201b444`, which sits in a handler table `0x1201b404 .. 0x1201b458` surrounded by `OnMapPublish`
+  `0x1201b380`, `OnEnterMyMapsOK` `0x1201b39c`, `OnEnterMapArchiveOK` `0x1201b3bc`, `ExitMyMaps`
+  `0x1201b3e4`, `updateCustomMapEvaluation` `0x1201b478`, `multiCustomMapEvaluationReportContent`
+  `0x1201b4b0`, `multiCustomMapEvaluationFavoriteContent` `0x1201b500`,
+  `multiCustomMapEvaluationLikeContent` `0x1201b550`, `customMapEvaluationTagsRequest` `0x1201b598`.
+- **Registry-shaped loop found inside that handler (`0x1181ceef .. 0x1181cf30`), kept because it is the
+  pattern a real session registry would show** (listing saved to `local/scratch/registry_scan_loop.txt`):
+  `mov ecx,[0x128048c0]` (`0x1181ceef`), `mov edi,[edx+0xc4]` (`0x1181cef5`), `mov eax,[ecx+8]`
+  (`0x1181cefb`), `mov edx,[ecx+4]` (`0x1181cefe`), `lea edx,[edx+eax*4]` (`0x1181cf01`),
+  `mov eax,[ecx+4]` (`0x1181cf04`), `cmp eax,edx` (`0x1181cf07`), `je 0x1181cf21` (`0x1181cf09`),
+  then the scan `mov ebx,[eax]` (`0x1181cf11`) → `cmp dword ptr [ebx+0x20], esi` (`0x1181cf13`) →
+  `je 0x1181cf1f` (`0x1181cf16`) on a match, `add eax,4` (`0x1181cf18`) → `cmp eax,edx`
+  (`0x1181cf1b`) → `jne 0x1181cf11` (`0x1181cf1d`) on a miss; `xor ebx,ebx` (`0x1181cf1f`) is reached
+  from both the match jump and the exhausted loop, and `0x1181cf21` (`mov edx,[ecx+8]`,
+  `mov ecx,[ecx+4]`, `lea edx,[ecx+edx*4]`, `cmp eax,edx`, `je 0x1181cf35`, `mov eax,[eax]`) starts a
+  second scan of the same container. `esi = [0x1216aeec]` (`-domination 0xab4fc8e2`, read at
+  `0x1181cf0b`), `edi = [0x1216af0c]` (default `0x6c2b3868`, read at `0x1181ce50`), and the field
+  compared on the other side is `[edx+0xc4]`.
+ New container: **`[0x128048c0]`**, `+4` = count, `+8` = index base scaled ×4, entries
+  are pointers whose field `+0x20` holds an id — distinct from the execLines container `[0x12829424]`.
+  Open: what `[0x128048c0]` is, and whether the cascade's `+0xa4` value is ever matched against an
+  entry's `+0x20`.
 - **Mode ids occur in three other FC3.dll data tables** (the next candidates for the
   session-descriptor registry): `0x1216aa2c .. 0x1216aa44` (`-deathmatch 0x1216aa2c`, default
   `0x1216aa30`, `-firestorm 0x1216aa34`, `-domination 0x1216aa38`, `-headquarters 0x1216aa3c`,

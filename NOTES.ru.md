@@ -294,6 +294,40 @@ product 1089053420; MD5 FC3_d3d11 `916c6d4b876d8be5f0ad68f50719a838`, FC3
   `FC3_d3d11.dll` даёт тот же каскад (`-domination` `0x11aa08ed`, `-headquarters` `0x11aa0907`,
   `-firestorm` `0x11aa091d`, `-dash` `0x11aa0937`, `-online` `0x11aa0959`) с диспатчем по слоту `+0x14`
   на `0x11aa0976`.
+- **Что функция каскада делает после записи id (`FC3.dll` `0x11a8c5f0` .. `0x11a8c6b9`, вывод
+  `local/scratch/cascade_tail.txt`):** она вызывает `0x119696d0` (`0x11a8c5f7`) и `0x11a8bdc0`
+  (`0x11a8c601`), выполняет ref-count блок из `[ebx+0x9c] + 0x4c` и `[ebp+0x14]` (`cmp` на `0x11a8c612`,
+  `lock xadd [edx], 1` на `0x11a8c62d`, `lock xadd [edx], -1` на `0x11a8c645`, `call 0x100945e0` на
+  `0x11a8c64f`), ставит флаг `[ecx+0xd] = 1` (`0x11a8c668`), читает строковый global `-sessionuid`
+  `0x11fb81e4` (`0x11a8c696`) и затем пишет поля записи запуска: `[ebx+0x64] = 0xfffffffd`
+  (`0x11a8c69c`), `[ebx+0x40] = eax` (`0x11a8c6a3`), `[ebx+0x44] = edx` (`0x11a8c6a6`) и
+  `[ebx+0x74] = 6` (`0x11a8c6b2`). Id режима уходит через объект с vtable-диспатчем; отсюда ни одна
+  запись в реестр не регистрируется.
+- **Обход `+0xa4` по всему `.text` (`FC3.dll`, скрипт `local/scratch/probe5.py`, вывод
+  `local/scratch/a4sites.txt` 93637 байт):** 832 функций работают со слотом `[reg+0xa4]` (835
+  обращений), и ровно одна заодно трогает global с id режима — `0x1181c440`; она оказалась UI-кодом
+  (следующий пункт). Значит `+0xa4` не является уникальным признаком режима запуска, и потребителя
+  надо искать через vtable-диспатч.
+- **Тупик: `FC3.dll 0x1181c440` — это FlowGraph UI-обработчик `customMapEvaluation`.** Его `+0xa4` —
+  слоты стека (`mov [esp+0xa4],4` на `0x1181d09e`, `mov [esp+0xa4],0x190` на `0x1181d101`); тело грузит
+  своё имя `mov esi, 0x1201b27c` (`0x1181c45b`, UTF-16 строка сразу после fourcc `CFCX` на `0x1201b276`);
+  `scripts/fc3_callers.py` даёт `0 E8 callers` плюс один абсолютный data-ref на `0x1201b444`, который
+  лежит в таблице обработчиков `0x1201b404` .. `0x1201b458` с соседями `OnMapPublish` `0x1201b380`,
+  `OnEnterMyMapsOK` `0x1201b39c`, `OnEnterMapArchiveOK` `0x1201b3bc`, `ExitMyMaps` `0x1201b3e4`,
+  `updateCustomMapEvaluation` `0x1201b478`, `multiCustomMapEvaluationReportContent` `0x1201b4b0`,
+  `multiCustomMapEvaluationFavoriteContent` `0x1201b500`, `multiCustomMapEvaluationLikeContent`
+  `0x1201b550`, `customMapEvaluationTagsRequest` `0x1201b598`.
+- **Похожий на реестр цикл сравнения внутри этого обработчика (`0x1181ceef` .. `0x1181cf30`), листинг `local/scratch/registry_scan_loop.txt`; оставлен,
+  потому что это ровно тот шаблон, который показал бы настоящий реестр сессий:** `mov edi,[edx+0xc4]`
+  (`0x1181cef5`), `mov ecx,[0x128048c0]` (`0x1181ceef`), `mov eax,[ecx+8]` (`0x1181cefb`),
+  `mov edx,[ecx+4]` (`0x1181cefe`), `lea edx,[edx+eax*4]` (`0x1181cf01`), `mov eax,[ecx+4]` (`0x1181cf04`), `cmp eax,edx` (`0x1181cf07`), `je 0x1181cf21` (`0x1181cf09`), затем скан `mov ebx,[eax]`
+  (`0x1181cf11`) → `cmp dword ptr [ebx+0x20], esi` (`0x1181cf13`) → `add eax,4` (`0x1181cf18`) →
+  `cmp eax,edx` (`0x1181cf1b`) → `jne 0x1181cf11` (`0x1181cf1d`) при промахе, `je 0x1181cf1f` (`0x1181cf16`) при совпадении; `xor ebx,ebx` (`0x1181cf1f`) достигается и из прыжка совпадения, и из исчерпанного цикла, а `0x1181cf21` (`mov edx,[ecx+8]`, `mov ecx,[ecx+4]`, `lea edx,[ecx+edx*4]`) начинает второй проход по тому же контейнеру; `esi = [0x1216aeec]`
+  (`-domination 0xab4fc8e2`, прочитано на `0x1181cf0b`), `edi = [0x1216af0c]` (запасной `0x6c2b3868`,
+  прочитано на `0x1181ce50`). Новый контейнер: **`[0x128048c0]`**, `+4` = количество, `+8` = база
+  индекса со множителем ×4, элементы — указатели, в поле `+0x20` которых лежит id; это другой
+  контейнер, не `execLines` (`[0x12829424]`). Открыто: что такое `[0x128048c0]` и сравнивается ли
+  значение `+0xa4` из каскада с полем `+0x20` такого элемента.
 - **Эти id встречаются в трёх других таблицах `FC3.dll`** (следующие кандидаты на реестр
   дескриптора сессии): `0x1216aa2c` .. `0x1216aa44` (`-deathmatch 0x1216aa2c`, запасной `0x1216aa30`,
   `-firestorm 0x1216aa34`, `-domination 0x1216aa38`, `-headquarters 0x1216aa3c`, `-coop 0x1216aa40`,
