@@ -1736,6 +1736,34 @@ So allocation and release of the co-op mode object are bracketed by the same two
 `0x106c2c50` on entry and `0x106bde20` on exit, both against the global `[0x1280432c]`. The NOTES
 open item "`0x118db560` unresolved" is closed.
 
+### What the co-op mode installer `0x11789a00` installs (probe155-probe156)
+
+The first 0x3c bytes of `0x11789a00` are a gate plus a three-slot hook table install:
+
+```text
+11789a00  cmp byte ptr [0x128042fc], 0        ; one-shot guard (the writer is 0x11789a00 itself)
+11789a07  jne 0x11789b63
+11789a0d  mov eax, dword ptr [0x1217bc8c]     ; optional callback slot
+11789a12  mov dword ptr [0x121a7eb0], 0x11789840
+11789a1c  mov dword ptr [0x121a7eb4], 0x117899e0
+11789a26  mov dword ptr [0x121a7eb8], 0x11789990
+11789a30  test eax, eax
+11789a32  je 0x11789a36
+11789a34  call eax                             ; call the installed callback if present
+11789a36  mov eax, 1
+11789a3b  mov dword ptr [0x120931c8], 0x121a7eb0   ; publish the table pointer into a .data global
+```
+
+So the installer writes its three handler addresses into the table `0x121a7eb0`/`0x121a7eb4`/`0x121a7eb8`,
+publishes a pointer to that table into the global `[0x120931c8]`, and calls whatever is in `[0x1217bc8c]`.
+Cross-references: the three handler addresses `0x11789840`, `0x117899e0`, `0x11789990` each have exactly one
+reference, the install site itself. The table address `0x121a7eb0` has two references: the install site and
+`0x11789a3b`. The slot `[0x1217bc8c]` is read at `0x10c56bf8`, `0x10c56ce4`, `0x10c56cf8`, `0x10c56d7a` and is
+touched at `0x106ed8bc`, `0x106efaa7`.
+RTTI lookup for `0x11fc6268` and `0x1200e5f8` failed: their `-4`/`-8` slots hold code addresses or non-pointers
+(`0x11fc6268-4 -> 0x104833e0`, `0x11fc6268-8 -> 0x11746490`, `0x1200e5f8-8 -> 0x66006e`), so neither table is a
+plain MSVC primary vftable with a CompleteObjectLocator.
+
 - Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
   from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
   `0x11fc6268` and what its eight slots mean; resolve the remaining NOTES open items (owner of the
