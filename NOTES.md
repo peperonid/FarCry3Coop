@@ -1417,3 +1417,126 @@ time, and what entry 8's family is.
   entries is the co-op one at runtime (entry `+0x380` is the only one whose handler is the co-op
   accessor); the consumers of `[0x12807738]`, `[0x12807740]`, `[0x12807744]`; whether the
   `[0x128042fc]` / `0x11789a00` pair is the launch-argument check that has to be bypassed.
+
+## Agent session (2026-11-06): the launch switch -> mode id chooser, and the mode id table
+
+Sources: static disassembly of `H:\FarCryCoop\TestFC3\bin\FC3.dll` (v1.06, sha256
+`71d58a7a4503c5c67dcd6f4b9445b5e7ac34c12043987f4c7285e13f2ed51c9b`), scripts
+`local\scratch\probe101.py`..`probe110.py` (scratch only, not tracked). All addresses are 1.06
+`FC3.dll`; `FC3_d3d11.dll` has the same structure at different addresses (its coop hash global is
+`0x1218ffe4`, coop hash occurrences in 8 functions).
+
+### The switch parser that picks the mode id
+
+`0x11a8c440` is the netgame launch parser (prologue `55 8bec 83ec2c 53 8b5d14 56 8b750c 57` =
+`push ebp; mov ebp,esp; sub esp,0x2c; push ebx; mov ebx,[ebp+0x14]; push esi; mov esi,[ebp+0xc]`
+= argv). It uses `mov edi,[0x11bcb5c0]` (a `strcmp`-like scanner imported from the C runtime at
+`FC3.dll+0x11bcb5c0`) as `push <switch string VA>; push argv; call edi`, and writes a **mode id
+constant** into the caller's out parameter. Verified chain tail verbatim: `-deathmatch` ->
+`mov eax,[0x1216aedc]` (`0x11a8c529`); **`-coop` (`push 0x11fb81fc` at `0x11a8c533`) ->
+`mov ecx,[0x1216aee4]` (`0x11a8c542`) -> `mov [ebp+8],ecx` (`0x11a8c548`)**; `-domination` ->
+`[0x1216aeec]`; `-headquarters` -> `[0x1216aef4]`; `-firestorm` -> `[0x1216aefc]`; `-dash` ->
+`[0x1216af04]`; **no switch matched -> `mov eax,[0x1216af0c]` (`0x11a8c5b1`) ->
+`mov [ebp+8],eax` (`0x11a8c5b6`)**. Earlier in the same function are `-login`, `-ip` (with the
+error string `Missing -login or -ip for -client.` at `0x11fb8258`), `-online`, `-password`,
+`-bfname`, `-sessionuid`. A second copy of the same chain lives in `0x11a8c8b0` (`-host` at
+`0x11a8c90b`, `-coop` at `0x11a8c95c` -> `mov [ebp+0xc],ecx`), which is also the caller of
+`0x11a8c440` (the only rel32 call, at `0x11a8d000`); `0x11a8c8b0` is reached from `0x11a8cf45` and
+`0x11a8d045`. `0x11a8c440` therefore only runs when the process is started with network launch
+arguments - a normal single-player start never reaches it.
+
+### Mode ids are 32-bit hashes, stored in a .data table next to `0x1216a00c`
+
+`FC3.dll .data` dump (each id followed by a `0xffffffff` terminator), verified with
+`local\scratch\probe106.py`: `0x1216aedc = 0x8b40f692` (-deathmatch), `0x1216aee4 = 0x43521e6f`
+(**-coop**), `0x1216aeec = 0xab4fc8e2` (-domination), `0x1216aef4 = 0x9991daec` (-headquarters),
+`0x1216aefc = 0xf66ffb87` (-firestorm), `0x1216af04 = 0x2100ced7` (-dash),
+`0x1216af0c = 0x6c2b3868` (**the mode used when no switch is given**), `0x1216aed0/0x1216aed4 =
+0x9ba82025`, `0x1216af14 = 0x1577a45d`, `0x1216af18 = 0xfe80eafc`, `0x1216af1c = 0xa9fc2652`. The
+neighbouring slots `0x1216aeb8`, `0x1216aeb0`, `0x1216aea8` hold string pointers (`World`
+`0x11f0f5c4`, `PersistenceDB` `0x11fbad38`, `CampaignSave` `0x11fbad28`), so this block is the
+named-session registry: name string + 32-bit hash id pairs, exactly the `push <name VA>; push
+<hash>` registration shape already recorded for the world/session records (see the earlier
+section "the registry is keyed by 32-bit hashes").
+
+### Where the coop hash is used (probe107-probe112)
+
+- `0x1133fb80` is a 50-byte predicate (`0x1133fb80`..`0x1133fbb2`, verified byte-by-byte in
+  `local\scratch\p111.txt`): `mov eax,[eax]` then `cmp` against `0xab4fc8e2`, `0x43521e6f` (coop),
+  `0x9991daec`, `0x6c2b3868`, `0xf66ffb87`, `0x2100ced7`, each followed by `je 0x1133fbaf`; the fail
+  path is `xor al,al; ret` at `0x1133fbac`, the success path `mov al,1; ret` at `0x1133fbaf`. It
+  answers "is this id one of the network mode ids" and **`0x8b40f692` (-deathmatch) is deliberately
+  not in the list**. `0x113403e0` repeats the same six comparisons at `0x113405a4`, `0x11340623`,
+  `0x11340a26` and reads the registry `[0x128048c0]` at `0x113408fa`, `0x11340bdd`.
+- `0x11a7f9d0` asks the mode accessor for sessions by id: `mov ecx,[0x12804acc]; mov eax,[ecx];
+  mov eax,[eax+4]; lea edx,[esp+0x10]; mov [esp+0x14],0x80608f71; push edx; call eax`, and when that
+  returns false `mov ecx,[0x12804acc]; mov dword ptr [esp+0xc],0x43521e6f; mov edx,[ecx];
+  mov edx,[edx+4]; lea eax,[esp+0xc]; push eax; call edx` - i.e. **virtual slot +4 of the
+  `[0x12804acc]` object is a "find/lookup session by hash id" call**, first probed with
+  `0x80608f71` (another registered name, value not yet attributed) and then with the coop hash. If
+  either lookup succeeds the code continues into loading `engine\toolsconfig\AlwaysLoaded.xml`
+  (`push 0x11f2fd78` at `0x11a7fa2b`). This is a point where the game asks for a coop session
+  without any launch argument.
+- `0x10fa1710` is not a plain mode switch, it is a **session-name -> loading-screen-name chain**
+  (`local\scratch\p112.txt`). It tests candidate names against `[ebp+0xc]` with `call 0x1011cb30`:
+  `'coop_vidar'` (`0x1200e400`) -> `'COOP_Vidar_Loading'` (`0x1200e40c`), `'coop_sleipnir'`
+  (`0x1200e420`) -> `'COOP_Sleipner_Loading'` (`0x1200e430`), `'mpdlc1_aegir'` (`0x11f8a1b4`) ->
+  `'COOP_Freya_Loading'` (`0x1200e3cc`), `'mpdlc1_idun'` (`0x1200e448`) -> `'Coop_Fenrir_Loading'`
+  (`0x1200e38c`), all jumping to the shared tail at `0x10fa1c22`. Only after those name tests does
+  it compare the hash ids: `0x10fa1bb9` `0xab4fc8e2` (-> `push 0x1200e454 'PvP_Dom_Loading'`,
+  `call 0x10a00be0`, `push 0x1200e454`, `call 0x10001ed0`), `0x10fa1bde` `0x9991daec` (->
+  `'PvP_Pump_Loading'` `0x1200e464`), `0x10fa1bec` `0x8b40f692` (-> `'PvP_DeathMatch_Loading'`
+  `0x1200e478`), `0x10fa1bfa` `0x6c2b3868` (-> `'PvP_TeamDeath_Loading'` `0x1200e490`), `0x10fa1c08`
+  `0xf66ffb87` (-> `'PvP_FireStorm_Loading'` `0x1200e4a8`), `0x10fa1c16` `0x2100ced7` (->
+  `'COOP_Dash_Loading'` `0x1200e4c0`); the dash case is `COOP_`-prefixed, so the dash mode is
+  handled as a coop-family session. The chain ends at `0x10fa1c2b` with `push edx; push ebx;
+  call 0x110252d0`, then `mov eax,[0x12804b3c]; cmp dword ptr [eax+0x70],1; jne 0x10fa1ca0` and a
+  second id-compare block (`0x10fa1c45`..`0x10fa1c66`, domination / headquarters / deathmatch /
+  default / firestorm all branch to `0x10fa1c68`) where `mov esi,[esp+0x14]; mov edx,[esi+0xa0];
+  mov eax,[edx+0x64]; lea ecx,[esi+0xa0]; call eax` makes a virtual call at object offset `+0xa0`,
+  slot `+0x64`. `0x10fa1710` also uses `-online` (`push 0x11fb8234`) as a string test before the
+  hash comparisons.
+- `0x11204b00` is the second mode dispatcher: it reads `[esi+0x10]` and branches `0` ->
+  `0x1120590d`, `1` -> fall-through, otherwise -> `0x11205d99`, and compares ids at `0x11205732`,
+  `0x11205753`, `0x11205775`, `0x11205793`, `0x112057b1`. Both `0x10fa1710` and `0x11204b00` start
+  from the same accessor (`mov eax,[0x12804acc]; cmp byte ptr [eax+0x6c],0; mov eax,[eax+0x68]`).
+- `0x11341dc0` (31 rel32 callers, e.g. `0x10ce93c9`, `0x10edd676`, `0x10f3a0f9`, `0x10fcc522`) is
+  the mode/session getter used everywhere: `mov eax,[edi]; mov edx,[eax+0x10]; mov ecx,edi;
+  call edx; mov ecx,edi; call 0x10056690; push eax; call 0x11774ae0; mov [ebx],esi` - takes a mode
+  id pointer in `[ebp+8]` and returns the object (then calls its virtual slot +4 with `this`).
+- `0x11a7f820` starts with `cmp byte ptr [0x12804a09],0` and iterates a vector
+  `[0x12820c04]`/`[0x12820c08]` (`lea edi,[ecx+eax*4]`), with `0x11a7fa12` holding the coop hash;
+  it is the closest verified "iterate registered sessions and pick the coop one" loop found so far.
+- Negative results: `0x113403e0`, `0x10fa1710`, `0x11204b00`, `0x10fad5e0`, `0x10f0c770` have **no
+  rel32 callers** (reached through a vtable / function pointer), so their entry points need a
+  pointer-table scan or REA flow analysis; `0x113403e0` also has `int3` padding, i.e. it is a real
+  function start. `0x11204b00` and `0x10fa1710` are large functions (`sub esp,0xa94` in
+  `0x11204b00`) - per-mode graph setup, not a single switch.
+- `cstr`-mid-string pitfall: `0x11fb8218` is not the start of a switch name (`0x11fb8214` is
+  `0x11fb8210 '-online'`, so `0x11fb8218` reads as `rters` = tail of `...multiplayers`);
+  `0x11fb8228` is not a string either. Only `-online` (`0x11fb8234`) is real there.
+
+### Consequence for the mod
+
+The coop mode is not a flag the ASI can flip in one place: the game resolves a **hash id** through
+the `[0x12804acc]` object (virtual slot +4) and the registry `[0x128048c0]`, and the coop hash
+`0x43521e6f` is a constant baked into the executable and the data table. The smallest single-point
+candidates so far: make the "no switch given" branch at `0x11a8c5b1` load the coop hash instead of
+`0x6c2b3868`, or call the accessor's find-by-id with `0x43521e6f` directly (the pattern already
+exists at `0x11a7fa08`). Nothing here needs the launch arguments: `0x11a7f9d0` shows the game can
+ask the accessor for a coop session at any time. The coop *session names* the game itself uses
+(`coop_vidar`, `coop_sleipnir`, `mpdlc1_aegir`, `mpdlc1_idun` and their `*_Loading` partners) are a
+second, name-based route into the same coop sessions.
+
+- Script-fragile details already recorded elsewhere: the switch->mode-id chooser `0x11a8c440` /
+  `0x11a8c8b0`, the `FC3.dll .data` hash table at `0x1216aedc`..`0x1216af1c`, `FC3_d3d11.dll`
+  mirror (`0x1218ffe4`).
+- Next: resolve what virtual slot +4 of `[0x12804acc]` really is (REA pseudocode), resolve the
+  object at `[0x12804b3c]` offset `+0x70` and the `+0xa0`/slot `+0x64` call in `0x10fa1710`,
+  enumerate the registered name strings next to the hashes at `0x1216aeb8` / `0x1216aeb0` /
+  `0x1216aea8`, and see which of them the single-player launch registers; then a dynamic experiment
+  that asks the accessor for the coop session (`0x43521e6f`) in a running 1.06 process.
+- Open objectives (unchanged): find who writes `[0x12162beb]` / `[0x128042fc]`; resolve the
+  remaining NOTES open items (owner of the container receiving the manager at `0x111f4fc6`,
+  `0x118db560`, `0x106eac80`, `0x106e96c0`, the coop entry among the thirteen, consumers of
+  `[0x12807738]`/`[0x12807740]`/`[0x12807744]`); bilingual NOTES + commit for every new finding.
