@@ -1813,9 +1813,13 @@ releases the array with `call 0x118830a0`, then closes `[0x128043f8]` via `call 
 
 So the co-op id `0x43521e6f` is pushed (and its byte-swapped form `0x6f1e5243` is used as the compare value for the
 accessor) into `0x110079e0` / `0x11007a00`, and the slot is filled with the descriptor `0x128040c0`, the value
-`0x2e0000` and the co-op id. The accessor helpers size the table from `[0x11fb5040]` (entry count) and
-`[0x11fb5044]` (item size): `0x110079e0` computes `lea eax, [edx*2 + edx]` (item size `0x69`), `0x110078a0` uses
-`imul edx, edx, 0x418` (`lea eax, [edx*8 + eax]`), and `0x11007a2b` indexes with `[0x11fb5040]`, `0x18` / `0x38`
+`0x2e0000` and the co-op id. `0x2e0000` and the co-op id. The accessor helpers read a count field, not a fixed table: `0x110079e0` loads
+`[edi]` -> `[edx]`, `push 1`, `call eax`, then `mov edx, [0x1280437c]`, `mov eax, [ebx+0xc]`,
+`mov ecx, [edx+0xc]`, `cmp eax, ecx`, `jb 0x11007a05`, so the limit is `[[0x1280437c]+0xc]`. `0x11007a10`
+`push 0x11fd1928` (`'Pause_%d'`) feeds `call 0x11789350`; `0x11007a53`-`0x11007a5a` read `[esp+0x20]` ->
+`[edx+4]` -> `[eax+0xd0]`, and `0x11007a60` reads `[0x12804a50]`. probe175 shows the globals
+`0x11fb5040`, `0x11fb5044`, `0x11fb5048`, `0x11fb504c` have no verified xrefs and no disp32 sites, so the
+earler sizing claim was wrong.
 displacements. `[0x12162b40]` is initialised by `0x1137f6c0`, a one-time setup that also writes `[0x12162b40] =
 0x11f1071c`, `[0x1285c450] = 0x11f1074c`, `[0x1285c448] = 0x10413200`, `[0x1285c444] = 0x11f10798`, sets
 `or [0x1285c44c], 1` and calls `0x11788030`. Related accessors: `0x111854b0` = `mov eax, [0x12189644]` / `ret 4`,
@@ -1828,8 +1832,7 @@ then `jmp 0x10f0c4c0`.
 
 - Open objectives: find who writes `[0x12162beb]`; identify the class whose vftable is `0x11fc6268`
   (the neighbouring strings name `CFCXGOBuilderCommon`, so the holder is a `CFCXGOBuilder*` class) and
-  what its eight slots mean; who writes the mode-table sizing globals `[0x11fb5040]` (entry count) and
-  `[0x11fb5044]` (item size `0x418` / `0x69`); the owner of the container receiving the manager at
+  what its eight slots mean; who writes the count field `[[0x1280437c]+0xc]` used by the mode accessor; the owner of the container receiving the manager at
   `0x111f4fc6`; what `0x106eac80` and `0x106e96c0` do; the coop entry among the thirteen registry rows.
   Closed in this session: `[0x128042fc]` (`0x11789a00` at `0x1119a53e`), `0x118db560` (the
   allocation helper), `[0x121a7eb0]`-`[0x121a7eb8]` + `[0x120931c8]`, `[0x1217bc8c]` readers,
