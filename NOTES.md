@@ -1611,7 +1611,83 @@ holders, with the slot index of each target:
   `0x10004080`, then `0x11f1514c`), reads `[obj+0x14]` and `[obj+0x20]`; the store itself is
   still unreached.
 
-- Open objectives (unchanged): find who writes `[0x12162beb]` / `[0x128042fc]`; resolve the
-  remaining NOTES open items (owner of the container receiving the manager at `0x111f4fc6`,
-  `0x118db560`, `0x106eac80`, `0x106e96c0`, the coop entry among the thirteen, consumers of
-  `[0x12807738]`/`[0x12807740]`/`[0x12807744]`); bilingual NOTES + commit for every new finding.
+### The mode-object class behind the co-op consumer (probe143-probe149)
+
+The table I called `0x1200e608` is a mid-table entry. The real primary vftable is `0x1200e5f8` (53 slots), and its secondary interfaces are `0x1200e660` and `0x1200e668` (verified: `FarCry3Coop-bantila/local/scratch/p143.py`, `p146.py`). That explains why probe140 found no reference to `0x1200e608` — the code writes `0x1200e5f8`.
+
+The constructor is `0x10fa1eb0` and it is called from exactly one site, `0x1119a558` inside `0x1119a250`, which is the mode-registry registration function already recorded in these notes:
+
+```text
+10fa1eb0  55                       push ebp
+10fa1eb1  8bec                     mov ebp, esp
+10fa1eb3  51                       push ecx                     ; local slot for the registry id
+10fa1eb4  56                       push esi                     ; esi = this
+10fa1eb5  e8b6f13900               call 0x11341070              ; base ctor installs the 0x11f910b0 family
+10fa1eba  8d86a0000000             eax, [esi + 0xa0]            ; pointer to the sub-object at field +0xa0
+10fa1ec1  c706f8e50012             mov dword ptr [esi], 0x1200e5f8
+10fa1ec7  c7460860e60012           mov dword ptr [esi + 8], 0x1200e660
+10fa1ece  c7463c68e60012           mov dword ptr [esi + 0x3c], 0x1200e668
+10fa1ed5  e8f6ea2c00               call 0x112709d0              ; construct the +0xa0 sub-object
+10fa1eda  33c0                     xor eax, eax
+10fa1edc  898634010000             mov dword ptr [esi + 0x134], eax   ; three zeroed status fields
+10fa1ee2  8d4dfc                   ecx, [ebp - 4]
+10fa1ee5  898638010000             mov dword ptr [esi + 0x138], eax
+10fa1eeb  89863c010000             mov dword ptr [esi + 0x13c], eax
+10fa1ef2  6898138212               push 0x12821398              ; global registry object (all zeros in the image)
+10fa1ef7  c78640010000ffffffff     mov dword ptr [esi + 0x140], 0xffffffff
+10fa1f01  888644010000             mov byte ptr [esi + 0x144], al      ; cleared flag
+10fa1f0d  89864c010000             mov dword ptr [esi + 0x14c], eax
+10fa1f13  e868971bff               call 0x1015b680              ; string initialisation
+10fa1f18  8b55fc                   edx, [ebp - 4]               ; the value pushed by the caller
+10fa1f1b  899640010000             mov dword ptr [esi + 0x140], edx    ; store the registry id at +0x140
+10fa1f21  8bc6                     mov eax, esi                 ; return this
+10fa1f23  8be5 5d c3               mov esp, ebp; pop ebp; ret
+```
+
+The destructor at `0x10fa1e30` re-installs the same three vftables (that is what made the `0x1200e5f8` references look like a second constructor), then runs the sub-object destructor and the base destructor:
+
+```text
+10fa1e30  55 8bec 83ec18 56 57     push ebp; mov ebp,esp; sub esp,0x18; push esi; push edi
+10fa1e37  8bf9                     edi, ecx                     ; this
+10fa1e39  8b8740010000             esi, [edi + 0x140]           ; the stored registry id
+10fa1e3f  50                       push eax
+10fa1e40  be98138212               esi, 0x12821398
+10fa1e46  c707f8e50012             mov dword ptr [edi], 0x1200e5f8      ; destructor vftable install
+10fa1e4c  c7470860e60012           mov dword ptr [edi + 8], 0x1200e660
+10fa1e53  c7473c68e60012           mov dword ptr [edi + 0x3c], 0x1200e668
+10fa1e5a  e8e1491cff               call 0x10166840              ; string release (216 callers)
+10fa1e68  8d8f44010000             ecx, [edi + 0x144]
+10fa1e8e  c745ec9cff1f11           mov dword ptr [ebp - 0x14], 0x11f9cfc9
+10fa1ea0  5f 5e 8be5 5d c3         pop edi; pop esi; mov esp,ebp; pop ebp; ret
+10fa1ea5..0x10fa1eaf               int3 padding
+```
+
+Slot 0 of `0x1200e5f8` is the deleting destructor, which shows where the object is released from the manager:
+
+```text
+104de9e0  55 8bec 83ec0c           destructor entry (this in ecx)
+104de9ec  8bf1                     esi, ecx
+104de9ee  e83d34ac00               call 0x10fa1e30              ; body
+104de9f3  f6450801                 test byte ptr [ebp + 8], 1   ; "delete too" flag
+104dea00  83fe00 0f8410000000      esi == 0 -> skip, and bounds check against [0x121bbff8] / [0x121a7fdc]
+104dea0d  56                       push esi
+104dea0e  e89d8bffff               call 0x1177f5b0              ; operator delete
+104dea15  8b0d2c438012             ecx, [0x1280432c]            ; manager global
+104dea1b  e8304a5cff               call 0x106c2c50              ; remove-from-manager step
+104dea20  8bc6                     eax, esi
+104dea22  e8c98affff               call 0x117774f0              ; release / ref-count step
+104dea27  8b0d2c438012             ecx, [0x1280432c]
+104dea2d  e8ee495cff               call 0x106bde20              ; second manager step
+104dea32  8bc6 8be5 5d c20400      mov eax,esi; mov esp,ebp; pop ebp; retn 4
+```
+
+`0x104de9e0` has exactly one reference — the vftable entry itself — so the object is released only through a virtual call. The `+0xa0` sub-object destructor `0x11270920` installs `mov dword ptr [esi], 0x11fac4a0` and reads `[esi + 0x8c]` / `[esi + 0x90]`, which is the same accessor family already seen in `0x112710f0`; `0x11fac4a0` starts `0x10368ca0` then six `0x1008a7e0` (not-implemented) then `0x1008a830`.
+
+Meaning: the co-op consumer `0x10fa1710` is not a loose function — it is slot 15 of the co-op mode object, whose id is written at `+0x140` from the value the registration function pushes, and whose registry handle is the global `0x12821398`.
+
+- Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
+  from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
+  `0x11fc6268` and what its eight slots mean; resolve the remaining NOTES open items (owner of the
+  container receiving the manager at `0x111f4fc6`, `0x118db560`, `0x106eac80`, `0x106e96c0`, the coop
+  entry among the thirteen, consumers of `[0x12807738]`/`[0x12807740]`/`[0x12807744]`); bilingual
+  NOTES + commit for every new finding.
