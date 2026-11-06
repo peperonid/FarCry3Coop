@@ -1536,6 +1536,81 @@ second, name-based route into the same coop sessions.
   enumerate the registered name strings next to the hashes at `0x1216aeb8` / `0x1216aeb0` /
   `0x1216aea8`, and see which of them the single-player launch registers; then a dynamic experiment
   that asks the accessor for the coop session (`0x43521e6f`) in a running 1.06 process.
+### The launch-mode functions are virtual slots, not switch cases (probe132-probe137)
+
+`0x113403e0`, `0x10fa1710`, `0x11204b00`, `0x10fad5e0`, `0x10f0c770` have no `E8` caller
+because they are entries in class vftables in `.rdata`. `xlib.verified_xrefs` on the table
+*start* returns 0 hits; only slot addresses are referenced from code.
+
+Whole-image dword scan (`local/scratch/p131.py`, `.text` + `.rdata` + `.data`) - the five
+holders, with the slot index of each target:
+
+- `0x11f910c0` -> slot 5 `0x11341340`, slot 8 `0x1133fb30`, slot 12 `0x113403e0`,
+  slot 13 `0x1133fe20`, slot 20 `0x1133fbd0`, slot 22 `0x11340d90`. Slot 0 `0x1030f8c0`,
+  slot 1 `0x10007480`, slots 16-19 and 21 hold the pure-virtual filler `0x1061fee0`.
+  Installed by `0x11341070` (`mov dword ptr [ebx+0x3c],0x11f35e98` too), which also looks up
+  the serializable name `0x11f75a78` = `'CGameLoadingScreen'` (`push 0x11f75a78;
+  call 0x10a00be0`, then `push 0x11f75a78; call 0x10001ed0`), and does an
+  `lock xadd` ref-count pair on `[ebx+0x3c]`/`[ebx+0x40]`.
+- `0x11f91128` (installed at `[esi+8]` by `0x11340ec0`, `mov dword ptr [esi+0x3c],0x11f91130`)
+  -> slot 0 `0x1030fbf0`, slot 1 `0x1030f850`, slot 2 `0x1030fc00`, then the purecall stubs
+  `0x1008a7e0` / `0x1008a830` / `0x10089f80` and the small class `0x1165c760`..`0x1165c960`.
+- `0x1200e608` -> slot 4 `0x1133fb30`, slot 8 `0x113403e0`, slot 9 `0x1133fe20`,
+  **slot 11 `0x10fa1710`**, slot 1 `0x10fa1f30`, slots 12-18 `0x10fa13b0 0x10fa1200
+  0x10fa12e0 0x10fa11c0 0x10fa1160 0x10fa1530 0x10fa1d10`, slot 20 `0x11340560`,
+  slot 21 `0x10fa1170`, slots 22-23 `0x104df010` / `0x104de9d0`. It shares slots 0-10 with
+  `0x11f910c0` (`0x10c478a0` then `0x10390f00 0x1005bf70 0x1133fb30 0x10c471a0 0x10c47bf0
+  0x10c47600 0x113403e0 0x1133fe20 0x10c471b0`) and only differs from slot 11, so it is a
+  sibling class of the same hierarchy - a mode-specific variant that carries the whole
+  `0x10fa1xxx` method cluster (the launch-mode handler set).
+- `0x11fb5914` (interior of the vftable family whose dtor-shaped head is `0x11fb5844`,
+  installed at `[esi]` by `0x112046a0`/`0x11204a00`) -> slot 0 `0x10390fd0`, slot 2
+  `0x112073d0`, slot 3 `0x112029e0`, **slot 8 `0x11204b00`**, slot 9 `0x10391480`,
+  slot 20 `0x11204980`, slot 17 `0x11202bd0`. `0x11204a00` initialises the object:
+  `[esi+4]=0`, `[esi+8]=3`, `[esi+0xc]=0`, `[esi+0x14]=0`, `[esi+0x18]=-1`,
+  `[esi+0x1c]=-1`, `[esi+0x20]=0`, `[esi+0x24]=0`, self-referential list head at `[esi+0x28]`
+  (`mov [eax],eax; mov [eax+4],eax; mov [eax+8],0`), `push 0x400; lea ecx,[esi+0x3c]`.
+- `0x1200ac6c` -> **slot 8 `0x10f0c770`**, slot 1 `0x10fcad00`, slot 7 `0x10507f50`,
+  slot 9 `0x10f0cbe0`, slot 10 `0x10f0baf0`, slot 12 `0x10f0c0b0`, slot 13 `0x10f0cb60`,
+  slot 15 `0x104cedd0`, slot 16 `0x104cedc0`, slot 18 `0x11a58e90`. Slot 2-6 and 17 and 20
+  hold the pure-virtual filler `0x104833e0`.
+- `0x1200d820` -> **slot 8 `0x10fad5e0`**, slot 5 `0x116fb950`, slot 6 `0x10fb0570`,
+  slot 7 `0x10fb0ee0`, slot 9 `0x104da2a0`, slot 10 `0x10faf980`, slot 11 `0x10fad310`,
+  slots 12-14 `0x10fae850 0x10fae7d0 0x10fae740`, slot 17 `0x10faf910`, slot 18 `0x10fad340`,
+  slot 19 `0x10fb0510`, slots 20-21 `0x10fad330` / `0x10fad320`, slot 23 `0x104da280`.
+- Correction: `0x11f902b0`, `0x12009e48`, `0x1200c9f0`, `0x1200d7f8`, `0x11fb4a34` are NOT
+  tables - `0x11f902b0` is the class-name string `'CGOBuilderNode'` and `0x12009e48` is the
+  middle of a string (`'lities'`). `0x11f0ebec` (written by `0x1030d7b6 mov dword ptr
+  [edi],0x11f0ebec`) is not a vftable either: it is a Builder-node descriptor region whose
+  tail spells `'CVideoBuilderObject'`.
+- `0x11f5ad34` (73 dword sites, 65 of them in `.text`, 56 different functions, e.g.
+  `0x10048c80`, `0x10117620`, `0x111f5fe0`, `0x112046a0`, `0x11783510`) is a widely shared
+  base record, but its dump crosses into ASCII (`'NONE'`, `'Start'`, `'Stop'`, `'Form'`,
+  `'Spot'`, `'Soun'`) so it is a serializable-name/reflection record, not a plain vftable.
+- Slot references found in code (`local/scratch/p133.py`): `0x11f910c0+0x58` (slot 22) from
+  `0x11340ed4` (inside `0x11340ec0`); `0x11fb5914` slot 0 from `0x10390fdc` (`0x10390f60`),
+  slot 18 from `0x11204a50` (`0x11204a00`), slot 36 from `0x10fc3fd8` (`0x10fc3f30`), slot 63
+  from `0x112027d8` (`0x112027a0`); `0x1200ac6c` slot 11 from `0x10fcac1c` (`0x10fcab70`),
+  slot 15 from `0x104cedd8` (`0x104cedd0`) and `0x11a58df4` (`0x11a58d70`), slot 59 from
+  `0x11a585bc` (`0x11a585a0`); `0x1200d820` slot 17 from `0x10fad4b0` and slot 21 from
+  `0x10fad54c`, both inside `0x10fad4a0`. `0x1200e608` (the co-op-bearing vftable) has no
+  dword reference to its start or any slot from code, so the object is created by a
+  constructor that stores the address with a register-relative `mov [reg+disp],imm32`.
+- Consequence: to reach the co-op launch-mode handler statically one must find the code that
+  stores `0x1200e608` into an object field (a `mov dword ptr [reg+disp],0x1200e608` `c7` form,
+  since the vftable address itself never appears as a call target), not a call to `0x10fa1710`.
+  Hypothesis, not yet verified: the co-op mode object is constructed by a factory selected from
+  the mode-id registry rather than by an explicit named constructor.
+- `0x11789a00` is the only writer of `[0x128042fc]` found so far: it is a self-guarded init -
+  `cmp byte ptr [0x128042fc],0; jne 0x11789b63`, it stores three handlers `0x11789840`,
+  `0x117899e0`, `0x11789990` into the table at `0x121a7eb0`, calls the function pointer in
+  `[0x1217bc8c]`, sets `mov dword ptr [0x120931c8],0x121a7eb0`, then `0x11789a45 mov byte ptr
+  [0x128042fc],1`, and ORs `[0x1288c800]`. `[0x12162beb]` has a pure getter at `0x1177eba0`
+  (`mov al,byte ptr [0x12162beb]; ret`) and its only byte store is at `0x11774c4a` inside
+  `0x11774b70`, which loops over a string list (`push 0x11f15148; call 0x10a00be0` ->
+  `0x10004080`, then `0x11f1514c`), reads `[obj+0x14]` and `[obj+0x20]`; the store itself is
+  still unreached.
+
 - Open objectives (unchanged): find who writes `[0x12162beb]` / `[0x128042fc]`; resolve the
   remaining NOTES open items (owner of the container receiving the manager at `0x111f4fc6`,
   `0x118db560`, `0x106eac80`, `0x106e96c0`, the coop entry among the thirteen, consumers of
