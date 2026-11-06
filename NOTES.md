@@ -1272,10 +1272,85 @@ time, and what entry 8's family is.
   argument is `-spawn` `0x11fb7fc0` (`0x11a8cb17..0x11a8cb1d`)
 - [ ] Find the callers of the co-op mode constructor `0x11a5a6e0` and what writes `[0x12162beb]` /
   `[0x128042fc]` (its two gates)
-- [ ] Read `FC3.dll 0x1119fa50 .. 0x111a0a90` (third mode-id consumer region, 400 instructions, already
-  dumped in `local/scratch/probe36.txt`) and the per-mode object builders `0x11a5a0b0`, `0x11a5a290`,
-  `0x11a5a560`, `0x11a7a2e0`, `0x11a7aa00`, `0x11a7ab80`, `0x11a7ad00`, `0x11a7ae80`, `0x11a7aff0`
-- [ ] Check whether `[0x12804acc]` (the container the launch-mode registration writes) is the same object
-  the coop tests read (`0x1111e4d4`, `0x1111e907`) or a different launch object — the registration writes
-  id-global addresses (`push 0x1216aee4`), the coop test compares the id VALUE, so the two shapes differ
+- [x] Partially resolved 2026-11-06: that region is the per-mode install chain of the mode manager
+  (see the "Mode-manager object and the mode registry" section). Still unread: the region head
+  `0x1119fa50` (400 instructions, already dumped in `local/scratch/probe36.txt`) and the per-mode
+  object builders `0x11a5a0b0`, `0x11a5a290`, `0x11a5a560`, `0x11a7a2e0`, `0x11a7aa00`, `0x11a7ab80`,
+  `0x11a7ad00`, `0x11a7ae80`, `0x11a7aff0`
+- [x] RESOLVED 2026-11-06 — it IS the same object, installed at `0x117567ce`; see the
+  "Mode-manager object and the mode registry" section below. The suspicion that the two shapes
+  differ (registration writes id-global addresses like `push 0x1216aee4`, the coop test compares the
+  id VALUE) was wrong: `+0x68` is the registry pointer and `+0x6c` is an ownership flag.
 - [ ] Phase 3: story script patches for multi-player
+
+## Mode-manager object and the mode registry (2026-11-06, FC3.dll 1.06, `local/scratch/probe53.py` .. `probe56.py`)
+
+- **`[0x12804acc]` is installed by `0x117567ce mov dword ptr [0x12804acc], esi`** (`FC3.dll
+  0x117567c0 .. 0x11756810`): primary vftable `0x11f16a3c` (`0x117567c4`), a second vftable
+  `0x11f1bdc0` at `+4` (`0x117567d4`) and at `+0x30` (`0x117567ed`), sub-objects built at `+8`
+  (`lea ecx,[esi+8]` + `call 0x106bdde0` at `0x117567cb/0x117567db`) and `+0x34`
+  (`lea ecx,[esi+0x34]` + `call 0x106bdde0` at `0x117567ea/0x117567f4`), fields `+0x24/+0x28/+0x2c`
+  and `+0x50..+0x64` zeroed (`0x117567e0..0x11756808`), a third sub-object at `+0x70`
+  (`lea ecx,[esi+0x70]`, `0x1175680b`). It is cleared twice: `0x11756f37 mov dword ptr [0x12804acc],
+  ebx` after `call 0x106bde10` (`0x11756f31`), and `0x10048100 mov dword ptr [0x12804acc], 0` inside
+  the deleting dtor `0x100480f0` (`mov dword ptr [esi], 0x11f169dc` at `0x100480fa`).
+- **The registration API `0x1029eb00` is fed the map at `obj+0x30`**: `mov eax, dword ptr [ebp+8]` +
+  `add eax, 0x30` + `call 0x1029eb00` (`0x117567ab..0x117567b1`). The launch-mode registration
+  `0x1119dec0` uses the same API with `add eax, 4`; that offset difference is still open.
+- **`engine\gamemodes\GameModesConfig.xml` (`0x11f16940`) has exactly two references, both in one
+  function `0x117568a0`**: `mov ecx, dword ptr [0x12804308]` (`0x117568a6`) → `mov eax,[ecx]` +
+  `mov edx,[eax+0x10]` (`0x117568ae`) → `push 0x11f16940` (`0x117568b5`) → `call edx` (`0x117568ba`);
+  false path `mov dword ptr [edi], 0` (`0x117568c0`), true path `push 0; push 0x11f16940;
+  lea eax,[esp+0xc]; push eax` (`0x117568cd..0x117568d8`).
+- **Registry container `[0x128048c0]` has one creator and one releaser**: created by `0x10048230`
+  (`mov dword ptr [eax], 0x11f224c4` at `0x10048271`, fields `+4..+0x18` = 0, published at
+  `0x10048289` and `0x10048297`); released in the mode-manager destructor `0x11756e00`:
+  `mov ecx, dword ptr [0x128048c0]` (`0x11756e03`) → if non-null `mov eax,[ecx]` + `mov edx,[eax]` +
+  `push 1` + `call edx` (`0x11756e1a..0x11756e20`) → `mov dword ptr [0x128048c0], ebx` (`0x11756e25`);
+  the manager's own `+0x68` pointer is released with `push eax; call 0x11701470`
+  (`0x11756e34/0x11756e35`) only when the ownership byte `[esi+0x6c]` is set
+  (`cmp byte ptr [esi+0x6c], bl` at `0x11756e2f`, cleared at `0x11756e3a`). This confirms the co-op
+  test path `+0x68` and that `+0x6c` is a flag, not a pointer.
+- **Per-mode install helper `0x11756dc0 .. 0x11756dfc` (`ret 0x10`)**: `mov edx, dword ptr [ebp+0x10]`
+  (mode id) + `mov esi, dword ptr [ebp+8]` (manager) + `lea eax,[esi+0x30]` + `call 0x118cea00`
+  map lookup (`0x11756ddc/0x11756ddf`), on hit `push esi; lea ecx,[esp+0x18]; call 0x11756a50`
+  (`0x11756de8..0x11756ded`), result byte read at `mov al, byte ptr [esp+0x13]` (`0x11756df2`).
+- **The install chain `0x1119fa50 .. 0x111a0a6b` has three groups** (22 `call 0x11756a50` sites at
+  `0x111a0870..0x111a0a6a`): group A `call 0x103d2b20` for 11 ids (`0x111a0880..0x111a0966`, co-op
+  `0x1216aee4` at `0x111a0944`), group B `call 0x103d2b90` for 5 ids (`0x111a097d..0x111a09d9`:
+  `0x1216aedc`, `0x1216af0c`, `0x1216aeec`, `0x1216aef4`, `0x1216aefc`), group C `call 0x103d2c00`
+  for 6 ids (`0x111a09f0..0x111a0a63`, adds `0x1216ca9c`). Co-op appears only in group A.
+- Group services: `0x103d2b20` pushes the class name `CFCXConsoleService` (`0x11fc5760`) and the mode
+  factory `0x11a746b0`; `0x103d2b90` pushes `CFCXMultiPlayerConsoleService` (`0x11fc5568`) and the
+  factory `0x10fad580`; `0x103d2c00` is the third variant (`mov al, bl; ret 8` at
+  `0x103d2c63..0x103d2c6b`). All three return a bool and are called only from this chain.
+- **`0x11756c50` (`ret 0x10`) refuses the install when the id is absent from `[0x128048c0]`**
+  (record field `+0x20`, scan `cmp dword ptr [ebx+0x20], edi` at `0x11756c82`, miss path
+  `xor al,al; ret 0x10` at `0x11756ca5..0x11756cad`); on success it passes the gates
+  `cmp byte ptr [0x128042fc],0` + `call 0x11789a00` (`0x11756cb0..0x11756cb9`) and
+  `cmp byte ptr [0x12162beb],0` (`0x11756cc5`) and allocates with `mov edx,0x10; lea ecx,[edx+0x10];
+  call 0x1177f7c0`.
+- **Mode registration is re-run by a shutdown/re-init driver at `0x111f3b30`** whose head is
+  `mov edi,ecx; call 0x111f22c0; cmp byte ptr [edi+0xb3],0; je 0x111f3c52`: it calls `0x1119f920`
+  (`0x111f429b`), `0x1119fa50` (`0x111f42a0`), `0x1119dfa0` (`0x111f42a5`) after a release loop
+  (`lock xadd dword ptr [eax], edx` + `mov eax,[ecx]` + `mov edx,[eax+4]` + `call edx` at
+  `0x111f42dd..0x111f4327`, `mov edi, dword ptr [0x12804b88]` (`0x111f42eb`), `call 0x11938250`
+  (`0x111f42f5`), `call 0x1039c5b0` (`0x111f4304`)).
+- Small accessor `0x111f3ae0 .. 0x111f3b2b`: `mov eax,[0x12804acc]` + `cmp byte ptr [eax+0x6c],0` +
+  `mov eax,[eax+0x68]` + `push eax; call 0x1039c880` + `push eax; call 0x1116d760`, then
+  `[0x12805450]` → `0x1135e720`, `[0x1280564c]` → `0x111e1c00`, `[0x128055ec]` vtable slot `+0xc`,
+  `[0x1280563c]` → `0x111e44d0`.
+- `0x111a0860` and `0x111a0a70` have **zero** direct E8/E9 callers: `0x111a0860` is reached by
+  fall-through inside `0x1119fa50`; `0x111a0a70` is a thunk (`push ecx; call 0x1119f920;
+  call 0x1119fa50; call 0x1119dfa0; pop ecx; ret` at `0x111a0a70..0x111a0a81`) whose only internal
+  call sites are `0x111a0a71/0x111a0a76/0x111a0a7b`, so its entry must be reached through a jump
+  table or a data reference (open).
+- Sibling mode builder `0x11a746b0 .. 0x11a74745` (used by `0x103d2b20`): same gates
+  (`cmp byte ptr [0x128042fc],0` → `call 0x11789a00`; `cmp byte ptr [0x12162beb],0`), allocation
+  `mov edx,0x10; lea ecx,[edx+0x40]` (0x50) `call 0x1177f7c0`, init `[obj] = 0x11f169e8`,
+  `[+0x1c] = 0xffffffff`, `[+0x48] = 7`, final vftable `mov dword ptr [eax], 0x1200cf78`
+  (`0x11a74732`).
+- Open: who calls `0x117567c0` / `0x117568a0`; what the `obj+0x30` map (`0x118cea00`) holds; who
+  writes `[obj+0x68]` and sets `[obj+0x6c]`; why `0x1119dec0` uses `add eax,4` but `0x117567ae` uses
+  `add eax,0x30`; the consumers of `0x1068f590` / `0x11851c40` callback registrars at
+  `0x103d2c6e` / `0x103d2ce0`.
