@@ -1736,9 +1736,9 @@ So allocation and release of the co-op mode object are bracketed by the same two
 `0x106c2c50` on entry and `0x106bde20` on exit, both against the global `[0x1280432c]`. The NOTES
 open item "`0x118db560` unresolved" is closed.
 
-### What the co-op mode installer `0x11789a00` installs (probe155-probe156)
+### What `0x11789a00` really installs: the game's custom allocator (probe155-probe158)
 
-The first 0x3c bytes of `0x11789a00` are a gate plus a three-slot hook table install:
+The first 0x3c bytes of `0x11789a00` are a one-shot guard plus a three-slot handler table install:
 
 ```text
 11789a00  cmp byte ptr [0x128042fc], 0        ; one-shot guard (the writer is 0x11789a00 itself)
@@ -1763,6 +1763,14 @@ touched at `0x106ed8bc`, `0x106efaa7`.
 RTTI lookup for `0x11fc6268` and `0x1200e5f8` failed: their `-4`/`-8` slots hold code addresses or non-pointers
 (`0x11fc6268-4 -> 0x104833e0`, `0x11fc6268-8 -> 0x11746490`, `0x1200e5f8-8 -> 0x66006e`), so neither table is a
 plain MSVC primary vftable with a CompleteObjectLocator.
+
+Probe158 corrects the label: `0x11789a00` is the game's custom-allocator initialisation, not a co-op install site.
+It is called lazily from `0x11789b70` (`call 0x11789a00` at `0x11789b81`, the sized `operator new` path) and from
+`0x117898c0` (`call 0x11789a00` at `0x117898d3`, the `operator delete` path), both behind `cmp byte [0x128042fc],0`.
+So `[0x128042fc]` means "allocator initialised", and the arena bookkeeping globals are `[0x121bbff8]`, `[0x121a7fdc]`
+and `[0x121a7fe0]` (`0x1177f560` picks the arena slot with `sub eax,[0x121bbff8]`, `shr eax,0x10`, `lea esi,[eax+eax*4]`,
+`lea esi,[esi*4+0x121a7fe0]`). Every earlier NOTES claim that `[0x128042fc]` is a launch-mode gate must be
+re-read with this correction: it is the allocator-initialised flag, not a mode gate.
 
 - Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
   from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
