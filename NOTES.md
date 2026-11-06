@@ -1768,9 +1768,9 @@ Probe158 corrects the label: `0x11789a00` is the game's custom-allocator initial
 It is called lazily from `0x11789b70` (`call 0x11789a00` at `0x11789b81`, the sized `operator new` path) and from
 `0x117898c0` (`call 0x11789a00` at `0x117898d3`, the `operator delete` path), both behind `cmp byte [0x128042fc],0`.
 So `[0x128042fc]` means "allocator initialised", and the arena bookkeeping globals are `[0x121bbff8]`, `[0x121a7fdc]`
-and `[0x121a7fe0]` (`0x1177f560` picks the arena slot with `sub eax,[0x121bbff8]`, `shr eax,0x10`, `lea esi,[eax+eax*4]`,
-`lea esi,[esi*4+0x121a7fe0]`). Every earlier NOTES claim that `[0x128042fc]` is a launch-mode gate must be
-re-read with this correction: it is the allocator-initialised flag, not a mode gate.
+and `[0x121a7fe0]` (`0x1177f560` picks the arena slot with `sub eax,[0x121bbff8]`, `shr eax,0x10`,
+`lea esi,[eax+eax*4]`, `lea esi,[esi*4+0x121a7fe0]`). Every earlier NOTES claim that `[0x128042fc]` is a
+launch-mode gate must be re-read with this correction: it is the allocator-initialised flag, not a mode gate.
 
 - Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
   from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
