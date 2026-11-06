@@ -1796,9 +1796,42 @@ releases the array with `call 0x118830a0`, then closes `[0x128043f8]` via `call 
 `call 0x1161fef0`, `[0x12804b18]` via `call 0x1161ccc0` and `call 0x1161e1b0`, and `[0x128043c8]` via
 `call 0x11742100`.
 
-- Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
-  from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
-  `0x11fc6268` and what its eight slots mean; resolve the remaining NOTES open items (owner of the
-  container receiving the manager at `0x111f4fc6`, `0x118db560`, `0x106eac80`, `0x106e96c0`, the coop
-  entry among the thirteen, consumers of `[0x12807738]`/`[0x12807740]`/`[0x12807744]`); bilingual
-  NOTES + commit for every new finding.
+### Where the co-op mode id enters the mode table (probe172-probe174)
+
+`0x11199e80` is the installer that asks for the co-op mode (`edi` = request argument):
+
+```text
+11199e80  mov eax, [0x12804b3c] ; cmp eax, edi ; push 0x43521e6f ; push eax ; call 0x110079e0
+11199ea5  mov eax, [0x12162b40] ; call 0x1137f6c0
+11199eb7  push 0x6f1e5243 ; push eax ; call 0x11007a00
+11199ec5  test al, al ; jz 0x11199ed9
+11199ed0  cmp eax, -1 ; jne 0x11199eeb
+11199ed6  cmp byte ptr [0x128042fc], 0 ; je 0x11199ee9
+11199ee9  mov dword ptr [edi], 0x128040c0 ; mov dword ptr [edi + 4], 0x2e0000
+11199f13  mov dword ptr [edi + 8], 0x43521e6f
+```
+
+So the co-op id `0x43521e6f` is pushed (and its byte-swapped form `0x6f1e5243` is used as the compare value for the
+accessor) into `0x110079e0` / `0x11007a00`, and the slot is filled with the descriptor `0x128040c0`, the value
+`0x2e0000` and the co-op id. The accessor helpers size the table from `[0x11fb5040]` (entry count) and
+`[0x11fb5044]` (item size): `0x110079e0` computes `lea eax, [edx*2 + edx]` (item size `0x69`), `0x110078a0` uses
+`imul edx, edx, 0x418` (`lea eax, [edx*8 + eax]`), and `0x11007a2b` indexes with `[0x11fb5040]`, `0x18` / `0x38`
+displacements. `[0x12162b40]` is initialised by `0x1137f6c0`, a one-time setup that also writes `[0x12162b40] =
+0x11f1071c`, `[0x1285c450] = 0x11f1074c`, `[0x1285c448] = 0x10413200`, `[0x1285c444] = 0x11f10798`, sets
+`or [0x1285c44c], 1` and calls `0x11788030`. Related accessors: `0x111854b0` = `mov eax, [0x12189644]` / `ret 4`,
+`0x11340c90` = `mov eax, [0x1217bc8c]; push 1; push eax; call 0x10c569d0`, `0x11185510` = `mov eax, [0x1280443c]`
+then `jmp 0x10f0c4c0`.
+
+`probe172.py` found 15 disp32 occurrences of the co-op id: code in `0x10f0c770`, `0x10f4c400`, `0x10f92420`,
+`0x10fa1710` (mode-object slot 15), `0x11279910` (twice), `0x1133fb80`, `0x113403e0` (thrice, the progress slot),
+`0x11a7f820`, and data cells `0x1216a00c`, `0x1216aa40`, `0x1216aee4`, `0x12173ff4` inside the `0x11bcac20` blob.
+
+- Open objectives: find who writes `[0x12162beb]`; identify the class whose vftable is `0x11fc6268`
+  (the neighbouring strings name `CFCXGOBuilderCommon`, so the holder is a `CFCXGOBuilder*` class) and
+  what its eight slots mean; who writes the mode-table sizing globals `[0x11fb5040]` (entry count) and
+  `[0x11fb5044]` (item size `0x418` / `0x69`); the owner of the container receiving the manager at
+  `0x111f4fc6`; what `0x106eac80` and `0x106e96c0` do; the coop entry among the thirteen registry rows.
+  Closed in this session: `[0x128042fc]` (`0x11789a00` at `0x1119a53e`), `0x118db560` (the
+  allocation helper), `[0x121a7eb0]`-`[0x121a7eb8]` + `[0x120931c8]`, `[0x1217bc8c]` readers,
+  `[0x12807738]`/`[0x12807740]`/`[0x12807744]` readers (`0x111f4fde`, `0x111f4ff2`, `0x111f500d`).
+  Bilingual NOTES + commit for every new finding.
