@@ -1685,6 +1685,31 @@ Slot 0 of `0x1200e5f8` is the deleting destructor, which shows where the object 
 
 Meaning: the co-op consumer `0x10fa1710` is not a loose function — it is slot 15 of the co-op mode object, whose id is written at `+0x140` from the value the registration function pushes, and whose registry handle is the global `0x12821398`.
 
+### Which class reaches the gate globals directly (probe152)
+
+`p152.py` disassembled five more unclaimed slots of `0x1200e5f8`, and all of them read the gate
+globals already recorded in these notes, which is how the co-op mode object reaches session state
+without going through the launch-mode functions:
+
+```text
+10fa1f30  slot 5   mov eax, [0x12804b3c]; cmp dword [eax+0x70], 1 ; same gate check as 0x10fa1710
+                   mov ecx, [0x12804430]                          ; another gate global
+10fa13b0  slot 16  mov eax, [0x12804acc]; cmp byte [eax+0x6c], 0  ; the gate global 0x1119a250 reads
+                   call 0x1048c910; mov edx, [0x12805180]; call 0x114cb560; call 0x1100d2f0
+10fa12e0  slot 18  mov eax, [0x12804acc]; test byte [eax+0x40], 0
+10fa1160  slot 19  mov eax, [0x12804acc]; cmp byte [eax+0x6c], 0
+                   ... mov edi, [eax+0x68]; call 0x100fe7b0
+                   mov ecx, [esi+0x14]; call 0x104dec50   ; or, on the other branch,
+                   mov edx, [esi+0x14]; call 0x104ded10
+10fa1d10           cmp byte [edi+0x144], 0                      ; the flag the ctor cleared
+                   push 0x12821398; call 0x1015b7b0; call 0x115e35d0
+                   call 0x103a9ea0; cmp eax, [0x1216ca90]; cmp eax, [0x1216ca9c]; call 0x1117f530
+```
+
+Layout check: `0x1200e5f8` slots `+0x20` (`0x10fa1f30`), `+0x30` (`0x10fa12e0`), `+0x3c`
+(`0x10fa1160`) match exactly where `0x11341070` installs `0x11f910f0`, `0x11f91128`, `0x11f91114`,
+so the co-op object is a member of the `0x11f910b0` family with a co-op slot set.
+
 - Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
   from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
   `0x11fc6268` and what its eight slots mean; resolve the remaining NOTES open items (owner of the
