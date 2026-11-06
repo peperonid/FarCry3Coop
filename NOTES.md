@@ -1710,6 +1710,32 @@ Layout check: `0x1200e5f8` slots `+0x20` (`0x10fa1f30`), `+0x30` (`0x10fa12e0`),
 (`0x10fa1160`) match exactly where `0x11341070` installs `0x11f910f0`, `0x11f91128`, `0x11f91114`,
 so the co-op object is a member of the `0x11f910b0` family with a co-op slot set.
 
+### The allocation helper that created the co-op mode object (probe153)
+
+`0x118db560` is now resolved: it is a manager-backed size-class allocation helper, and it is the
+call that produced the object passed to the co-op mode constructor at `0x1119a54d`:
+
+```text
+118db560  8b0d2c438012  mov ecx, [0x1280432c]     ; manager global as `this`
+118db566  56            push esi
+118db567  8bf0          mov esi, eax               ; eax = size requested
+118db569  e8e276defe    call 0x106c2c50            ; manager step, the same one the deleting destructor uses
+118db56e  83fe08        cmp esi, 8
+118db571  7718          ja 0x118db58b              ; size-class split
+118db573  8bc7          mov eax, edi               ; edi = the size the caller set (`mov edi,0x150` at 0x1119a548)
+118db575  e8f6c5e9ff    call 0x11777b70            ; allocate for size <= 8
+118db57a  8b0d2c438012  mov ecx, [0x1280432c]
+118db580  8bf0          mov esi, eax
+118db582  e89928defe    call 0x106bde20            ; manager step, the other one the deleting destructor uses
+118db587  8bc6 5e c3    mov eax,esi; pop esi; ret
+118db58b  8bd7 mov edx,edi; 118db58d 8bc6 mov eax,esi; 118db58f e8acc8e9ff call 0x11777e40  ; allocate for size > 8
+118db594..118db5a1      mov ecx,[0x1280432c]; mov esi,eax; call 0x106bde20; mov eax,esi; pop esi; ret
+```
+
+So allocation and release of the co-op mode object are bracketed by the same two manager calls,
+`0x106c2c50` on entry and `0x106bde20` on exit, both against the global `[0x1280432c]`. The NOTES
+open item "`0x118db560` unresolved" is closed.
+
 - Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
   from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
   `0x11fc6268` and what its eight slots mean; resolve the remaining NOTES open items (owner of the
