@@ -1772,6 +1772,30 @@ and `[0x121a7fe0]` (`0x1177f560` picks the arena slot with `sub eax,[0x121bbff8]
 `lea esi,[eax+eax*4]`, `lea esi,[esi*4+0x121a7fe0]`). Every earlier NOTES claim that `[0x128042fc]` is a
 launch-mode gate must be re-read with this correction: it is the allocator-initialised flag, not a mode gate.
 
+### Who builds the mode manager and what it registers (probe159-probe161)
+
+`0x111f4fc6` is the tail of the mode-manager setup. It takes the container in `[esp + 0x14]` (`esi`), creates the
+manager with `call 0x1039b710` (`0x111f4fcf`), stores it in the container field `[esi + 0xd4]` (`0x111f4fd8`), then
+registers three things on it:
+
+```text
+111f4fde  mov ecx, [0x12807738] ; push ecx ; mov ecx, eax ; call 0x106eac80    ; manager constructor argument
+111f4fec  mov eax, [esi + 0xd4] ; mov edx, [0x12807740]
+111f4ff8  mov ecx, [eax + 0x12c] ; mov ecx, [ecx + 0x24] ; push edx ; call 0x106e96c0
+111f5007  mov eax, [esi + 0xd4] ; mov edx, [0x12807744]
+111f500d  mov ecx, [eax + 0x130] ; mov ecx, [ecx + 0x24] ; push edx ; call 0x106e96c0
+111f5022  mov ecx, [esi + 0xd4] ; push 0 ; push esi ; call 0x106e46a0
+```
+
+So the manager's own sub-objects live at `[manager + 0x12c]` and `[manager + 0x130]`, each is reached through its
+`+0x24` field, and both are registered by `0x106e96c0` with the globals `[0x12807740]` and `[0x12807744]`; the final
+`call 0x106e46a0` hands the manager the container itself (`push 0; push esi`). The setup function returns `1` at
+`0x111f508c` (`ret 4`). The next function at `0x111f5090` is the matching teardown: it walks the array rooted at
+`[0x12805260]` (count at `[eax + 0xc]`, entries at `[eax + 8]`, each entry released through `call 0x11442150`),
+releases the array with `call 0x118830a0`, then closes `[0x128043f8]` via `call 0x11739ed0`, `[0x12804b14]` via
+`call 0x1161fef0`, `[0x12804b18]` via `call 0x1161ccc0` and `call 0x1161e1b0`, and `[0x128043c8]` via
+`call 0x11742100`.
+
 - Open objectives: the writer of `[0x128042fc]` is resolved (`0x11789a00`, called at `0x1119a53e`
   from inside `0x1119a250`); find who writes `[0x12162beb]`; identify the class whose vftable is
   `0x11fc6268` and what its eight slots mean; resolve the remaining NOTES open items (owner of the
