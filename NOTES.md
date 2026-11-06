@@ -1354,3 +1354,66 @@ time, and what entry 8's family is.
   writes `[obj+0x68]` and sets `[obj+0x6c]`; why `0x1119dec0` uses `add eax,4` but `0x117567ae` uses
   `add eax,0x30`; the consumers of `0x1068f590` / `0x11851c40` callback registrars at
   `0x103d2c6e` / `0x103d2ce0`.
+
+
+## Registry object: its allocation, constructor chain and the thirteen-entry table (2026-11-06, FC3.dll 1.06, `local/scratch/probe73.py` .. `probe81.py`)
+
+- `0x111f3b30` is **not** a jump-table target: its only data reference is vftable slot `+0x44` of
+  `0x11fba838` (`0x11fba87c`). RVA-form scans of `0x011f3ae0`, `0x011f3b30` and `0x0039c250` return
+  zero hits, so the registry is reached through vftables and tail-jump chains, not jump tables.
+- `0x11fba838` is the shared vftable of the thirteen registry sub-objects: exactly thirteen write
+  sites, all inside the builder `0x1039c250 .. 0x1039c580`, at offsets `0x20, 0xb0, 0x140, 0x1d0,
+  0x260, 0x2f0, 0x380, 0x410, 0x4a0, 0x530, 0x5c0, 0x650, 0x6e0` (stride `0x90`). Its slots include
+  the scalar deleting dtor `0x1039c580` at `+0x00` and `+0xac`, plus mid-function entries
+  `0x111f3d10` (`+0x24`) and `0x111f3b30` (`+0x44`).
+- Each sub-object ctor is `0x100013c0`: `mov ecx,esi; call 0x106dfa60` + `[esi+0x10] = 0x10238ce0` +
+  mask initialisation from the global `0x1217c698` (`mov eax,[0x1217c698]; mov [esi+4],eax`, then a
+  bit-mask loop with `shl ecx,cl` / `not eax` / `and` / `or` / `add ecx,2` / `shr eax,1`).
+  `0x106dfa60` is the base init: `[esi+8] = -1`, `[esi+0xc] = 0`, `[esi+4] = 0`, then `0x1217b420` +
+  `call 0x106f6fb0`, `[eax+4] = 0`, `[ecx] = 0`, `mov [esi],eax`, `lock xadd dword ptr [ecx],1`.
+- Handler addresses pushed into the thirteen entry ctors: `0x111f1070`, `0x111edbd0`, `0x111f22c0`,
+  `0x111f26c0`, `0x111f22a0`, `0x111f26e0`, **`0x111f3ae0` for the entry at `+0x380`** (push site
+  `0x1039c3e4`), `0x111f20a0`, `0x111f0a90`, `0x111f2140`, `0x111f0a30` three times. Entry `+0x380`
+  is the entry whose handler is the co-op accessor `0x111f3ae0` (`mov eax,[0x12804acc]` +
+  `cmp byte ptr [eax+0x6c],0` + `mov eax,[eax+0x68]`).
+- Manager constructor `0x1039c030 .. 0x1039c250` (`this` in `esi`): `call 0x106db0d0`; four init
+  groups (`lea edi,[esi+0x15c]` twice with stride `0x24` → `0x106ce850`; `lea ebx,[esi+0x1a8]` twice
+  with stride `0x48` → `0x106ce8b0`; `lea edi,[esi+0x280]` twice with stride `0x84` → `0x106d3ed0`);
+  then `lea edi,[esi+0x388]; call 0x1039c250` — the thirteen-entry table lives at manager offset
+  `+0x388` and its entry pointers are published at `+0x128..0x158` as `&esi+0x3a8, 0x438, 0x4c8,
+  0x558, 0x5e8, 0x678, 0x708, 0x798, 0x828, 0x8b8, 0x948, 0x9d8, 0xa68`. Tail registrars:
+  `push 0xd; push edi; mov ecx,esi; call 0x106bc890`, `push 2; lea eax,[esi+0x280]; call 0x106bc860`,
+  `push 2; lea eax,[esi+0x15c]; call 0x106bc8b0`, `push 3; push ebx; call 0x106bc8e0`; epilogue
+  `mov eax,esi; ret`. Inline callback pairs `(0x111edac0, 0)`, `(0x1039cc20, …)`, `(0x1039b990, 0)`
+  are registered through `call 0x106bc7b0` with `ecx` = `&esi+0x1f0` and `&esi+0x238`.
+- Reference census over every executable section (`local/scratch/calls.json` caches 721 985 rel32
+  call/jmp refs, 178 197 distinct targets): `0x1039c250` has one caller (`0x1039c09c`),
+  `0x1039c030` one (`0x1039b719`), `0x1039b710` one (`0x111f4fcf`), `0x111f3ae0` one (`0x111f3c54`),
+  and the teardown `0x1039d020` has thirteen (`0x1039b877..0x1039b97c`).
+- Allocation site (`0x111f4f9f..0x111f501d`): after `call 0x1039a420`, `call 0x1039ab60` and the
+  shared launch gate pair `cmp byte ptr [0x128042fc],0` → `call 0x11789a00` (`0x111f4fa9`,
+  `0x111f4fb2`), the object is created with **`mov eax,0x10; mov edi,0xaf0; call 0x118db560`**
+  (`0x111f4fb7`) — **size 0xaf0**, alignment 0x10 — and stored as `mov esi,[esp+0x14]` …
+  `mov dword ptr [esi+0xd4], eax` (`0x111f4fc6`, `0x111f4fd8`) after `push esi; call 0x1039b710`
+  (`0x111f4fce..0x111f4fcf`).
+- The entries are consumed immediately afterwards: `mov ecx,[0x12807738]; push ecx; mov ecx,eax;
+  call 0x106eac80` (`0x111f4fde..0x111f4fe7`), then `mov eax,[esi+0xd4]; mov edx,[0x12807740];
+  mov ecx,[eax+0x12c]; mov ecx,[ecx+0x24]; push edx; call 0x106e96c0` (`0x111f4fec..0x111f5002`) and
+  the same pattern for the next entry through `[eax+0x130]` with global `[0x12807744]`
+  (`0x111f5007..0x111f501d`): the published `+0x128..0x158` array is the dispatch table, each entry's
+  member at `+0x24` is passed as `this` to `0x106e96c0` with a per-entry global from
+  `[0x12807738 + n*4]`.
+- Corrections to earlier notes: the claim "thunk `0x11010ee0` → `0x12163234`" is wrong (`0x11010ee0`
+  bytes are `0c 00` followed by `0xcc` padding). `0x12162beb` has 14 218 raw matches but they are
+  `cmp eax,0x12162beb`-style immediates, not memory references, so the real gate stays the
+  `cmp byte ptr [0x12162beb],0` inside `0x11756c50`.
+- Tooling note: raw scans must use the section's raw pointer (`pe.d[ptr:ptr+rawsz]`); the earlier
+  `probe72.py` used the virtual offset as a file offset (`pe.d[sv:sv+vsz]`), which made every scan
+  return zero. `FC3.exe` is not present in `H:\FarCryCoop\TestFC3\bin\` (only `FC3.dll`,
+  `FC3_d3d11.dll`, `SandBar.dll`, `SandDock.dll`, `binkw32.dll`, `FC3Editor.*`, `FC3Updater.exe`);
+  the working copies are `E:\FarCryCoop\Work\fc3\FC3.exe`.
+- Open: who allocates the container whose field `+0xd4` receives the manager (`mov esi,[esp+0x14]` at
+  `0x111f4fc6`); what `0x118db560`, `0x106eac80` and `0x106e96c0` do exactly; which of the thirteen
+  entries is the co-op one at runtime (entry `+0x380` is the only one whose handler is the co-op
+  accessor); the consumers of `[0x12807738]`, `[0x12807740]`, `[0x12807744]`; whether the
+  `[0x128042fc]` / `0x11789a00` pair is the launch-argument check that has to be bypassed.
