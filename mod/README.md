@@ -67,8 +67,14 @@ DllGetClassObject@3, DllRegisterServer@4, DllUnregisterServer@5, GetdfDIJoystick
    (`H:\FarCryCoop\TestFC3\bin\`). Never into the real install (`H:\Uplay\Far Cry 3\` is
    read-only by project rule).
 2. Launch the game normally and load into a single-player game.
-3. Open `bin\fc3coop_probe.log` — it logs the detected engine base and the first pokes, e.g.
-   `FC3 coop probe: engine base = 0xXXXXXXXX (from FC3.dll)`.
+3. Open `bin\fc3coop_probe.log`. It now logs enough to answer H1 from a *single* run:
+   - `FC3 coop probe: engine base = 0xXXXXXXXX (from FC3.dll)` — the probe loaded and found the engine.
+   - `pre-poke default: [g1]=0xAAAAAAAA [g2]=0xBBBBBBBB` — the value the engine held *before* we
+     touched it (the single-player default). This tells us what a normal game stores there.
+   - `poke n/5: ... readback [g1]=0x... [g2]=0x...` — after each forced write, the value we read
+     back. If read-back equals `0x43521E6F` the poke stuck; if it shows the default again, the
+     engine overwrote us (H1 alone is not enough).
+   - `OVERWRITE: readback ...` / `heartbeat poke #N ...` — periodic proof of whether the value holds.
 4. Observe whether the game reports/enters a co-op (host) state or changes behaviour.
 
 If the game fails to start, delete `dinput8.dll` from the bin dir to restore it.

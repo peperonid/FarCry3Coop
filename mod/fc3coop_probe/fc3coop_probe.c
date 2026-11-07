@@ -308,6 +308,35 @@ static int poke_u32(uintptr_t addr, unsigned value) {
     return changed;
 }
 
+/*
+ * Read a uint32 from a live engine address, guarded twice (VirtualQuery for a
+ * committed, readable page + SEH around the load). Returns 1 and writes *out on
+ * success, 0 if the address is not safely readable. Used to observe the engine's
+ * own value at the co-op globals (pre-poke default, and post-poke read-back).
+ */
+static int peek_u32(uintptr_t addr, unsigned *out) {
+    MEMORY_BASIC_INFORMATION mbi;
+
+    if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi)) {
+        return 0;
+    }
+    if (mbi.State != MEM_COMMIT) {
+        return 0;
+    }
+    if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+                         PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))) {
+        return 0; /* PAGE_NOACCESS / guard / unknown: do not touch */
+    }
+
+    __try {
+        *out = *(volatile unsigned *)addr;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+    return 1;
+}
+
 /* Locate the live engine image. Returns its runtime base, 0 when not loaded. */
 static uintptr_t find_engine(const WCHAR **out_name) {
     HMODULE h = GetModuleHandleW(FC3_MODNAME);
@@ -329,6 +358,8 @@ static DWORD WINAPI poke_thread(LPVOID arg) {
     uintptr_t base;
     const WCHAR *name;
     int logged_writes = 0;
+    int logged_overwrite = 0;
+    int pokes_done = 0;
     (void)arg;
 
     for (;;) {
@@ -340,9 +371,28 @@ static DWORD WINAPI poke_thread(LPVOID arg) {
 
         log_line(L"FC3 coop probe: engine base = 0x%08X (from %s)", (unsigned)base, name);
 
-        /* Phase 2: keep forcing the co-op session id into both globals. */
+        /* Read the globals BEFORE writing them: this captures whatever value the engine
+         * holds on its own (e.g. the single-player default), so one run of the probe
+         * already tells us what a normal game stores at these two addresses. */
+        {
+            unsigned d1 = 0, d2 = 0;
+            int r1 = peek_u32(base + FC3_G1_RVA, &d1);
+            int r2 = peek_u32(base + FC3_G2_RVA, &d2);
+            if (r1 && r2) {
+                log_line(L"pre-poke default: [g1]=0x%08X [g2]=0x%08X", d1, d2);
+            } else {
+                log_line(L"pre-poke: g1_readable=%d g2_readable=%d (page not committed yet?)",
+                         r1, r2);
+            }
+        }
+
+        /* Phase 2: keep forcing the co-op id into both globals, and read the value back
+         * right after each write. If the read-back differs from FC3_COOP_ID, the engine
+         * overwrote us between the write and the read -- that is exactly the question
+         * H1 must answer (can a poke stick at all, or is the real state elsewhere). */
         for (;;) {
             int ok1, ok2;
+            unsigned b1 = 0, b2 = 0;
 
             Sleep(POKE_MS);
 
@@ -353,15 +403,23 @@ static DWORD WINAPI poke_thread(LPVOID arg) {
 
             ok1 = poke_u32(base + FC3_G1_RVA, FC3_COOP_ID);
             ok2 = poke_u32(base + FC3_G2_RVA, FC3_COOP_ID);
+            pokes_done++;
+
+            (void)peek_u32(base + FC3_G1_RVA, &b1);
+            (void)peek_u32(base + FC3_G2_RVA, &b2);
 
             if (logged_writes < LOG_MAX_WRITES) {
                 logged_writes++;
-                if (logged_writes == 1) {
-                    log_line(L"poke id 0x%08X -> [g1]=[g2]=0x%08X", FC3_COOP_ID, FC3_COOP_ID);
-                } else {
-                    log_line(L"poke id 0x%08X -> [g1]=[g2]=0x%08X (write %d/%d, g1_ok=%d g2_ok=%d)",
-                             FC3_COOP_ID, FC3_COOP_ID, logged_writes, LOG_MAX_WRITES, ok1, ok2);
-                }
+                log_line(L"poke %d/%d: g1_ok=%d g2_ok=%d readback [g1]=0x%08X [g2]=0x%08X",
+                         logged_writes, LOG_MAX_WRITES, ok1, ok2, b1, b2);
+            } else if ((b1 != FC3_COOP_ID || b2 != FC3_COOP_ID) &&
+                       logged_overwrite < LOG_MAX_WRITES) {
+                logged_overwrite++;
+                log_line(L"OVERWRITE: readback [g1]=0x%08X [g2]=0x%08X (wanted 0x%08X) pokes_done=%d",
+                         b1, b2, FC3_COOP_ID, pokes_done);
+            } else if (pokes_done % 20 == 0) {
+                /* Heartbeat roughly every 10s so the log keeps showing the held value. */
+                log_line(L"heartbeat poke #%d: [g1]=0x%08X [g2]=0x%08X", pokes_done, b1, b2);
             }
         }
     }
