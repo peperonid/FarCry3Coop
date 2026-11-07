@@ -2072,3 +2072,44 @@ New open questions: what object owns the `.rdata 0x1200ad00` dispatch table and 
 `0x11a58700`; which live object carries vtable `0x11bd2b04` (the mode-id-reset owner) — this needs a
 constructor that writes that vtable or a runtime/heap dump, since it is never stored statically; and
 whether `[0x121e5a38] = 0xc9700a6a` is a heap canary rather than a manager pointer.
+
+## The dispatch table `0x1200ad00` is owned by `CFCXPlaylistService` (2026-11-07, agent, `local/scratch/p283*.py`)
+
+Answers "what object owns the `.rdata 0x1200ad00` dispatch table and who calls vmethod `0x11a58700`"
+from the previous section. FC3.dll has **no MSVC RTTI** (the `-0x4` slot is 0; the only `.?AV` strings
+in the file are Havok serialization). FC3 uses a **custom RTTI: vtable slot `+0x04` is a class-info
+getter** that does `push <name_string>; call <getname>`. Chain (verified from raw bytes):
+
+- `IGameModeService` (base vtable `0x11f169e8`, getter `0x10048190`) → `CPlaylistService`
+  (vtable `0x11fab790`, getter `0x10362330`, name string `0x11f8d98c`, descriptor `.data 0x1285e0ec`)
+  → **`CFCXPlaylistService`** (the owner of the target vtable; name string `0x11fc544c`, pushed at
+  `0x103d1659`, descriptor `.data 0x12863890`, getter `0x103d1640`).
+- **Target vtable bounds:** `.rdata 0x1200ad00..0x1200ad50`, exactly 21 slots (`+0x00..+0x50`), bounded
+  by zero dwords at `0x1200acfc` and `0x1200ad54`. Slot `+0x48` returns the playlist-name strings
+  `"UserPlaylist"` (`0x1127a2b1`), `"OfflinePlaylist"` (`0x1127a2cf`), `"PrivateCoopPlaylist"`
+  (`0x1127a2e6`), `"MapArchivePlaylist"` (`0x1127a2fd`), `"BetaTestPlaylist"` (`0x1127a314`) — so the
+  co-op-id install routine `0x11279910` (a callee of this class's slots `0x11277c20`/`0x11278160`/
+  `0x11279700`) is reached from the **playlist service** object, i.e. picking the *PrivateCoopPlaylist*
+  (or similar) is what drives the co-op-id install.
+- **Constructor `0x11a585a0`** installs the vtable: `mov dword ptr [esi], 0x1200ad00` at `0x11a585b3`
+  (then child vtables at `[esi+0x50]=0x1200ad58`, `+0x54=0x1200ad9c`, `+0x58=0x1200ada8`,
+  `+0x60=0x1200ae10`, and `[esi+0x8c8]=0x11fbcc20`). Base ctor `0x11278470` first writes
+  `0x11f169e8`, then at `0x11278526` `mov [ebx], 0x11fab790`. Destructor `0x11a58440` re-stores
+  `0x1200ad00` at `0x11a5845f` (standard MSVC dtor behaviour).
+- **Factory `0x11a58670`**: `mov eax,0x10; mov edi,0x900; call 0x118db560` → **class size 0x900**, then
+  `call 0x11a585a0`. Only creation path is a **class-registry registration**: `push 0x11a58670` at
+  `.text 0x111a0541` inside `0x1119fa50`, immediately after `call 0x103d1640` (the class-info getter)
+  and `call 0x118ce980` (register into the global registry `[0x12804b1c]`).
+- **No global holds an instance:** the value `0x1200ad00` appears exactly twice in the whole file, both
+  as imm32 in `.text` (`0x11a585b5` ctor, `0x11a5845f` dtor). The instance lives on the heap; the
+  pointer is held by the (BSS, runtime-initialized) class registry `[0x12804b1c]`.
+- **Who calls vmethod `0x11a58700` — not resolvable statically, with proof why.** It is slot 5
+  (`+0x14`), an override (the base table `0x11fab790+0x14` holds `0x10362e70`). Its body:
+  `mov esi,ecx; call 0x1127a0f0; push esi; call 0x103fe6c0; mov [esi+0x8cc],eax` and links node
+  `[esi+0x8c8]` into the list at `[eax+0xe8]` (an "attach"); the sibling slot `+0x18` (`0x11a58380`)
+  detaches via `0x1115e4a0`. The classic `call dword ptr [ecx+0x14]` encoding (`FF 51 14`) does **not
+  exist** in this DLL (0 matches); every `call [reg+0x14]` form in `.text` goes through stack slots
+  (`ebp`/`ebx`/`esp` functors, 245 sites, none a vtable). Real virtual dispatch in this build is the
+  pair `mov reg,[obj+0x14]; call reg` — 3073 such pairs, not attributable to a type without a runtime
+  type map. **Next probe is dynamic:** breakpoint the factory `0x11a58670` (or the registry write
+  `0x118ce980`), dump `[instance]`, and trace returns of the slot `+0x14` call on a live process.
