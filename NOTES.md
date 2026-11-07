@@ -2153,3 +2153,16 @@ Open: (a) caller of vmethod `0x11a58700` — still unresolved, dynamic trace nee
 section); (b) identify `[0x1217c688]` and the meaning of the `[0x12807738..0x1280775c]` array;
 (c) what triggers the init table `0x11bd2b04` (CRT `__initterm` walker / engine DllMain slot
 `[0x11e6c3dc]`).
+
+## FC3.dll is ASLR-enabled — every hardcoded address must become base+RVA (2026-11-07, agent, `pefile` on the TestFC3 copy)
+
+Critical for the mod build (hooks H1/H2). `pefile` on `H:\FarCryCoop\TestFC3\bin\FC3.dll`:
+- `machine=0x14C` (x86), `ImageBase=0x10000000`, `DllCharacteristics=0x0140` → bit `0x40` (DYNAMIC_BASE)
+  **is set**, and the base-relocation data directory is **present**. So the DLL *will* relocate at
+  runtime when 0x10000000 is taken — all the addresses in this file are VA-at-preferred-base only.
+- Consequence: the ASI/loader must obtain the live FC3.dll module base (`GetModuleHandle("FC3.dll")`)
+  and add RVAs, never hardcode `0x12891ca0` etc. RVAs (VA − 0x10000000) already needed:
+  `[0x12891ca0]→0x2891ca0`, `[0x12891ca8]→0x2891ca8`, `[0x12807738..0x1280775c]→0x2807738..`,
+  vtable `0x1200ad00→0x200ad00`, init table `0x11bd2b04→0x1bd2b04`, install routine
+  `0x11279910→0x1279910`, `CFCXPlaylistService` method `0x11a58700→0x1a58700`.
+- `Subsystem=2` (GUI). The working copy is confirmed 1.06 (`FC3.dll` 40,720,424 bytes, 2026-11-01).
