@@ -2166,3 +2166,42 @@ Critical for the mod build (hooks H1/H2). `pefile` on `H:\FarCryCoop\TestFC3\bin
   vtable `0x1200ad00→0x200ad00`, init table `0x11bd2b04→0x1bd2b04`, install routine
   `0x11279910→0x1279910`, `CFCXPlaylistService` method `0x11a58700→0x1a58700`.
 - `Subsystem=2` (GUI). The working copy is confirmed 1.06 (`FC3.dll` 40,720,424 bytes, 2026-11-01).
+
+## Co-op installer call chain + Playlist service plumbing (session 4, static probes p290–p295)
+
+Probes `local/scratch/p29{0..5}_*.py` (+ `.out`) on `H:\FarCryCoop\TestFC3\bin\FC3.dll`. A researcher
+delegate was tasked to resolve the last dispatch link of the co-op installer; it timed out at the 30m
+wall-clock (SIGTERM) but its probe scripts completed. Findings:
+
+- **The co-op installer `0x11279910` has exactly two direct static callers**, both methods of the
+  playlist-service object (the `this` is held in `edi`/`esi` and members `[+0x8c0]`,`[+0x8c4]` are
+  written around the call):
+  - `0x1127a16f` inside routine `0x1127a0f0` (the base slot `+0x14` impl; `call 0x11279a90` then
+    `call 0x11279910` back-to-back, then sets members `[+0x488]=2`, `[+0x4b0]=0x32`, `[+0x4b4]=0xa`,
+    `[+0x4b8]=5`). `0x1127a0f0` is the routine that actually drives the co-op id install.
+  - `0x11279fc0` (child vtable `0x1200ad9c` slot 0 → co-op installer).
+- **`0x11a58700` is NOT the installer's caller** — re-confirmed. It is the `CFCXPlaylistService
+  not initialized` error path (see prior note); its only role in the chain is being slot 2 of vtable
+  `0x1200ad00`. The earlier `0x11a58700 → 0x1127a0f0` framing is superseded: the *real* per-tick
+  driver is the slot `+0x14` method `0x1127a0f0` on the playlist service, dispatched generically.
+- **Who creates the service**: registration routine `0x111a04f0`… calls getter `0x103d1640`
+  (singleton guard `[0x1286388c]`, instance global `0x12863890`) and registers slot handlers via
+  `0x118ce980` (pushes handler `0x11a58670` then `call 0x118ce980`), plus a create/lookup
+  `0x11756a50` on service container `[0x12804acc]`. Handler `0x11a58670` sits next to the
+  `not initialized` error path `0x11a58700` (same object, slot 0x14 region).
+- **Playlist service registry names** (`.rdata`, `NetObject.PlaylistService` family):
+  `CPlaylist`@`0x11fab6a4`, `CPlaylists`@`0x11fab6b0`, `CPlaylistServiceMemento`@`0x11fab6bc`,
+  `NetObject.PlaylistService`@`0x11fab6de`, `UserPlaylist`@`0x11fab6f0`, `OfflinePlaylist`@`0x11fab700`,
+  **`PrivateCoopPlaylist`@`0x11fab710`**. `UserPlaylist`/`OfflinePlaylist`/`PrivateCoopPlaylist` are
+  referenced together at `0x1127a2b2`/`0x1127a2d0`/`0x1127a2e7` — i.e. immediately after the co-op
+  installer caller `0x1127a0f0`. **`PrivateCoopPlaylist` is the likely co-op session playlist type**;
+  flag for follow-up (what selects it, and does the co-op id `0x43521e6f` pair with it).
+- **Verdict on the last dispatch link (who invokes slot `+0x14`)**: **NOT statically resolvable in
+  reasonable time.** A generic scan (p295) for `mov r,[base+0x14]; call r` finds hundreds of sites
+  across `.text` (the idiom is the engine's generic tick dispatch), so it can't be narrowed by
+  pattern alone. Needs a runtime trace: break on `0x1127a0f0` (or the installer `0x11279910`),
+  capture the return-address stack and `this` (`edi`), which reveals the scheduler that ticks the
+  playlist service. This is the owner's (debugger) task, not a static one.
+- Net effect on the mod plan: H1 (poke the id into `[base+0x2891ca0]/[base+0x2891ca8]`) is
+  **unaffected** — we install the id after the fact, we don't need the dispatcher. `PrivateCoopPlaylist`
+  at `0x11fab710` is a new lead for the host-side session setup.

@@ -13,3 +13,8 @@ scratch_*
 # disassembler caches
 *_dis_cache.json
 __pycache__/
+
+# FC3 co-op probe build artifacts (sources under mod/ are tracked; binaries are not)
+mod/fc3coop_probe/build/
+mod/fc3coop_probe/build_log.txt
+mod/fc3coop_probe/*.log
