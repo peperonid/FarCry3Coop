@@ -2205,3 +2205,44 @@ wall-clock (SIGTERM) but its probe scripts completed. Findings:
 - Net effect on the mod plan: H1 (poke the id into `[base+0x2891ca0]/[base+0x2891ca8]`) is
   **unaffected** — we install the id after the fact, we don't need the dispatcher. `PrivateCoopPlaylist`
   at `0x11fab710` is a new lead for the host-side session setup.
+
+## Are G1/G2 the live co-op state? H1 verdict (session 5, static probes p300–p311)
+
+Probes `local/scratch/p30{0,0b,1,2,3}_*.py`, `p310_consumers.py`, `p311_modefunc.py` (+ `.out`) on
+`H:\FarCryCoop\TestFC3\bin\FC3.dll`; cross-checked against researcher delegate `del_mw6w8qqd_bsky`
+(timed out 30m, `.out` empty, but its session thinking + probes are corroborating). This REFINES and
+partly CORRECTS the session-4 note ("H1 is unaffected"). New, decisive:
+
+- **G1=`0x12891ca0` / G2=`0x12891ca8` are NOT the live mode state.** They are function-local
+  `static const` query-key constants that MSVC promoted to `.data` (each paired with an init-guard
+  byte `0x12891ca4` / `0x12891cac`). Raw dword scan (p300/p300b): each has exactly **3 references in
+  all of `.text`, and all of them sit inside the two co-op installer routines `0x11279910` /
+  `0x11279a2b`** (sites `0x11279961/65/2b` for G1, `0x11279ae1/e5/ab` for G2). No gameplay/dispatch
+  code reads them by address. So scribbling them from an ASI **cannot switch the live game mode** —
+  it only edits the constants the installer uses as lookup keys. (Session-4 "H1 unaffected" was too
+  optimistic: H1 is not harmful, but it is also **not sufficient and tests the wrong variable**.)
+- **The co-op id `0x43521e6f` is referenced at 11 distinct `.text` sites** (p300b):
+  `0x10f0c7ec, 0x10f4cb11, 0x10f9260e, 0x10fa1aa5, 0x11279965(installer), 0x11279ae5(installer),
+  0x1133fb8a, 0x113405ab, 0x1134062a, 0x11340a2d, 0x11a7fa12`. These are the real consumers.
+- **Live current game-mode id = object field `[this + 0x4c]`.** At `0x113405a0`
+  (`mov eax,[ebx+0x4c]`) the code dispatches on the current mode by comparing it against a family of
+  **six mode-hash ids** — `0xab4fc8e2, 0x43521e6f(CO-OP), 0x9991daec, 0x6c2b3868, 0xf66ffb87,
+  0x2100ced7` — and the co-op one routes to `FCXMainMenu` + the `IngameToLobby` command
+  (`0x113405cd`..`0x11340600`). `ebx` is the mode-manager `this`. This field, not G1/G2, is the
+  switch that actually selects co-op. The six ids did **not** match plain FNV-1a of candidate mode
+  names (custom hash) — naming the siblings is a follow-up.
+- **Better "current-mode" statics than G1/G2** (delegate finding, consistent with p310):
+  `.data` slot `0x1216aee4` holds `0x43521e6f` **statically (never written from `.text`)** and is
+  read/compared ~15× as a global value (`cmp eax,[0x1216aee4]`, `mov ecx,[0x1216aee4]`); likewise
+  `0x1216ca90` holds `0x80608f71` (campaign/single-player id) read 20+×. These behave like
+  compile-time mode constants, not mutable runtime state.
+- **Real mutable state holder** (delegate, needs runtime confirmation): the live playlist/session
+  entry container at `[service + 0x8c0]` (service = the `CFCXPlaylistService` singleton, instance
+  global `0x12863890`), plus an id→mask registry global `[0x128048c0]` and the service container
+  `[0x12804acc]`. The co-op session is a `PrivateCoopPlaylist` (`0x11fab710`) entry in that container.
+
+**Net effect on the plan**: H1 (ASI poke of G1/G2) is demoted from "enables co-op" to "safe
+diagnostic that will be INCONCLUSIVE by construction" — the engine keeps `0x43521e6f` there itself,
+so writing the same value proves nothing, and the mode switch reads `[this+0x4c]`. The productive
+lead is the **live playlist-service container `[service+0x8c0]`** and the **mode-manager field
+`+0x4c`**; both need a runtime trace (owner's debugger), not an offline poke.

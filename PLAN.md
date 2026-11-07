@@ -44,6 +44,10 @@ Parts in both cases:
 - Injection for the first experiments does **not** need the ASI loader: the H1 probe is a
   self-contained `dinput8.dll` proxy (`mod/fc3coop_probe/`, built 2026-11-07) that needs no
   external loader. The ASI + Ultimate ASI Loader path stays the eventual shipping form.
+  **Caveat (2026-11-08, NOTES session 5):** the probe's poke of `0x12891ca0/0x12891ca8` is now known
+  to be a *diagnostic only* — those are `static const` lookup keys, not the live mode state; the real
+  co-op switch is the mode-manager field `[this+0x4c]` and the live playlist container
+  `[service+0x8c0]` (`CFCXPlaylistService`, instance global `0x12863890`), which need a runtime trace.
 - Script layer: changed mission scripts in our own archive; original files are not replaced.
 - **Steam invite:** the game has no `steam_api.dll` (Steam only starts it, Ubisoft Connect runs
   it), so the Far Cry (2004) Steam bridge (Spacewar, AppID 480) is reused: "Join" in the Steam
