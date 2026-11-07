@@ -2113,3 +2113,43 @@ getter** that does `push <name_string>; call <getname>`. Chain (verified from ra
   pair `mov reg,[obj+0x14]; call reg` — 3073 such pairs, not attributable to a type without a runtime
   type map. **Next probe is dynamic:** breakpoint the factory `0x11a58670` (or the registry write
   `0x118ce980`), dump `[instance]`, and trace returns of the slot `+0x14` call on a live process.
+
+## `0x11bd2b04` is NOT a vtable — it is a function-pointer init table; the mode-id globals' real writer (2026-11-07, agent, `local/scratch/p285*.py`..`p287*.py`)
+
+Answers "which live object carries vtable `0x11bd2b04` (the mode-id-reset owner)" from the
+co-op-id section. A researcher run timed out at the 30-min watchdog; the result was reconstructed
+from raw bytes with probes p285–p287. Correction to the 2026-11-07 store-writer note:
+
+- **`0x11bd2b04` is not a class vtable.** It is a ~200-entry array of *tiny independent stub
+  functions* in `.rdata` (`0x11bd2b04..0x11bd2e24`, slots `0x11b29040..0x11b2a9c0`), not a class's
+  method table. Proof: (1) the base dword `0x11bd2b04` appears **0 times** anywhere in the file
+  (no code ref, no stored pointer) — a vtable always has at least its constructor's `mov [this],
+  <vtable>` imm32 (contrast the real `CFCXPlaylistService` vtable `0x1200ad00`, which has exactly
+  two such stores); (2) the entries are not methods — e.g. `+0x00` (`0x11b29040`) is
+  `call 0x10024dc0; push 0x11ba38f0; call 0x106f9c37; ret`, `+0x04` (`0x11b29060`) clears globals
+  `[0x12806178]`/`[0x12806184]` — none reads a `this`/`ecx` object. It is reached by a PE data
+  directory / CRT static-init mechanism, not by an object pointer.
+- **The reset routine `0x11b2a610` (table entry at `+0x2b8`, file `.rdata 0x11bd2dbc`) is a bare
+  initializer**, not a method: `or eax, 0xffffffff; mov [0x12807738], eax; ... mov [0x1280775c], eax; ret`
+  (ten dwords `0x12807738, 3c, 40, 44, 48, 4c, 50, 54, 58, 5c` set to `-1`). No argument, no side
+  effects → it runs once at module init to prime the array to `-1`.
+- **The only runtime writer of those ten globals is `0x117884f0`** (structural `.text` scan: 70
+  accesses of the block, exactly 5 stores, all in this one function). It is called from a single
+  `e8` site `0x10c56ee8`, inside a routine that allocates with `0x118db560` and stores the created
+  object into the global `[0x12805e24]`. `0x117884f0` reads a packed 16-bit field `[0x1217c688]`
+  (BSS default `4`), spreads its bits into the ten slots via per-bit loops, and writes them through
+  helper `0x10037bc0(global_va, &value, index)`; it also uses a count
+  `[0x1217af10]-[0x1217b2fc]` (BSS defaults `83`/`0x7FC9xxxx`). The other five globals
+  (`0x12807738/3c/40/44/5c`) have **no writer at all** besides the init stub `0x11b2a610`.
+- **Consequence for the "mode/session id" label:** the prior note called `[0x12807738..0x1280775c]`
+  the "mode/session id block". This pass shows the block is a fixed 10-dword array primed to `-1`
+  and recomputed at runtime from a packed feature/resolution bitfield — the co-op-id install path
+  (`0x11279910` → `[0x12891ca0/0x12891ca8]`) is a *different* set of globals. Whether these ten
+  dwords are session ids or a video/mode capability table needs a separate probe of `[0x1217c688]`;
+  flagged, not resolved. (The 2026-11-06 manager-ctor reads `0x111f4fde/0x111f4ff2/0x111f500d` of
+  `[0x12807738]/[0x12807740]/[0x12807744]` remain valid — readers exist, the writer is `0x117884f0`.)
+
+Open: (a) caller of vmethod `0x11a58700` — still unresolved, dynamic trace needed (see prior
+section); (b) identify `[0x1217c688]` and the meaning of the `[0x12807738..0x1280775c]` array;
+(c) what triggers the init table `0x11bd2b04` (CRT `__initterm` walker / engine DllMain slot
+`[0x11e6c3dc]`).
