@@ -1796,45 +1796,145 @@ releases the array with `call 0x118830a0`, then closes `[0x128043f8]` via `call 
 `call 0x1161fef0`, `[0x12804b18]` via `call 0x1161ccc0` and `call 0x1161e1b0`, and `[0x128043c8]` via
 `call 0x11742100`.
 
-### Where the co-op mode id enters the mode table (probe172-probe174)
+### Where the co-op mode id enters the mode table (probe172-probe190)
 
-`0x11199e80` is the installer that asks for the co-op mode (`edi` = request argument):
+`0x11199e80` is not an installer. probe186 disassembles it from the aligned function boundary and it is a small
+thunk that reaches the object stored at `[ecx + 0x14]`:
 
 ```text
-11199e80  mov eax, [0x12804b3c] ; cmp eax, edi ; push 0x43521e6f ; push eax ; call 0x110079e0
-11199ea5  mov eax, [0x12162b40] ; call 0x1137f6c0
-11199eb7  push 0x6f1e5243 ; push eax ; call 0x11007a00
-11199ec5  test al, al ; jz 0x11199ed9
-11199ed0  cmp eax, -1 ; jne 0x11199eeb
-11199ed6  cmp byte ptr [0x128042fc], 0 ; je 0x11199ee9
-11199ee9  mov dword ptr [edi], 0x128040c0 ; mov dword ptr [edi + 4], 0x2e0000
-11199f13  mov dword ptr [edi + 8], 0x43521e6f
+11199e80  push ebp ; mov ebp, esp ; push esi
+11199e84  mov esi, [ecx + 0x14] ; test esi, esi ; je 0x11199e95
+11199e8b  push edi ; mov edi, [ebp + 8] ; call 0x1133fd30
+11199e94  pop edi ; pop esi ; pop ebp ; ret 4
+11199e9a  int3 (x6, padding up to 0x11199ea0)
 ```
 
-So the co-op id `0x43521e6f` is pushed (and its byte-swapped form `0x6f1e5243` is used as the compare value for the
-accessor) into `0x110079e0` / `0x11007a00`, and the slot is filled with the descriptor `0x128040c0`, the value
-`0x2e0000` and the co-op id. `0x2e0000` and the co-op id. The accessor helpers read a count field, not a fixed table: `0x110079e0` loads
-`[edi]` -> `[edx]`, `push 1`, `call eax`, then `mov edx, [0x1280437c]`, `mov eax, [ebx+0xc]`,
-`mov ecx, [edx+0xc]`, `cmp eax, ecx`, `jb 0x11007a05`, so the limit is `[[0x1280437c]+0xc]`. `0x11007a10`
-`push 0x11fd1928` (`'Pause_%d'`) feeds `call 0x11789350`; `0x11007a53`-`0x11007a5a` read `[esp+0x20]` ->
-`[edx+4]` -> `[eax+0xd0]`, and `0x11007a60` reads `[0x12804a50]`. probe175 shows the globals
-`0x11fb5040`, `0x11fb5044`, `0x11fb5048`, `0x11fb504c` have no verified xrefs and no disp32 sites, so the
-earler sizing claim was wrong.
-displacements. `[0x12162b40]` is initialised by `0x1137f6c0`, a one-time setup that also writes `[0x12162b40] =
-0x11f1071c`, `[0x1285c450] = 0x11f1074c`, `[0x1285c448] = 0x10413200`, `[0x1285c444] = 0x11f10798`, sets
-`or [0x1285c44c], 1` and calls `0x11788030`. Related accessors: `0x111854b0` = `mov eax, [0x12189644]` / `ret 4`,
+`0x11199ea0` is a separate function and it has nothing to do with the mode table: it loads the FEU file
+`'UI\Singleplayer\Menu\Loading\loading.feu'` (`0x11fc6138`, pushed at `0x11199eab` and `0x11199ec3`), clears
+`[ebx + 0x10]`, calls `0x10a00be0` and `0x10001ed0`, reaches `[ebx + 0x14]` -> `[eax + 8]` (vtable slot 2, with
+`push esi` as an out-parameter), releases a reference with `or ecx, 0xffffffff` / `lock xadd dword ptr [eax], ecx`
+plus `call 0x100945e0`, and finally builds `{0x11f373cc, 0x11199d80, 0, 0, edx}` on the stack and calls
+`0x118b1810` with `ecx = 0x11fc6164`. `0x128040c0` and `0x6f1e5243` have zero verified xrefs, so the
+`[edi] = 0x128040c0`, `[edi + 4] = 0x2e0000` and `[edi + 8] = 0x43521e6f` lines and the "byte-swapped compare
+value" wording in this section were mid-instruction decode artifacts and are dropped.
+
+probe188 counts 11 verified xrefs of the co-op id `0x43521e6f`. The code sites are: `0x10f0c7e8`
+`mov dword ptr [esp + 0x6c], 0x43521e6f` (with `[esp + 0x54] = 0x11fafe90`), `0x10f4cb0a`
+`mov dword ptr [esp + 0xb8], 0x43521e6f` (with `[esp + 0xa0] = 0x11fafe90`), `0x10f9260a`
+`cmp dword ptr [esp + 0xc], 0x43521e6f` / `jne 0x10f9267d` right after `push edx` / `call eax` (a mode-id query
+that returns the id on the stack), `0x10fa1aa4` `cmp eax, 0x43521e6f` / `jne 0x10fa1bb8`, the two writers
+`0x1127995f` `mov dword ptr [0x12891ca0], 0x43521e6f` and `0x11279adf` `mov dword ptr [0x12891ca8], 0x43521e6f`
+(each guarded by `test byte ptr [0x12891ca4], al` / `or dword ptr [0x12891ca4], eax` and by the mirror
+`0x12891cac`, and each followed by `mov ecx, [ebx + 0x8c0]`), and the two mode-id compare chains `0x1133fb80`
+(`mov eax, [eax]` ; `cmp eax, 0xab4fc8e2` ; `je 0x1133fbaf` ; `cmp eax, 0x43521e6f` ; `je 0x1133fbaf` ;
+`cmp eax, 0x9991daec`) and `0x113405a0` (`mov eax, [ebx + 0x4c]` then the same three-way compare with
+`je 0x113405cd`). `0x11a7f820` and the data cells `0x1216a00c`, `0x1216aa40`, `0x1216aee4`, `0x12173ff4` inside
+the `0x11bcac20` blob are the remaining occurrences.
+
+The count-field pattern that the previous version of this section attributed to a mode accessor lives inside the
+pause-menu function `0x11007920`-`0x11007c70` (probe189): it calls `0x11168cf0`, reads `[0x12804acc]`
+(`cmp byte ptr [eax + 0x6c], 0`), loads `'UI\Singleplayer\Menu\Pause\M_PauseMenu.feu'` (`0x11fd18fc`) through
+`call 0x117872f0`, reads `[0x12804ac0]` (`lea edi, [eax + 0x38]`) and calls `0x103a2d50`, then at `0x110079ea`
+`mov edx, [0x1280437c]`, `0x110079f0` `mov eax, [ebx + 0xc]`, `0x110079f3` `mov ecx, [edx + 0xc]`; `0x11007a10`
+pushes `0x11fd1928` (`'Pause_%d'`, whose other reference is `0x11169c43`), `0x11007a2c` `lea edi, [eax + 0xc]`,
+`0x11007a53`-`0x11007a5a` read `[esp + 0x20]` -> `[edx + 4]` -> `[eax + 0xd0]`, `0x11007a60` reads
+`[0x12804a50]`, `0x11007a6b` `call 0x116504b0`, `0x11007a9d` `mov ecx, [eax + 0xc]`. `0x110079e0` and `0x11007a00`
+are mid-function addresses with zero verified xrefs, not helper entry points. probe175 keeps the conclusion that
+`0x11fb5040`, `0x11fb5044`, `0x11fb5048`, `0x11fb504c` have no verified xrefs and no disp32 sites, so the earlier
+mode-table sizing claim was wrong.
+
+CORRECTED (2026-11-07, probe-level probes `local/scratch/p210*.py`-`p227*.py`): the paragraph that used to sit
+here — "`[0x12162b40]` is initialised by `0x1137f6c0`, which also writes `[0x12162b40] = 0x11f1071c`,
+`[0x1285c450] = 0x11f1074c`, `[0x1285c448] = 0x10413200`, `[0x1285c444] = 0x11f10798`, `or [0x1285c44c], 1`,
+`call 0x11788030`" — is **unsupported** and is superseded. `0x12162b40`, `0x1285c448`, `0x1285c44c`, `0x1285c450`
+and `0x1285c454` have ZERO `.reloc` patch sites (`0x1285c444` has 2); `0x11f1071c`, `0x11f1074c`, `0x11f10798`
+and `0x10413200` are the stored value at no patch site at all; and `0x1285c444`-`0x1285c454` have no file offset
+(`.data` = VA `0x12093000`, virtual size `0x8051e0`, raw size only `0xe7c00`, so that range is zero-initialised
+BSS). What `0x1137f6c0` actually does is a one-time guard init: stores `[0x1280493c] = 0x11f921e8`,
+`[0x1280d49c] = 0x11f1687c`, `[0x1280d4a0] = 0x11f16894`, `[0x1282e598] = 0x11f168a8` (plus `[0x1282e594]`), and
+calls `0x116c1bb0`, `0x1003b4b0`, `0x106f9ff0`. Related accessors: `0x111854b0` = `mov eax, [0x12189644]` / `ret 4`,
 `0x11340c90` = `mov eax, [0x1217bc8c]; push 1; push eax; call 0x10c569d0`, `0x11185510` = `mov eax, [0x1280443c]`
 then `jmp 0x10f0c4c0`.
 
-`probe172.py` found 15 disp32 occurrences of the co-op id: code in `0x10f0c770`, `0x10f4c400`, `0x10f92420`,
-`0x10fa1710` (mode-object slot 15), `0x11279910` (twice), `0x1133fb80`, `0x113403e0` (thrice, the progress slot),
-`0x11a7f820`, and data cells `0x1216a00c`, `0x1216aa40`, `0x1216aee4`, `0x12173ff4` inside the `0x11bcac20` blob.
+`probe172.py` found the same id by raw disp32 byte hits (`0x10f0c770`, `0x10f4c400`, `0x10f92420`, `0x10fa1710`,
+`0x11279910` twice, `0x1133fb80`, `0x113403e0` three times, `0x11a7f820`); probe188 confirms 11 verified xrefs,
+whose instruction addresses are `0x10f0c7ec`, `0x10f4cb11`, `0x10f9260e`, `0x10fa1aa5`, `0x11279965`, `0x11279ae5`,
+`0x1133fb8a`, `0x113405ab` plus the data cells `0x1216a00c`, `0x1216aa40`, `0x1216aee4`, `0x12173ff4` inside the
+`0x11bcac20` blob.
 
-- Open objectives: find who writes `[0x12162beb]`; identify the class whose vftable is `0x11fc6268`
-  (the neighbouring strings name `CFCXGOBuilderCommon`, so the holder is a `CFCXGOBuilder*` class) and
-  what its eight slots mean; who writes the count field `[[0x1280437c]+0xc]` used by the mode accessor; the owner of the container receiving the manager at
-  `0x111f4fc6`; what `0x106eac80` and `0x106e96c0` do; the coop entry among the thirteen registry rows.
+### Global reference census from `.reloc` patch sites (2026-11-07, `local/scratch/p199*.py`-`p227*.py`, `scripts/fc3_reloc_xref.py`)
+
+Method (the only reliable way to enumerate a global's references in this binary): FC3.dll has **772159** `.reloc`
+entries; every HIGHLOW entry is a patch site whose stored dword is the address used in some disp32 operand, so
+"patch sites whose stored dword == G" is the complete reference list of global G. A global that no instruction
+ touches has zero patch sites. Every site for the globals below is inside `.text`, and the aligned-instruction
+operand scan reproduces the patch-site count exactly (`0x12804acc` 4614 = 4614, `0x12804ac0` 1129 = 1129,
+`0x12804a50` 186 = 186, `0x1280437c` 1776 = 1776, `0x1217bc8c` 7 = 7, `0x12162beb` 14218, `0x128042fc` 14905).
+
+Write sites (destination operand), read straight out of the dumps:
+
+| global | write sites | what the write does |
+|---|---|---|
+| `[0x1280437c]` | `0x11757eda` `mov [0x1280437c], ebx`; `0x1175b58b` `mov [0x1280437c], eax` | `ebx` is the null value used by the teardown routine `0x11757b80`; `0x1175b58b` (inside the routine starting at `0x1175a7e0`) is the only installing write found so far |
+| `[0x12804acc]` | `0x10048102` `mov [0x12804acc], 0`; `0x117567ce` `mov [0x12804acc], esi`; `0x11756f37` `mov [0x12804acc], ebx` | 3 writes out of 4614 sites; the other 4611 are reads |
+| `[0x12804ac0]` | `0x11629dd6` `mov [0x12804ac0], ebx`; `0x1162a703` `mov [0x12804ac0], eax`; `0x1162a70a` `mov [0x12804ac0], ebx` | 3 writes out of 1129 sites |
+| `[0x12804a50]` | `0x100bf8b7` and `0x100bf8c7` (`mov [0x12804a50], eax`, inside the routine starting at `0x100bf830`) | the pause-menu object is created by `0x100bf830`; the rest of the 186 sites are reads |
+| `[0x1217bc8c]` | `0x106ed8bb` `mov [0x1217bc8c], ebx` (clear) and the `0x106efaa8` region, which stores the static object `0x106b71b0` | 2 writes out of 7 sites; readers `0x11340c90`, `0x11342740`, `0x112e319b`, `0x112e31b2` |
+| `[0x128042fc]` | `0x11789a45` `mov byte ptr [0x128042fc], al` | the only store; the other 14904 sites are `cmp byte ptr [0x128042fc], bl`-style reads |
+
+Teardown routine `0x11757b80` (VERIFIED, `local/scratch/p200_out.txt`, `p207_out.txt`): for each of
+`[0x127bc324]`, `[0x12804384]`, `[0x1280437c]`, `[0x1280440c]`, `[0x12804430]`, `[0x128043b4]`, `[0x128042e4]`, …
+it runs `mov ecx, [g]` / `cmp ecx, ebx` / `je skip` / `mov edx, [ecx]` / `mov eax, [edx]` / `push 1` / `call eax`
+(COM-style `Release(1)` through slot 0) and then `mov [g], ebx`. So a global being zeroed there is being released,
+not merely cleared.
+
+`0x1174c070` is the container's keyed-lookup helper (VERIFIED, `local/scratch/p213_out.txt`): `mov eax, [ebp+8]`
+-> `mov eax, [eax+0xc]` -> `test eax, eax; je 0x1174c120` (count 0 -> not found), then `mov edx, [ecx+8]` (item
+array), `mov ecx, [edx+edi*4]`, `mov eax, [ecx]`, `mov eax, [eax+0x10]`, `lea edx, [esp+0x10]`, `push edx`,
+`call eax` (vtable slot 4 of the item), then `mov eax, [eax]`, `mov ecx, [eax]`, `mov eax, [eax+4]`,
+`cmp ecx, [ebp+0xc]`, `cmp eax, [ebp+0x10]`, and `bl` = found/not-found. Container layout therefore:
+`+8` = item array, `+0xc` = count.
+
+`0x1174c070` is reached from 299 of the `[0x1280437c]` sites; the other frequent call targets after a container
+load are `0x116f56a0` (97), `0x1013c1f0` (84), `0x1174b660` (77), `0x116eda40` (66), `0x100945e0` (45),
+`0x1024be80` (45), `0x1174c1b0` (40), `0x11788030` (38), `0x116f0a40` (36) — 425 distinct targets in total
+(`local/scratch/p218_out.txt`). There is no `mov ecx, [0x1280437c]` + `call` pattern anywhere (probe222), so the
+container is always handed to a helper as an argument, never used as `this`.
+
+Registry-writer family (probe226/probe227, `local/scratch/p227_out.txt`): writing `[0x1217bc8c]`,
+`[0x12804acc]`, `[0x12804ac0]`, `[0x12804a50]` and `[0x1280437c]` within one instruction window happens at
+exactly two places — `0x11002390` and `0x118586d0` — and both are `0x116eda40 push ecx / push ebx / call
+0x1101a150`, i.e. three arguments, not five. Those five globals therefore belong to the registry class itself,
+not to a parameter list, and each write is one field of that class. `0x118586d0` is inside the routine starting
+at `0x118580f0`, and `0x11002390` is a jump-target (predecessors `0x11002041`, `0x110021f2`) inside the routine
+starting at `0x11002000`.
+
+No store to `[reg + 0xc]` occurs within 0x80 bytes of any `[0x1280437c]` load (probe216/probe217): the count field
+is still not attributed to a writer. Lessons: a linear whole-`.text` disassembly desynchronises and invents
+`add reg, imm` / `or reg, imm` forms whose disp32 field is really the global (this is where the old
+"2400+ writes" figure came from); per-function overlap estimates inflate counts (1027 windows -> 1765 stores for
+a 1776-site global); capstone's `detail.canonical` raises `AttributeError` on some instructions (use
+`i.op_str`); `xlib.enclosing(starts, va)` takes the starts list first.
+
+Two corrections to this section:
+
+- the pause-menu function spans `0x11007920`-`0x11007c66` (`ret` at `0x11007c66`, `0xCC` padding up to
+  `0x11007c6f`, next function at `0x11007c70`), not `0x11007c70`;
+- `0x11185b9a` is `call 0x11789a00`, not a count read, and `0x11007a9d` reads `[eax + 0xc]` where `eax` comes from
+  the `[esp + 0x20]` -> `[edx + 4]` -> `[eax + 0xd0]` chain, not from the container. The only count reads proven
+  from the container are `0x110079f3` (`mov ecx, [edx + 0xc]` with `edx = [0x1280437c]`) and `0x1174c070`
+  (`mov eax, [eax + 0xc]` with `eax` = the container argument).
+
+- Open objectives: find who writes `[0x12162beb]` (14218 patch sites, all of them `cmp byte ptr [0x12162beb], bl`
+  style reads — no store among them, so the flag is written indirectly or through a base register); identify the
+  class whose vftable is `0x11fc6268` (the neighbouring strings name `CFCXGOBuilderCommon`, so the holder is a
+  `CFCXGOBuilder*` class) and what its eight slots mean; who writes the count field `[[0x1280437c]+0xc]` (its
+  proven reads are only `0x110079f3` and `0x1174c070`); who calls the installing write `0x1175b58b` (the routine
+  `0x1175a7e0` is not yet attributed); the owner of the container receiving the manager at `0x111f4fc6`; what
+  `0x106eac80` and `0x106e96c0` do; the coop entry among the thirteen registry rows.
   Closed in this session: `[0x128042fc]` (`0x11789a00` at `0x1119a53e`), `0x118db560` (the
   allocation helper), `[0x121a7eb0]`-`[0x121a7eb8]` + `[0x120931c8]`, `[0x1217bc8c]` readers,
-  `[0x12807738]`/`[0x12807740]`/`[0x12807744]` readers (`0x111f4fde`, `0x111f4ff2`, `0x111f500d`).
+  `[0x12807738]`/`[0x12807740]`/`[0x12807744]` readers (`0x111f4fde`, `0x111f4ff2`, `0x111f500d`),
+  the write sites of `[0x12804acc]`, `[0x12804ac0]`, `[0x12804a50]`, `[0x1217bc8c]` and `[0x1280437c]`, and the
+  claim that `0x1137f6c0` initialises `[0x12162b40]` (disproved).
   Bilingual NOTES + commit for every new finding.
