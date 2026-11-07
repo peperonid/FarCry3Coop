@@ -227,6 +227,22 @@ this session`). Команды выполнять через `ctx_execute` с `l
 (`timeout: 60` → 60 мс → процесс умирает до запуска оболочки). Либо не указывать его, либо давать
 большое значение (`120000`).
 
+MCP tool calls in this session may fail silently: the tool result comes back as a rendered
+`<tool_call>…<tool_call>` block — the same markup the rule above forbids printing.
+Currently `mcp__supermemory__*` and `mcp__rea__*` behave that way. When this happens, do not
+retry the call — it burns a turn and produces nothing. Use a declared alternative: for project
+memory fall back to the repo's own documents (`NOTES.md`, `PLAN.md`, `docs/`), and for reverse
+engineering fall back to the read-only Python probes in `scripts/` (capstone + raw FC3.dll).
+Report the failure to the owner instead of repeating the call.
+
+**RU:** Вызовы MCP-инструментов в этой сессии могут молча падать: вместо результата приходит
+отрендеренный блок `<tool_call>…<tool_call>` — та самая разметка, которую правило выше
+запрещает печатать. Сейчас так ведут себя `mcp__supermemory__*` и `mcp__rea__*`. При таком
+исходе инструмент повторно не звать — вызов сжигает ход и ничего не даёт. Использовать
+объявленную альтернативу: для проектной памяти — документы этого репозитория (`NOTES.md`,
+`PLAN.md`, `docs/`), для реверс-инжиниринга — черновые Python-зонды из `scripts/` (capstone и
+сырой FC3.dll). Сообщить владельцу о сбое вместо повтора вызова.
+
 ## Repo layout / Раскладка репозитория
 
 - `NOTES.md` / `NOTES.ru.md` — findings log. The owner's granular Phase 1 sections stay first and
@@ -357,4 +373,9 @@ about testing, networking, sync tools, or packaging, also read the hub's `playbo
   decode PowerShell dumps as UTF-16.
 - In a bash heredoc a backslash inside Python string literals gets mangled: build it with
   `chr(92)`.
+- MCP tools (`mcp__supermemory__*`, `mcp__rea__*`) sometimes do NOT run: the tool result comes back
+  as a literal `<tool_call>…</…>` text block instead of a real result. That is a FAILED call, not a
+  success — do not treat the echoed markup as the tool having done anything, and do not retry it in
+  a loop. Fall back to the read-only Python probes in `scripts/` + `local/scratch/` (capstone over
+  the raw FC3.dll) and to `NOTES.md`/`docs/`, and report the failure to the owner.
 

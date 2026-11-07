@@ -2026,3 +2026,49 @@ New open questions: what calls `0x11279910` (and therefore what triggers the coo
 and `0x116e7f70` (no recorded edges — they are pointer-reached); which registry entry `0x113224e0` resolves for the coop
 id; and whether the arena globals `[0x121bbff8]`/`[0x121a7fdc]` are the same region that `0x1101a150` and
 `0x1101a1b0` allocate through `[0x11bcb130]` with `0x10000`/`0x20000` sizes.
+
+## Co-op-id install path, verified from raw bytes (2026-11-07, agent session, `local/scratch/p271*.py`..`p282*.py`)
+
+Continuation of the 2026-11-07 store-writer pass, answering the four open questions from
+"Store-writer attribution and verified call edges". Every claim below is read from raw FC3.dll bytes
+at a verified function start; `local/scratch/calls.json` is still treated as unreliable (see the
+withdrawn chain at the end).
+
+- **The co-op id `0x43521e6f` is installed at RUNTIME, it is not a static global value.** The global
+  `[0x12891ca0]` lies in `.data` past the raw file size (virtual start `0x12093000`, raw size
+  `0xe7c00` → BSS-like, image initial value 0). `0x11279910` writes it: `mov dword ptr [0x12891ca0],
+  0x43521e6f` at `0x1127995f`, guarded by `test byte ptr [0x12891ca4], al` / `jne 0x11279969`
+  (`0x11279951`/`0x11279957`) and an `or dword ptr [0x12891ca4], eax` init stamp (`0x11279959`).
+  A sibling global `[0x12891ca8]` gets the same id at `0x11279adf`. (probe p278, p280)
+- **Where `0x43521e6f` does appear as a literal:** the mode-id table entries `.data 0x1216a00c`,
+  `0x1216aa40`, `0x1216aee4`, `0x12173ff4` (already recorded), plus `.text` sites `0x10f0c7ec`,
+  `0x10f4cb11`, `0x10f9260e`, `0x10fa1aa5`, `0x1133fb8a`, `0x113405ab`, `0x1134062a`, `0x11340a2d`,
+  `0x11a7fa12`. (probe p278)
+- **`0x11279910` is a helper called twice by one bigger routine, not a top-level trigger.** Its only
+  two `call` sites are `0x11279fd2` (inside `0x11279fc0`) and `0x1127a16f` (inside `0x1127a0f0`); a
+  linear decode shows the routine runs `0x11279910..0x1127ad0e` and is split by `ret` at `0x11279a8a`
+  and `0x11279c0a`. The caller `0x11279fc0` has no direct caller; `0x1127a0f0` is called from
+  `0x11a5870b` inside function `0x11a58700`. (probe p273, p276, p280)
+- **The real trigger is a virtual dispatch.** `0x11a58700` has no direct `call`; the value is a
+  pointer stored at `.rdata 0x1200ad14`, a slot in a dispatch table spanning `0x1200ad00..0x1200ad2c`
+  whose neighbours `0x11277c20`, `0x11278160`, `0x11279700` are the same `0x1127xxxx` family as
+  `0x11279910`. So the co-op-id install fires through a vmethod on that table's object. (probe p281, p282)
+- **`0x11b2a610` (mode-id reset to `-1`) is a vmethod of an object whose vtable is never stored
+  statically.** It is slot `+0x2b8` of a 200-entry table `0x11bd2b04..0x11bd2e24` (a
+  `0x11b29040..0x11b2a9c0`, step-`0x20` accessor table). The base `0x11bd2b04` appears NOWHERE in the
+  image — not as a code reference and not even as a stored pointer — so its vtable pointer is installed
+  on a live object at runtime. The global `[0x121e5a38]` currently reads the guard value `0xc9700a6a`,
+  **not** a vtable, so it is not the co-op manager pointer as the previous session assumed. (probe p271, p272, p274)
+- **`0x116e7f70` (the `Release(1)` teardown of `[0x12804a50]`) is slot `+0xc` of a 19-entry vtable
+  `0x11f26488..0x11f264d4`.** That vtable base IS installed in code: `mov dword ptr [ebx], 0x11f26488`
+  at `0x116e8127` (constructor `0x116e7fb0`) and `mov dword ptr [edi], 0x11f26488` at `0x116e82ea`
+  (constructor `0x116e82e0`, called from `0x1174676c`). So `[0x12804a50]` is an object of the
+  `0x11f26488` class and `0x116e7f70` runs when it is destroyed. (probe p272, p273)
+- **Withdrawn chain.** The previous session's "`0x11279910` → `0x11554c40` → `0x11554b70`" edge does
+  not survive decoding: from a verified start, `0x11554b70` lands mid-instruction and yields garbage
+  (`add al,0xdb; inc eax; ...`), so that chain is **not confirmed** and is retracted.
+
+New open questions: what object owns the `.rdata 0x1200ad00` dispatch table and who calls into
+`0x11a58700`; which live object carries vtable `0x11bd2b04` (the mode-id-reset owner) — this needs a
+constructor that writes that vtable or a runtime/heap dump, since it is never stored statically; and
+whether `[0x121e5a38] = 0xc9700a6a` is a heap canary rather than a manager pointer.
