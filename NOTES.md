@@ -1404,8 +1404,9 @@ time, and what entry 8's family is.
   member at `+0x24` is passed as `this` to `0x106e96c0` with a per-entry global from
   `[0x12807738 + n*4]`.
 - Corrections to earlier notes: the claim "thunk `0x11010ee0` → `0x12163234`" is wrong (`0x11010ee0`
-  bytes are `0c 00` followed by `0xcc` padding). `0x12162beb` has 14 218 raw matches but they are
-  `cmp eax,0x12162beb`-style immediates, not memory references, so the real gate stays the
+  bytes are `0c 00` followed by `0xcc` padding). `0x12162beb` has 14 218 `.reloc` patch sites and they
+  **are** memory references (`cmp byte ptr [0x12162beb], bl`-style reads); the older claim that they were
+  `cmp eax,0x12162beb`-style immediates came from a raw byte scan. The gate reading stays
   `cmp byte ptr [0x12162beb],0` inside `0x11756c50`.
 - Tooling note: raw scans must use the section's raw pointer (`pe.d[ptr:ptr+rawsz]`); the earlier
   `probe72.py` used the virtual offset as a file offset (`pe.d[sv:sv+vsz]`), which made every scan
@@ -1606,10 +1607,11 @@ holders, with the slot index of each target:
   `0x117899e0`, `0x11789990` into the table at `0x121a7eb0`, calls the function pointer in
   `[0x1217bc8c]`, sets `mov dword ptr [0x120931c8],0x121a7eb0`, then `0x11789a45 mov byte ptr
   [0x128042fc],1`, and ORs `[0x1288c800]`. `[0x12162beb]` has a pure getter at `0x1177eba0`
-  (`mov al,byte ptr [0x12162beb]; ret`) and its only byte store is at `0x11774c4a` inside
-  `0x11774b70`, which loops over a string list (`push 0x11f15148; call 0x10a00be0` ->
-  `0x10004080`, then `0x11f1514c`), reads `[obj+0x14]` and `[obj+0x20]`; the store itself is
-  still unreached.
+  (`mov al,byte ptr [0x12162beb]; ret`) and its only live byte store is `0x1177584a` inside
+  `0x11775800` (see the store-writer attribution section at the end of this file). The store at
+  `0x11774c4a` inside `0x11774b70` (a string-list routine: `push 0x11f15148; call 0x10a00be0` ->
+  `0x10004080`, then `0x11f1514c`, reading `[obj+0x14]` and `[obj+0x20]`) is not a census store site:
+  the aligned `.reloc` census reports exactly one store for this global.
 
 ### The mode-object class behind the co-op consumer (probe143-probe149)
 
@@ -1876,10 +1878,10 @@ Write sites (destination operand), read straight out of the dumps:
 | global | write sites | what the write does |
 |---|---|---|
 | `[0x1280437c]` | `0x11757eda` `mov [0x1280437c], ebx`; `0x1175b58b` `mov [0x1280437c], eax` | `ebx` is the null value used by the teardown routine `0x11757b80`; `0x1175b58b` (inside the routine starting at `0x1175a7e0`) is the only installing write found so far |
-| `[0x12804acc]` | `0x10048102` `mov [0x12804acc], 0`; `0x117567ce` `mov [0x12804acc], esi`; `0x11756f37` `mov [0x12804acc], ebx` | 3 writes out of 4614 sites; the other 4611 are reads |
+| `[0x12804acc]` | `0x10048100` `mov [0x12804acc], 0` (deleting dtor `0x100480f0`); `0x117567ce` `mov [0x12804acc], esi`; `0x11756f37` `mov [0x12804acc], ebx` | 3 writes out of 4614 sites; the other 4611 are reads |
 | `[0x12804ac0]` | `0x11629dd6` `mov [0x12804ac0], ebx`; `0x1162a703` `mov [0x12804ac0], eax`; `0x1162a70a` `mov [0x12804ac0], ebx` | 3 writes out of 1129 sites |
-| `[0x12804a50]` | `0x100bf8b7` and `0x100bf8c7` (`mov [0x12804a50], eax`, inside the routine starting at `0x100bf830`) | the pause-menu object is created by `0x100bf830`; the rest of the 186 sites are reads |
-| `[0x1217bc8c]` | `0x106ed8bb` `mov [0x1217bc8c], ebx` (clear) and the `0x106efaa8` region, which stores the static object `0x106b71b0` | 2 writes out of 7 sites; readers `0x11340c90`, `0x11342740`, `0x112e319b`, `0x112e31b2` |
+| `[0x12804a50]` | `0x100bf8b7` and `0x100bf8c7` (`mov [0x12804a50], eax`, inside the routine starting at `0x100bf830`); `0x116e7f96` `mov [0x12804a50], 0` (inside `0x116e7f70`) | the object is created by `0x100bf830` and released by `0x116e7f70`; the rest of the 186 sites are reads |
+| `[0x1217bc8c]` | `0x106ed8ba` `mov [0x1217bc8c], ebx` (clear, inside `0x106ed890`) and `0x106efaa8` `mov [0x1217bc8c], 0x106b71b0` (inside `0x106ef800`) | 2 writes out of 7 sites; readers `0x11340c90`, `0x11342740`, `0x112e319b`, `0x112e31b2` |
 | `[0x128042fc]` | `0x11789a45` `mov byte ptr [0x128042fc], al` | the only store; the other 14904 sites are `cmp byte ptr [0x128042fc], bl`-style reads |
 
 Teardown routine `0x11757b80` (VERIFIED, `local/scratch/p200_out.txt`, `p207_out.txt`): for each of
@@ -1925,8 +1927,7 @@ Two corrections to this section:
   from the container are `0x110079f3` (`mov ecx, [edx + 0xc]` with `edx = [0x1280437c]`) and `0x1174c070`
   (`mov eax, [eax + 0xc]` with `eax` = the container argument).
 
-- Open objectives: find who writes `[0x12162beb]` (14218 patch sites, all of them `cmp byte ptr [0x12162beb], bl`
-  style reads — no store among them, so the flag is written indirectly or through a base register); identify the
+- Open objectives: identify the
   class whose vftable is `0x11fc6268` (the neighbouring strings name `CFCXGOBuilderCommon`, so the holder is a
   `CFCXGOBuilder*` class) and what its eight slots mean; who writes the count field `[[0x1280437c]+0xc]` (its
   proven reads are only `0x110079f3` and `0x1174c070`); who calls the installing write `0x1175b58b` (the routine
@@ -1938,3 +1939,90 @@ Two corrections to this section:
   the write sites of `[0x12804acc]`, `[0x12804ac0]`, `[0x12804a50]`, `[0x1217bc8c]` and `[0x1280437c]`, and the
   claim that `0x1137f6c0` initialises `[0x12162b40]` (disproved).
   Bilingual NOTES + commit for every new finding.
+
+### Store-writer attribution and verified call edges from the aligned `.reloc` census (2026-11-07, `local/scratch/p265.py`-`p270.py`)
+
+Two census-data facts change how the table above must be read (both were wrong in earlier probes):
+
+- `local/scratch/census199.json` is keyed by **decimal** address strings (`'310395644'` = `0x128042fc`); a lookup with
+  `hex(g)` silently returns nothing, which produced a run reporting `refs=0 stores=0` for all 13 globals. Each entry is
+  `[site_va, mnemonic, op_str, flag]` and `flag` is **not** a store marker (`cmp` sites carry `True`). A site is a store
+  only when the mnemonic writes *and* the memory operand is the first operand.
+- a `census199` `site_va` is the **reloc patch field**, not the instruction start: for direct disp32 forms it sits +2
+  past the opcode (`80 3D disp32 imm8`, `89 0D disp32`). `census196.json`/`census197.json` hold the instruction-start
+  variant (`cmp byte ptr [0x128042fc], bl` = instruction `0x1004823A` vs patch site `0x1004823C`). `p268.py` realigns by
+  disassembling from `site-16` and keeping the instruction that covers the site. This corrects two addresses in the
+  table above: the `[0x12804acc]` clear is `0x10048100` (not `0x10048102`) and the `[0x1217bc8c]` clear is `0x106ed8ba`
+  (not `0x106ed8bb`).
+
+Complete store table (`p268_out.txt`; refs = patch sites, insn = aligned instruction start):
+
+| global | refs | stores | store insn | enclosing function | prologue of the enclosing function |
+|---|---|---|---|---|---|
+| `[0x12162beb]` | 14218 | 1 | `0x1177584a mov [0x12162beb], cl` | `0x11775800` | `push ebp; sub esp,0x24; push 1; push 0x2000; push 0x10000000; push 0` |
+| `[0x1217bc8c]` | 7 | 2 | `0x106ed8ba mov [0x1217bc8c], ebx` | `0x106ed890` | `mov eax,[0x1217bcf4]; mov ecx,[eax]; mov edx,[ecx]; mov eax,[edx+0x30]; push 0x11e6c31c; call eax` |
+| | | | `0x106efaa8 mov [0x1217bc8c], 0x106b71b0` | `0x106ef800` | `mov esi,ecx; lea eax,[esi+8]; mov [0x1217bc84], eax` |
+| `[0x128042fc]` | 14905 | 1 | `0x11789a45 mov [0x128042fc], al` | `0x11789a00` | `cmp byte ptr [0x128042fc], 0; jne 0x11789b63; mov eax,[0x1217bc8c]` |
+| `[0x1280437c]` | 1776 | 2 | `0x11757eda mov [0x1280437c], ebx` | `0x11757b80` (teardown; starts by reading `[0x12804ac8]`, `[eax+0x58]`, `movsd xmm0,[eax+0x48]`) |
+| | | | `0x1175b58b mov [0x1280437c], eax` | `0x1175a7e0` | `and esp,0xfffffff8; sub esp,0x9c; mov esi,[ebp+8]; mov edi,[ebp+0xc]` |
+| `[0x12804a50]` | 186 | 3 | `0x100bf8b7` and `0x100bf8c7` `mov [0x12804a50], eax` | `0x100bf830` | `cmp byte ptr [0x128042fc], bl; jne 0x100bf849` |
+| | | | `0x116e7f96 mov [0x12804a50], 0` | `0x116e7f70` | `mov edi,ecx; call 0x116e7ec0; mov eax,[0x12804a50]; push eax; call 0x1164ff40` |
+| `[0x12804ac0]` | 1129 | 3 | `0x11629dd6 mov [0x11629ac0], ebx` | `0x11629c30` | `mov ecx,[0x12804b70]; cmp ecx,ebx; je; mov eax,[ecx]; mov edx,[eax]; push 1; call edx` |
+| | | | `0x1162a703` / `0x1162a70a` | `0x1162a530` | `mov esi,[ebp+8]; mov edi,[ebp+0xc]; add esi,4` |
+| `[0x12804acc]` | 4614 | 3 | `0x10048100 mov [0x12804acc], 0` | `0x100480f0` (deleting dtor: `mov esi,ecx; mov [esi],0x11f169dc; test byte ptr [ebp+8],1; ret 4`) |
+| | | | `0x117567ce mov [0x12804acc], esi` | `0x11756650` | `mov ebx,[ebp+8]; mov esi,[edi+0x68]; cmp byte ptr [edi+0x6c],0` |
+| | | | `0x11756f37 mov [0x12804acc], ebx` | `0x11756c50` | `mov edi,[ebp+0x14]; cmp edi,-1` |
+| `[0x12807738]`/`[0x12807740]`/`[0x12807744]` | 13 / 5 / 2 | 1 each | `0x11b2a613`, `0x11b2a61d`, `0x11b2a622` | `0x11b2a610` | `or eax,0xffffffff; mov [0x12807738],eax; mov [0x1280773c],eax; ... mov [0x1280775c],eax; ret` |
+| `[0x12891ca0]`/`[0x12891ca8]` | 1 each | 1 each | `0x1127995f`, `0x11279adf` `mov [...], 0x43521e6f` | `0x11279910` | `sub esp,0x1d0; mov ebx,[ebp+8]; lea eax,[ebx+0x238]` |
+| `[0x12891ca4]`/`0x12891cac]` | 2 each | 1 each | `0x11279959` / `0x11279ad9` `or dword ptr [...], eax` | `0x11279910` | as above |
+
+What each of these says:
+
+- **`[0x12162beb]` is settled.** Its only store is `0x1177584a` inside `0x11775800`, which (1) calls
+  `[0x11bcb130](0, 0x2000, 0x10000000, 1)`, (2) stores the returned region base into `[0x121bbff8]`, (3) stores the
+  rounded size (`add eax, 0xfffffff`) into `[0x121a7fdc]`, (4) calls `[0x11bcb144](buffer[ebp-0x24])`, (5) sets
+  `cl = ((0x10000 / [ebp-0x20]) * [ebp-0x20]) == 0x10000` (`div` then `imul` then `cmp`) and stores `cl`. So this byte is
+  a **memory-quantum feature flag** (the region is 256 MiB, granularity 8 MiB), not a co-op switch. The only verified
+  call of `0x11775800` in the recorded call graph is `0x1177f70e` inside `0x1177f700` (raw bytes there are
+  `push esi; mov esi,ecx; call 0x106c2c50; call 0x11775800; call 0x1177eac0`). `[0x121bbff8]`/`[0x121a7fdc]` are the
+  arena bounds the deleting dtor `0x100480f0` tests before freeing through `0x1177f5b0`.
+- **`[0x128042fc]` is an allocator-initialised guard, not a mode gate**: 14905 reads and **14903 recorded calls of
+  `0x11789a00`** — the same lazy-init idiom repeated across the module (`cmp byte ptr [0x128042fc], bl; jne skip; call
+  0x11789a00`), verified at `0x10002c02`, `0x10002c89`, `0x10002f72`, `0x10003001`. That is why the global looks like a
+  gate by reference count alone.
+- **`[0x12804a50]` has a teardown**: `0x116e7f70` releases the object with the COM-style `Release(1)` shape
+  (`mov eax,[0x12804a50]; push eax; call 0x1164ff40`, then `mov ecx,[0x12804a50]; mov edx,[ecx]; mov eax,[edx]; push 1;
+  call eax`) and stores 0 at `0x116e7f96`. Combined with `0x100bf830` (which first checks `[0x128042fc]` before creating
+  the object), the global is a lazily created/released singleton.
+- **`[0x12804acc]` clear belongs to the deleting dtor** `0x100480f0`: it restores the vtable
+  (`mov dword ptr [esi], 0x11f169dc`), clears the global, and frees `esi` through `0x1177f5b0` only when the pointer lies
+  in the arena `[0x121bbff8] .. [0x121a7fdc]`.
+- **`[0x12804ac0]` clear is inside a teardown** `0x11629c30`, which first runs the same `Release(1)` idiom on
+  `[0x12804b70]` before clearing `[0x12804ac0]` at `0x11629dd6`.
+- **`[0x1217bc8c]` write sites are both inside their routines**: cleared at `0x106ed8ba` inside `0x106ed890` (which opens
+  with a virtual call through slot `+0x30` with the string argument `0x11e6c31c`), and installed at `0x106efaa8` inside
+  `0x106ef800` with the static object `0x106b71b0`; the same routine stores `0x106b71e0` into `[0x1217bc88]` and the
+  holder's own fields into `[0x1217bc84]`.
+- **The mode/session id block has a reset routine**: `0x11b2a610` is `or eax, 0xffffffff` followed by stores of `-1` into
+  `[0x12807738] [0x1280773c] [0x12807740] [0x12807744] [0x12807748] [0x1280774c] [0x12807750] [0x12807754] [0x12807758]
+  [0x1280775c]`. It has **no direct `call`/`jmp` edge in the recorded call graph** (reached through a pointer), which is
+  the answer to "who writes the mode-id globals": they are reset to `-1`, and the only installs of a real value found so
+  far are the manager-constructor reads at `0x111f4fde`/`0x111f4ff2`/`0x111f500d`.
+- **The coop id `0x43521e6f` is installed lazily at runtime**, not only baked in the data table: `0x11279910` writes it
+  into `[0x12891ca0]` at `0x1127995f` and into `[0x12891ca8]` at `0x11279adf`, each preceded by an
+  `or dword ptr [0x12891ca4], eax` / `or dword ptr [0x12891cac], eax` init stamp. `0x11279910` has exactly two recorded
+  call sites (`0x11279fd2`, `0x1127a16f`) and it calls `0x113224e0` twice (`0x11279982`, `0x11279b02`).
+- **`0x113224e0` is a registry lookup by type id**: it builds a local object with vtable `0x11f94dd4`, then walks the
+  accessor array `[ecx+4] .. [ecx+8]` (stride 4, with `lea edx,[eax+edx*4]`) of the singleton at `[0x128048c0]`, comparing
+  `dword ptr [item + 0x20]` against an id obtained through a virtual call at slot `[obj]+0x58`. Its only two callers are
+  the two sites inside `0x11279910`, so the coop-id installing routine asks the registry for an entry.
+
+Call-graph discipline learned in this pass: `local/scratch/calls.json` contains **mis-aligned entries**. It lists
+`0x11789b42` as a caller of `0x11775800`, but decoding from the verified start `0x11789b28` gives `0x11789b42 call
+0x11768700` instead; and a `ret` at `0x11279a53` sits between the two `0x113224e0` calls, so `0x11279910` is not one
+straight line. Every claimed edge must be re-read from raw bytes at a verified function start before it is published.
+
+New open questions: what calls `0x11279910` (and therefore what triggers the coop-id install); who reaches `0x11b2a610`
+and `0x116e7f70` (no recorded edges — they are pointer-reached); which registry entry `0x113224e0` resolves for the coop
+id; and whether the arena globals `[0x121bbff8]`/`[0x121a7fdc]` are the same region that `0x1101a150` and
+`0x1101a1b0` allocate through `[0x11bcb130]` with `0x10000`/`0x20000` sizes.
