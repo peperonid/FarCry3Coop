@@ -148,3 +148,16 @@ claude mcp add --scope local rea -e "GHIDRA_INSTALL_DIR=$R\Tools\ghidra_12.1.4_P
 - Догадка, не проверено: `FC_m64d3d12.dll` защищена Denuvo и VMProtect, поэтому статический анализ
   в Ghidra может показать мало полезного кода. Неизвестно, пока не попробуем на копии игры
   (`H:\FarCryCoop\TestFC3\`).
+
+## Состояние на этом ПК (перепроверено 2026-11-08)
+
+- `rea doctor --client pi --provider ghidra` -> `healthy: true`, `environment_healthy: true`. Все
+  проверки в порядке: node `24.22.2` (шим `rea` на PATH разрешается в него; запись в конфиге pi
+  закрепляет `C:\Program Files\nodejs\node.exe`, который в таблице выше указан как v22.23.4), Ghidra
+  12.1.4 в `C:\tools\ghidra_12.1.4_PUBLIC`, `analyzeHeadless.bat` на месте, win32/x64.
+- Зарегистрирован для pi в `C:\Users\<user>\.pi\agent\mcp.json` (stdio, `node …\rea-agents\scripts\rea.mjs mcp`,
+  заданы `GHIDRA_INSTALL_DIR` + `JAVA_HOME`).
+- Зарегистрирован для pi, но в сессии, которая это писала, он **не был доступен модели как вызываемый
+  инструмент `mcp__rea__*`**. Действует запасной путь из AGENTS.md: если инструментов в текущей сессии
+  нет — не выдумывать их, а использовать черновые Python-зонды из `scripts\` (capstone по сырому
+  `FC3.dll`) и записывать находки в `NOTES.md`/`docs/`, сообщив владельцу.
