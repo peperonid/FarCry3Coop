@@ -24,6 +24,7 @@ import datetime
 import json
 import os
 import sys
+import time
 
 try:
     import frida
@@ -130,6 +131,9 @@ def main():
     ap.add_argument("--pid", type=int, default=None, help="attach to this pid instead of auto-detect")
     ap.add_argument("--list", action="store_true", help="list processes Frida can see (diagnose attach) and exit")
     ap.add_argument("--grep", default=None, help="with --list, only names containing this substring")
+    ap.add_argument("--watch", type=int, default=0, metavar="SECONDS",
+                    help="auto mode: stay attached N seconds, watch for a live mode-manager "
+                         "capture (do a Main Menu -> Load/Resume in-game during this), log it, then quit")
     args = ap.parse_args()
 
     log = Logger(LOG_PATH)
@@ -188,13 +192,35 @@ def main():
             "  pop dry             H3b dry run (show svcInit addr)       (populate true)\n"
             "  pop go              H3b LIVE: call FUN_1127a0f0(service)  (may crash)\n"
             "  modeid <this> <id>  DANGEROUS poke: setModeId(this_hex, id_hex)\n"
+            "  scanmm              scan memory for the live mode-manager (no transition needed)\n"
             "  help | quit"
         )
         log.echo(HELP)
         log.echo("First: do `dump`, enter+leave a menu in-game, then `mode` (need a non-null thisPtr),")
         log.echo("then `switch dry`, then `switch go`. Watch the game window AND this log on every 'go'.")
 
-        while True:
+        if args.watch:
+            log.echo(">>> WATCH MODE: attached and live. Switch to the game NOW and do a real MODE "
+                     "CHANGE (ESC / pause does NOT count). Best: go to the Main Menu, then choose "
+                     "Load / Resume a checkpoint and let the world load. Do it now, repeatedly.")
+            log.echo(">>> Watching %d seconds; captures are logged as [MODECAP]. <<<" % args.watch)
+            t0 = time.time()
+            seen = set()
+            while time.time() - t0 < args.watch:
+                try:
+                    r = call("lastMode")
+                except Exception as exc:
+                    log.echo("[watch] poll error: %r" % (exc,))
+                    r = None
+                if r and r.get("thisPtr") and str(r.get("thisPtr")) != "0":
+                    key = str(r.get("thisPtr"))
+                    if key not in seen:
+                        seen.add(key)
+                        log.echo("[MODECAP] " + json.dumps(r, ensure_ascii=False))
+                time.sleep(1.0)
+            log.echo(">>> WATCH DONE. captured mode-manager this: %s <<<"
+                     % (", ".join(sorted(seen)) if seen else "NONE - no mode transition fired"))
+        while not args.watch:
             try:
                 line = input("fc3> ").strip()
             except EOFError:
@@ -232,6 +258,9 @@ def main():
                         log.echo("use: modeid <this_hex> <id_hex>")
                         continue
                     log.echo(json.dumps(call("setModeId", rest[0], int(rest[1], 16)), ensure_ascii=False))
+                elif cmd in ("scanmm", "scan", "findmm"):
+                    log.echo("scanning writable memory for a live mode-manager (this+0x4c == a known mode id) ...")
+                    log.echo(json.dumps(call("scanModeManager"), ensure_ascii=False))
                 elif cmd in ("help", "?", "h"):
                     log.echo(HELP)
                 elif cmd in ("quit", "exit", "q"):

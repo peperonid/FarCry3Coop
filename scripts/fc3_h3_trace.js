@@ -127,6 +127,78 @@ function installerHook(label) {
   } catch (e) { console.log(k + ' hook failed: ' + e); }
 });
 
+// --- Locate the live mode-manager WITHOUT needing the dispatch hook to fire.
+// The mode manager holds its current mode id at [this+0x4c]; that id is one of the
+// known mode-hash ids. Scan writable memory for any of those ids, treat the
+// candidate object start as this = (id_addr - 0x4c), and validate it looks like a
+// C++ object: its first qword is a vtable pointer inside FC3.dll, and that vtable's
+// first entry is also inside FC3.dll. Returns candidates for inspection; on a hit
+// that validates, also caches lastMode.mmPtr so switchCoop() can be used.
+function idPattern(u32) {
+  var b = [u32 & 0xff, (u32 >>> 8) & 0xff, (u32 >>> 16) & 0xff, (u32 >>> 24) & 0xff];
+  return b.map(function (x) { return ('0' + x.toString(16)).slice(-2); }).join(' ');
+}
+function inModule(p) {
+  try { return !p.isNull() && p.compare(base) >= 0 && p.compare(base.add(mod.size)) < 0; }
+  catch (e) { return false; }
+}
+function findModeManagerCore() {
+  var ids = MODE.known.concat([0x63ddbbcb]); // + the lobby id the dispatcher remaps to
+  // Only the process heap holds the live, constructed mode-manager instance. DLL/EXE
+  // image data segments contain the SAME id constants in static tables (false
+  // positives). Windows committed heap is sometimes type 'private' and sometimes
+  // 'anonymous', so do NOT trust type; instead drop any range that belongs to a
+  // loaded module (findModuleByAddress on its base), which removes all image .data.
+  var ranges = Process.enumerateRanges({ protection: 'rw-', coalesce: true })
+    .filter(function (x) { return Process.findModuleByAddress(x.base) === null; });
+  var patList = ids.map(function (id) { return { pat: idPattern(id), id: id }; });
+  var scanned = 0, MAXSCAN = 800 * 1024 * 1024;
+  var found = [];
+  for (var r = 0; r < ranges.length && scanned < MAXSCAN && found.length < 16; r++) {
+    var rng = ranges[r];
+    scanned += rng.size;
+    for (var pi = 0; pi < patList.length && found.length < 16; pi++) {
+      var hits = [];
+      try { hits = Memory.scanSync(rng.base, rng.size, patList[pi].pat); }
+      catch (e) { continue; }
+      for (var h = 0; h < hits.length && found.length < 16; h++) {
+        var idAddr = hits[h].address;
+        var id = patList[pi].id;
+        var thisp = idAddr.sub(0x4c);
+      var vtable, v0;
+      try { vtable = thisp.readPointer(); v0 = vtable.readPointer(); } catch (e) { continue; }
+      if (!inModule(vtable) || !inModule(v0)) continue;
+      var vt5c = null;
+      try { vt5c = vtable.add(ADDR.modeSwitchVt).readPointer(); } catch (e) {}
+      found.push({
+        this: thisp.toString(), modeId: '0x' + (id >>> 0).toString(16),
+        vtable: vtable.toString(), vtableRva: '0x' + vtable.sub(base).toString(16),
+        vt5c: vt5c ? vt5c.toString() : null,
+        vt5cInModule: vt5c ? inModule(vt5c) : false
+      });
+      }
+    }
+  }
+  // cache the first candidate whose +0x5c slot is a module function (best switch target)
+  var chosen = null;
+  for (var c = 0; c < found.length; c++) {
+    if (found[c].modeId === '0x43521e6f' && found[c].vt5cInModule) { chosen = found[c]; break; }
+  }
+  if (!chosen) for (var c2 = 0; c2 < found.length; c2++) {
+    if (found[c2].vt5cInModule) { chosen = found[c2]; break; }
+  }
+  if (!chosen && found.length) chosen = found[0];
+  if (chosen) {
+    lastMode.mmPtr = ptr(chosen.this);
+    lastMode.thisPtr = chosen.this;
+    lastMode.id = parseInt(chosen.modeId, 16);
+    lastMode.idName = nameOf(lastMode.id);
+    lastMode.at = 'scan';
+  }
+  return { scannedBytes: scanned, ranges: ranges.length, count: found.length, candidates: found,
+           cachedForSwitch: chosen ? chosen.this : null };
+}
+
 // --- RPC: read the live playlist-service container without calling anything.
 rpc.exports = {
   dumpService: function () {
@@ -149,6 +221,7 @@ rpc.exports = {
     return out;
   },
   lastMode: function () { return lastMode; },
+  scanModeManager: function () { return findModeManagerCore(); },
   // DANGEROUS, EXPERIMENTAL: write the live mode id [this+0x4c]. Only after the
   // trace confirms `this`; the plan does NOT expect an offline/global poke to
   // switch the mode (H1 demotion), so treat this as a live test, not a fix.
