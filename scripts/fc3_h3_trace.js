@@ -251,6 +251,58 @@ function findModeManagerByVtable() {
            candidates: found, cachedForSwitch: chosen ? chosen.this : null };
 }
 
+// --- Robust vtable discovery (session 8). DumpCallers.java proved FUN_11340560 has NO
+// direct callers: it is invoked ONLY as a virtual slot (+0x38) of two vtables in the
+// image (0x1200e620, 0x11f910e8). The two static vtables found the exact 4 slots but the
+// live object may use a DERIVED vtable we didn't scan for. So instead, scan ALL rw- memory
+// for any pointer that equals the dispatch function address -> that IS a vtable slot ->
+// vtableBase = slotAddr - 0x38. Enumerate every such live vtable (auto-discovers derived
+// classes). Then report how many live objects point at each. Never calls anything.
+function findModeVtablesByDispatch() {
+  var dispAddr = A(ADDR.dispatchMode); // dispatch slot address = function entry, runtime
+  var disp = ptrToPat(dispAddr);
+  var ranges = Process.enumerateRanges({ protection: 'rw-', coalesce: true });
+  var scanned = 0, MAXSCAN = 1400 * 1024 * 1024;
+  var vtableBases = {};  // vtableBase -> count of dispatch-slot hits
+  var objs = {};         // objectAddr -> true
+  for (var r = 0; r < ranges.length && scanned < MAXSCAN; r++) {
+    var rng = ranges[r]; scanned += rng.size;
+    var hits = [];
+    try { hits = Memory.scanSync(rng.base, rng.size, disp); } catch (e) { continue; }
+    for (var h = 0; h < hits.length; h++) {
+      var vtBase = hits[h].address.sub(0x38);
+      vtableBases[vtBase.toString()] = (vtableBases[vtBase.toString()] || 0) + 1;
+    }
+  }
+  // for each discovered vtable base, find live objects whose vptr == base
+  var bases = Object.keys(vtableBases);
+  var vtInfo = [];
+  for (var b = 0; b < bases.length; b++) {
+    var vb = ptr(bases[b]);
+    var inImg = Process.findModuleByAddress(vb) !== null;
+    var objs2 = [];
+    // only scan for instances if the vtable is in the image (a real vtable);
+    // a heap 'slot' hit would be a coincidental data value.
+    if (inImg) {
+      for (var r2 = 0; r2 < ranges.length; r2++) {
+        var rng2 = ranges[r2];
+        var hh = [];
+        try { hh = Memory.scanSync(rng2.base, rng2.size, ptrToPat(vb)); } catch (e) { continue; }
+        for (var k = 0; k < hh.length && objs2.length < 12; k++) {
+          var o = hh[k].address; var id = 0;
+          try { id = o.add(0x4c).readU32(); } catch (e) {}
+          objs2.push({ this: o.toString(), modeId: '0x' + (id >>> 0).toString(16), modeIdName: nameOf(id) });
+        }
+        if (objs2.length >= 12) break;
+      }
+    }
+    vtInfo.push({ vtableBase: bases[b], inImage: inImg, slotHits: vtableBases[bases[b]],
+                  instances: objs2 });
+  }
+  return { scannedBytes: scanned, dispatchAddr: dispAddr.toString(),
+           vtableCount: bases.length, vtables: vtInfo };
+}
+
 // --- RPC: read the live playlist-service container without calling anything.
 rpc.exports = {
   dumpService: function () {
@@ -275,6 +327,7 @@ rpc.exports = {
   lastMode: function () { return lastMode; },
   scanModeManager: function () { return findModeManagerCore(); },
   scanModeManagerByVtable: function () { return findModeManagerByVtable(); },
+  scanModeVtables: function () { return findModeVtablesByDispatch(); },
   // DANGEROUS, EXPERIMENTAL: write the live mode id [this+0x4c]. Only after the
   // trace confirms `this`; the plan does NOT expect an offline/global poke to
   // switch the mode (H1 demotion), so treat this as a live test, not a fix.

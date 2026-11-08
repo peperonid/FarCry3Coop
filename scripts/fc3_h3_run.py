@@ -194,6 +194,7 @@ def main():
             "  modeid <this> <id>  DANGEROUS poke: setModeId(this_hex, id_hex)\n"
             "  scanmm              scan memory for the live mode-manager (no transition needed)\n"
             "  scanmmv             scan heap for the mode-manager by its VTABLE pointer (robust)\n"
+            "  modevt              auto-find ALL vtables dispatching to the mode switch + live instances\n"
             "  help | quit"
         )
         log.echo(HELP)
@@ -265,6 +266,9 @@ def main():
                 elif cmd in ("scanmmv", "scanv", "findmmv"):
                     log.echo("scanning heap for a live mode-manager instance by its VTABLE pointer (robust) ...")
                     log.echo(json.dumps(call("scanModeManagerByVtable"), ensure_ascii=False))
+                elif cmd in ("modevt", "scanmmv2"):
+                    log.echo("auto-discovering every vtable whose slot +0x38 == dispatcher, then live instances ...")
+                    log.echo(json.dumps(call("scanModeVtables"), ensure_ascii=False))
                 elif cmd in ("help", "?", "h"):
                     log.echo(HELP)
                 elif cmd in ("quit", "exit", "q"):
