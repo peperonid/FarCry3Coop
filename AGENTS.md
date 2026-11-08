@@ -72,14 +72,14 @@ and are written in English only: `<type>(<optional scope>): <description>`, e.g.
 
 **EN:** Reverse engineering uses REA (https://github.com/morluto/rea) as an MCP server, version 6.8.0,
 installed on this PC (npm global `rea-agents`) and registered for the **pi** agent in
-`C:\Users\<user>\.pi\agent\mcp.json`: see [docs/tools/rea.md](docs/tools/rea.md). Ghidra 12.1.4
+`C:\Users\<user>\.pi\agent\mcp.json`: see [docs/tools/rea.md](docs/tools/rea.md). The `coop-anything` and `supermemory` MCP servers are registered in the same file: see [docs/tools/coop-anything.md](docs/tools/coop-anything.md) and [docs/tools/supermemory.md](docs/tools/supermemory.md). Ghidra 12.1.4
 (`C:\tools\ghidra_12.1.4_PUBLIC`) and Temurin JDK 21.0.13+9 (`C:\tools\jdk-21.0.13+9`) are present;
 Claude Code is not installed here. The Python scripts in `scripts/` stay the fallback for read-only probes.
 `rea doctor --client pi --provider ghidra` reports healthy (verified 2026-11-03).
 
 **RU:** Для реверс-инжиниринга используется REA (https://github.com/morluto/rea) как MCP-сервер,
 версия 6.8.0: установлен на этом ПК (глобальный npm пакет `rea-agents`) и прописан для агента **pi** в
-`C:\Users\<user>\.pi\agent\mcp.json`: см. [docs/tools/rea.ru.md](docs/tools/rea.ru.md).
+`C:\Users\<user>\.pi\agent\mcp.json`: см. [docs/tools/rea.ru.md](docs/tools/rea.ru.md). Серверы MCP `coop-anything` и `supermemory` зарегистрированы в том же файле: см. [docs/tools/coop-anything.ru.md](docs/tools/coop-anything.ru.md) и [docs/tools/supermemory.ru.md](docs/tools/supermemory.ru.md).
 
 На этом ПК есть Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) и Temurin JDK 21.0.13+9
 (`C:\tools\jdk-21.0.13+9`); Claude Code отсутствует. Скрипты из `scripts/` остаются запасным
