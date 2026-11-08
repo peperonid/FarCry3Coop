@@ -2246,3 +2246,39 @@ diagnostic that will be INCONCLUSIVE by construction" — the engine keeps `0x43
 so writing the same value proves nothing, and the mode switch reads `[this+0x4c]`. The productive
 lead is the **live playlist-service container `[service+0x8c0]`** and the **mode-manager field
 `+0x4c`**; both need a runtime trace (owner's debugger), not an offline poke.
+
+
+## The six game-mode hashes: dispatch shape and the uncracked hash (session 6, static probes p312–p315)
+
+Probes `local/scratch/p312_hashcrack.py`, `p313_alg.py`, `p314_dispatch.py`, `p315_je.py` (+ `.out`) on
+`H:\FarCryCoop\TestFC3\bin\FC3.dll`, 2026-11-08. Continues the session-5 finding that the live current-mode
+id is the mode-manager field `[ebx + 0x4c]` (mode-manager `this` in `ebx`).
+
+- **The mode dispatch at `0x113405a0` is a compare-chain, not a jump table** (p315_je, the only fully-decoded
+  chain of the three): `0x113405a0 mov eax,[ebx+0x4c]`, then six `cmp eax, <id>` + conditional jumps —
+  `0xab4fc8e2 je 0x113405cd`, `0x43521e6f`(CO-OP)` je 0x113405cd`, `0x9991daec je 0x113405cd`,
+  `0x6c2b3868 je 0x113405cd`, `0xf66ffb87 je 0x113405cd`, `0x2100ced7 jne 0x11340605` (so it *falls through*
+  to `0x113405cd` when equal). **All six mode ids route to the same block `0x113405cd`**, whose strings are
+  `FCXMainMenu` + `IngameToLobby`; a current-mode that is none of the six branches to `0x11340605`. ⇒ this
+  chain is a *membership test* — "is the live mode one of these six (menu/lobby-capable) modes → main menu /
+  IngameToLobby". CO-OP is one of the six.
+- **Two sibling chains** at `0x11340622..` and `0x11340a25..` compare `[ebx+0x4c]` against the same six ids
+  with different targets (p314_dispatch, 750 insns decoded over `0x11340400..0x11340d00`). In both, only
+  `0x2100ced7` has a large downstream window (327 / 237 insns) carrying map-loading strings `CustomMap`,
+  `UI\Multiplayer\Textures\Menu\Loading\Worlds\`, `_01_1.xbt`, `\1\`; the other five ids have 2-insn windows.
+  ⇒ `0x2100ced7` is the mode that drives the per-world loading-screen textures (a multiplayer/arcade-style
+  loader); the other five share a short path.
+- **The six mode hashes are NOT any common string hash.** Brute-forced (p312, p313) a candidate name
+  vocabulary (CO-OP / Campaign / Hike / Arcade / HackThe / Expedition / Matchmaking variants, dotted engine
+  names, `PrivateCoopPlaylist`/`OfflinePlaylist`/`UserPlaylist`) against **FNV-1a, FNV-1, djb2, djb2x, sdbm,
+  murmur-less** — **0 hits**. Reference points: `fnv1a("CO-OP")=0x91c67ca9`, `djb2("CO-OP")=0x0ce785c3`,
+  `sdbm("CO-OP")=0x38ef15a2`; none equals `0x43521e6f`. ⇒ the Dunia id-hash is custom; mode names are hashed
+  at *build* time (the ids sit in `.data`, never written from `.text`, per session 5), so naming the five
+  siblings needs the hash routine recovered from the engine, or the `GameModesConfig.xml` name↔id table — not
+  offline cracking.
+
+**Net effect on the plan**: confirms session-5 — the switch reads `[ebx+0x4c]`; CO-OP (`0x43521e6f`) is one
+of six ids sharing the IngameToLobby/menu path, and `0x2100ced7` is the one mode id that loads per-world
+textures. The *static* thread on the mode dispatch is exhausted. Next real step is the owner's runtime trace
+of what writes `[ebx+0x4c]` (set a breakpoint there, capture the writer + `this`), and/or recovering the
+Dunia id-hash to name the five siblings.
