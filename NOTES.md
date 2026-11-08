@@ -2387,3 +2387,59 @@ is read at `0x113405a0` (`MOV EAX,[EBX+0x4c]`); the six-id compare that follows 
 `switchCoop` calls the switch-virtual directly, outside the dispatcher, which also runs
 `(**(code**)(*param_1+0x20))()` and other bookkeeping at entry — so the live test can still misbehave or
 crash for reasons other than the register convention. Hence dryRun + offline instance first.
+
+## Session 8 (2026-11-08): DX9 live attach + the mode-manager object is not alive at the menu (agent session, Frida + REA/Ghidra headless)
+
+Goal: capture the live mode-manager `this` (the ECX/EBX at the dispatch) so `switchCoop` can be driven,
+and read the live `[service+0x8c0]` container. The whole session was on the owner's working copy
+`H:\FarCryCoop\TestFC3\` (the real Uplay install untouched), 1.06 `FC3.dll`.
+
+### The game had to be switched to the DX9 build to load FC3.dll at all
+The Steam working copy launches the **DirectX 11** binary `farcry3_d3d11.exe` by default, which does
+**not** load `FC3.dll` (DX11 ships `FC3_d3d11.dll`), so every address in the trace was unmapped. The
+**DX9** binary `farcry3.exe` (a 60672-byte stub, hash `73a2870f827d3f305681f2198f232bf2f08172097411091543a7f3e5539f9641`)
+**does** load `FC3.dll` — our 1.06 identity. `scripts/fc3_h3_run.py` now defaults to `farcry3.exe` and
+refuses to attach to `_d3d11`. Live module base varies per run (this run `0x798a0000`; `A(x)=base+(x-0x10000000)`).
+
+### The co-op UI is online-gated; offline it aborts before the mode switch
+The owner attached `scripts/fc3_h3_run.py --watch 90` and navigated to the multiplayer/co-op menu, but
+the game showed the in-game error **"Служба сетевой игры больше недоступна"** ("the network game service is
+no longer available") — Ubisoft netplay is unavailable offline — and **aborted before any mode change**.
+The dispatch hook at `0x113405a0` never fired (`WATCH DONE ... NONE - no mode transition fired`). So FC3's
+co-op cannot be entered through the UI while offline; the internal H3 approach is precisely a bypass of that
+gate, but it still needs a live mode-manager `this`.
+
+### The dispatcher is invoked ONLY virtually (headless `DumpCallers.java`)
+`scripts/ghidra/DumpCallers.java` (offline `FC3_106` project) shows `FUN_11340560` (the dispatcher; dispatch
+point `0x113405a0`, `thiscall this` = the mode manager) has **zero direct CALL xrefs** — its only two xrefs
+are DATA, both **vtable slots**: `0x1200e658` (vtable base `0x1200e620`, 15 slots) and `0x11f91120` (vtable base
+`0x11f910e8`, 16 slots, several slots are the purecall thunk `0x1061fee0` => an abstract/interface table). In
+both tables `FUN_11340560` sits at slot **`+0x38`** (see `scripts/ghidra/DumpVtable.java` -> `out/vtable_mode.txt`).
+The vtable stores the function **entry** `0x11340560`, not the mid-function dispatch point.
+
+### The live mode-manager instance does not exist at the menu (two independent scans, both empty)
+- `scanmm` (heap id-scan, `[obj+0x4c]` == one of the six mode ids): only three mode-**descriptor** objects
+  with id `0x6c2b3868` (vtables `0x1f1a128`/`0x1f3a8b8`/`0x1f6aacc`), not the manager.
+- `scanmmv` (heap scan for a live `vptr == A(0x1200e620)` or `A(0x11f910e8)`): **0 instances**.
+- `modevt` (`scanModeManagerByVtable`'s successor `findModeVtablesByDispatch`, added + fixed this session):
+  scans the readable **image** ranges for the function-entry pointer `0x11340560` (auto-discovers every vtable
+  that dispatches through it, base and derived), then scans the `rw-` heap for live objects of each. Result:
+  exactly **2** image vtables found — `A(0x1200e620)` and `A(0x11f910e8)` — confirming the static analysis, but
+  **0 live instances** of either.
+
+Conclusion (deterministic): **no object of the two dispatcher-implementing classes is constructed while the
+game sits at the main/co-op menu.** The mode manager is instantiated only around a real mode activation. The
+only deterministic way to read `this` is to catch the dispatcher live during a transition the game **can** do
+offline — a **single-player world load** (Main Menu -> Continue / Load Checkpoint), not the offline-blocked
+co-op menu. `[service+0x8c0]` (the co-op playlist container, service object at the singleton `0x12863890`)
+was also re-checked and is still `0x0` at the menu.
+
+### Tools touched this session (committed, pushed to the agent fork)
+- `scripts/fc3_h3_run.py`: `--watch N` auto mode (attach, poll `lastMode` 1 Hz, log `[MODECAP]`, auto-detach);
+  commands `scanmm`, `scanmmv`, `modevt`.
+- `scripts/fc3_h3_trace.js`: `scanModeManager` (id-scan), `scanModeManagerByVtable` (static-vtable scan),
+  `findModeVtablesByDispatch` (`modevt`: image-wide vtable discovery + heap instance scan, caches the first
+  live instance into `lastMode` for `switchCoop`). `ADDR.mmDispatchFn = 0x11340560` (the slot value).
+- `scripts/ghidra/DumpCallers.java`, `scripts/ghidra/DumpVtable.java` + `run_dump_vtable.bat` (offline reuse).
+Commits (agent fork `main`): `b74c165` (add modevt discovery), `a3aac57` (fix modevt: search the entry pointer,
+in the image, then instances in the heap). Supermemory record `jiAFbWDzn3UFD5x3X5Uj9g`.
