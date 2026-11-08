@@ -110,7 +110,11 @@ analysis (loads in ~3 min, no re-analysis) with a headless postScript:
 init `FUN_1127a0f0`, the installer `FUN_11279910`, the singleton getter `FUN_103d1640` and the mode
 switch vtable `+0x5c`); `ghidra/run_decomp_h3.bat` shows the invocation (paths point at the scratch
 project — edit them). `ghidra/DisasmSwitch.java` (+ `run_disasm.bat`) is the linear-disasm variant used to
-disasm-confirm the switch ABI. Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
+disasm-confirm the switch ABI. `ghidra/DumpCallers.java` (+ `run_dump_callers.bat`) lists xrefs to the
+dispatcher (proved it is invoked only virtually), `ghidra/DumpVtable.java` (+ `run_dump_vtable.bat`) walks a
+function's vtable, and `ghidra/DecompileModeSwitch.java` (+ `run_decomp_modeswitch.bat`) decompiles the live
+mode-switch virtual `vtable+0x5c` (`FUN_1030f8a0`, an id-setter) and the dispatcher's entry-bookkeeping slots.
+Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
 
 ## Caches and ignored files
 

@@ -2443,3 +2443,53 @@ was also re-checked and is still `0x0` at the menu.
 - `scripts/ghidra/DumpCallers.java`, `scripts/ghidra/DumpVtable.java` + `run_dump_vtable.bat` (offline reuse).
 Commits (agent fork `main`): `b74c165` (add modevt discovery), `a3aac57` (fix modevt: search the entry pointer,
 in the image, then instances in the heap). Supermemory record `jiAFbWDzn3UFD5x3X5Uj9g`.
+
+### Session 8c (2026-11-08): the live vtable + the +0x5c "switch" is only an id-setter (H3a demoted)
+
+The `--watch` + single-player-load capture repeated and the new auto-`[MODEPROBE]` gave the live
+mode-manager layout (run base `0x798a0000`, `this`=`0x298db6d0`):
+
+- `curMode` `[this+0x4c]` = `0x80608f71` this run (was `0x83AE70EF` last run) -> `[this+0x4c]` is NOT a
+  stable mode id and is never one of the six dispatch ids.
+- `[this+0x20]` = `0x0`, `[this+0x74]` = `0x100dbd00` (a module pointer, i.e. the "gate" is a live member,
+  so the dispatcher's loading-texture branch is taken).
+- **primary vtable = `0x7a56e5f8` -> Ghidra `0x1200e5f8`** (in image). The two vtables the `modevt` scan kept
+  reporting (`0x1200e620`, `0x11f910e8`) were *not* the object's vptr: `0x1200e620` is this same object's
+  **secondary** base-class subobject at primary+`0x28` (multiple inheritance). That is exactly why
+  `scanmmv`/`modevt` found 0 instances: an object's `+0` vptr is the primary table `0x1200e5f8`, which those
+  scans never looked for. The dispatcher `FUN_11340560` sits at **primary `+0x60`** (`0x1200e658`), which equals
+  the secondary table's `+0x38` (`0x1200e620+0x38`) - that coincidence is what made the `+0x38`-assumption scan
+  report a bogus base.
+
+Primary vtable slot targets (runtime-probed, Ghidra RVAs): `+0x20 -> 0x1133fb30` (no function: a thunk slot),
+`+0x38 -> 0x10c471b0`, **`+0x5c -> 0x1030f8a0`** (the virtual the dispatcher calls as the "switch"), `+0x60 ->
+0x11340560` (the dispatcher itself).
+
+Decompiled (offline `FC3_106`, `scripts/ghidra/DecompileModeSwitch.java` -> `out/decomp_modeswitch.txt`):
+
+```
+void __thiscall FUN_1030f8a0(int this, undefined4 *param_2)   // vtable[+0x5c]
+{
+  *(undefined4 *)(this + 0x4c) = *(undefined4 *)(this + 0x48);   // prev = cur
+  *(undefined4 *)(this + 0x48) = *param_2;                        // cur  = targetId
+  return;
+}
+```
+
+**So the `vtable[+0x5c]` "switch virtual" is a two-line id-swizzle, not a transition.** It records the target id
+into `[this+0x48]` and shifts the old one to `[this+0x4c]`; it does **not** load a world, build a session, or
+touch the playlist service. Consequence for H3a: `switchCoop` (write `[this+0x4c]=CO-OP` + call `vtable[+0x5c](&CO-OP)`)
+would be harmless (it can't crash on this path, so the owner does NOT need to risk it) but **useless for
+entering co-op** - it only sets two id fields. `[this+0x48]` is the "current/target" id, `[this+0x4c]` the
+"previous" id; the dispatcher's six-id compare and the loading-texture branch consume them, and the real work
+(map/world load, session bring-up) happens in consumers of `[this+0x48]` and in the dispatcher's *caller* - which
+invokes the dispatcher-virtual (`vtable[+0x60]`) with `(param_2=&destId, param_3=refcounted ptr, param_4,
+param_5)` and is not findable by static xref (indirect through the object). The dispatcher has zero direct
+callers; only objects of this class call it through the vtable.
+
+This demotes H3a as the co-op entry mechanism. New leads: (1) find the consumers of `[this+0x48]` / the
+dispatcher-virtual `+0x60` callers to locate the code that actually acts on a co-op target id; (2) the co-op
+container `[svc+0x8c0]` is still `0x0` in-world, so the co-op session/playlist (and its netplay prerequisite)
+must be brought up before any co-op target id would do anything - which offline is blocked by the Ubisoft
+network-service gate. A clean co-op transition most likely must be **captured online** (watch a real 2p join)
+and only then reasoned about for offline/4p reconstruction.
