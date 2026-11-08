@@ -19,6 +19,16 @@ on the owner's machine. See NOTES.md "Session 7" for the mechanism and the disas
 Frida on PATH (`frida`, `frida-ps`), game running offline to the main menu, `FC3.dll` at its 1.06 build
 (the script re-anchors from `base`; addresses are 1.06, base `0x10000000`).
 
+**Frida is NOT installed on the owner's PC yet** (checked 2026-11-08: no `frida`/`frida-ps` on PATH, no
+`frida`/`frida-tools` in the active Python, no `frida.exe` in the project or `H:\FarCryCoop`). Install it
+before step 2, e.g. `python -m pip install frida-tools` (this pulls the matching `frida` core and puts
+`frida`, `frida-ps`, `frida-trace` on PATH). Installing is a download, so the owner runs it (or approves
+it). Confirm afterwards with `frida --version` and `frida-ps -a`.
+
+**Capture the log.** The script prints all evidence with `console.log` (the `[dispatch]` lines, and the
+return values of every `rpc.exports.*`). Save the whole REPL session so it can be reviewed afterwards.
+In PowerShell: `frida -n FC3 -l scripts\fc3_h3_trace.js 2>&1 | Tee-Object -FilePath H:\FarCryCoop\scratch\h3_live.log`.
+
 ## Steps
 
 1. Launch the game offline and reach the **main menu** (do NOT start a normal single-player mission).
