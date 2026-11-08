@@ -344,6 +344,34 @@ rpc.exports = {
   scanModeManager: function () { return findModeManagerCore(); },
   scanModeManagerByVtable: function () { return findModeManagerByVtable(); },
   scanModeVtables: function () { return findModeVtablesByDispatch(); },
+  // Read-only probe of a live mode-manager `this` (from the dispatch hook). Reads the
+  // vtable pointer, [this+0x4c] current id, the [this+0x74] gate, and the real targets
+  // of vtable slots +0x20/+0x38/+0x5c/+0x60 with a Ghidra-RVA conversion so each can be
+  // decompiled offline. Never calls anything. addrStr optional; defaults to lastMode.mmPtr.
+  probeMode: function (addrStr) {
+    var t = addrStr ? ptr(parseInt(addrStr, 16)) : lastMode.mmPtr;
+    if (!t || t.isNull()) return { error: 'no this (pass an address or capture one via the dispatch hook)' };
+    function toRva(a) { return '0x' + (a.sub(mod.base).add(0x10000000)).toString(16); }
+    var out = { this: t.toString() };
+    try { out.curMode = '0x' + (t.add(0x4c).readU32() >>> 0).toString(16); } catch (e) { out.e4c = '' + e; }
+    try { out.gate74 = '0x' + (t.add(0x74).readU32() >>> 0).toString(16); } catch (e) {}
+    try { out.gate20 = t.add(0x20).readPointer().toString(); } catch (e) {}
+    try {
+      var vt = t.readPointer();
+      out.vtable = vt.toString();
+      out.vtableGhidra = toRva(vt);
+      out.vtableInImage = Process.findModuleByAddress(vt) !== null;
+      var offs = [0x20, 0x38, 0x5c, 0x60];
+      out.slots = {};
+      for (var i = 0; i < offs.length; i++) {
+        var o = offs[i]; var f;
+        try { f = vt.add(o).readPointer(); } catch (e) { out.slots['+0x' + o.toString(16)] = 'read-err'; continue; }
+        out.slots['+0x' + o.toString(16)] = { addr: f.toString(), ghidra: toRva(f),
+          inModule: Process.findModuleByAddress(f) !== null };
+      }
+    } catch (e) { out.vtableErr = '' + e; }
+    return out;
+  },
   // DANGEROUS, EXPERIMENTAL: write the live mode id [this+0x4c]. Only after the
   // trace confirms `this`; the plan does NOT expect an offline/global poke to
   // switch the mode (H1 demotion), so treat this as a live test, not a fix.

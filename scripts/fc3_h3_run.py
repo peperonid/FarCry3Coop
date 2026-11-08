@@ -187,6 +187,7 @@ def main():
             "commands:\n"
             "  dump                read live playlist-service container  (dumpService)\n"
             "  mode                last mode-manager this + [this+0x4c]  (lastMode)\n"
+            "  probe [hex]         read-only dump of a live mode-manager this vtable+slots (+0x20/38/5c/60)\n"
             "  switch dry          H3a dry run (no live call)            (switchCoop true)\n"
             "  switch go           H3a LIVE: write [this+0x4c]+call vtable[+0x5c] (may crash)\n"
             "  pop dry             H3b dry run (show svcInit addr)       (populate true)\n"
@@ -219,6 +220,11 @@ def main():
                     if key not in seen:
                         seen.add(key)
                         log.echo("[MODECAP] " + json.dumps(r, ensure_ascii=False))
+                        # immediately probe the live `this` while we are attached (read-only)
+                        try:
+                            log.echo("[MODEPROBE] " + json.dumps(call("probeMode", str(r.get("thisPtr"))), ensure_ascii=False))
+                        except Exception as exc:
+                            log.echo("[MODEPROBE] error: %r" % (exc,))
                 time.sleep(1.0)
             log.echo(">>> WATCH DONE. captured mode-manager this: %s <<<"
                      % (", ".join(sorted(seen)) if seen else "NONE - no mode transition fired"))
@@ -238,6 +244,9 @@ def main():
                 elif cmd in ("mode", "lastmode"):
                     r = call("lastMode")
                     log.echo(json.dumps(r, ensure_ascii=False))
+                elif cmd == "probe":
+                    arg = rest[0] if rest else None
+                    log.echo(json.dumps(call("probeMode", arg), ensure_ascii=False))
                 elif cmd == "switch":
                     if not rest or rest[0].lower() not in ("dry", "go"):
                         log.echo("use: switch dry | switch go")
