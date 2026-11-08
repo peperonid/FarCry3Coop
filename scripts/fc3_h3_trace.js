@@ -372,6 +372,45 @@ rpc.exports = {
     } catch (e) { out.vtableErr = '' + e; }
     return out;
   },
+  // Read-only dump of the global mode-list singleton DAT_128048c0 (idMaskReg). The
+  // loader (FUN_113409d0) finds a co-op descriptor by scanning this list for the
+  // entry whose +0x20 mode id == the target id. Each entry: +0x00 refcount,
+  // +0x0C name string (char*), +0x20 mode id. This answers the decisive live question:
+  // is a +0x20==0x43521e6f (CO-OP) entry present in the running game offline?
+  dumpModes: function (maxEntries) {
+    var cap = (maxEntries && maxEntries > 0) ? maxEntries : 64;
+    var g = A(ADDR.idMaskReg); // global holding the manager pointer
+    var out = { global: g.toString() };
+    var obj;
+    try { obj = g.readPointer(); } catch (e) { return { error: 'global read fail: ' + e }; }
+    out.manager = obj.toString();
+    if (obj.isNull()) { out.note = 'singleton null (not constructed yet)'; return out; }
+    try { out.vtable = obj.readPointer().toString(); } catch (e) {}
+    var data, count;
+    try { data = obj.add(0x04).readPointer(); } catch (e) { out.dataErr = '' + e; return out; }
+    try { count = obj.add(0x08).readU32(); } catch (e) { out.countErr = '' + e; return out; }
+    out.count = count;
+    out.entries = [];
+    if (data.isNull()) { out.note = 'data ptr null'; return out; }
+    var lim = Math.min(count, cap);
+    for (var i = 0; i < lim; i++) {
+      var ent = { index: i };
+      try {
+        var e0 = data.add(i * 4).readPointer(); // entry pointer
+        ent.entry = e0.toString();
+        if (e0.isNull()) { ent.empty = true; out.entries.push(ent); continue; }
+        var id = e0.add(0x20).readU32() >>> 0;
+        ent.id = '0x' + id.toString(16);
+        if (id === MODE.coop) ent.COOP = true;
+        var namePtr = e0.add(0x0C).readPointer();
+        if (!namePtr.isNull()) {
+          try { ent.name = namePtr.readCString(48); } catch (e2) { ent.name = '(unreadable)'; }
+        }
+      } catch (e) { ent.err = '' + e; }
+      out.entries.push(ent);
+    }
+    return out;
+  },
   // DANGEROUS, EXPERIMENTAL: write the live mode id [this+0x4c]. Only after the
   // trace confirms `this`; the plan does NOT expect an offline/global poke to
   // switch the mode (H1 demotion), so treat this as a live test, not a fix.

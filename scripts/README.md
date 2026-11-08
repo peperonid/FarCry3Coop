@@ -94,7 +94,7 @@ virtual blind can crash the game. Addresses are 1.06 (`FC3.dll` base `0x10000000
 `fc3_addrmap.py` before use. Attach to an `-offline` instance only — never an online / Ubisoft Connect
 session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run it one-command with
 `scripts\fc3_h3_run.bat` (attaches to the running `farcry3.exe` / `farcry3_d3d11.exe`, loads this script,
-mirrors the whole session to `H:\FarCryCoop\scratch\h3_live.log`, and gives a `dump`/`mode`/`switch`/`pop`
+mirrors the whole session to `H:\FarCryCoop\scratch\h3_live.log`, and gives a `dump`/`modes`/`mode`/`switch`/`pop`
 command loop). Or attach by hand: the game process is `farcry3` (not `FC3`), so
 `frida -n farcry3 -l scripts/fc3_h3_trace.js` and use `rpc.exports.dumpService()` / `lastMode()` /
 `switchCoop(true)` / `populate(true)` in the REPL. `fc3_h3_run.py` is the driver the `.bat` calls; pass
@@ -116,7 +116,13 @@ function's vtable, and `ghidra/DecompileModeSwitch.java` (+ `run_decomp_modeswit
 mode-switch virtual `vtable+0x5c` (`FUN_1030f8a0`, an id-setter) and the dispatcher's entry-bookkeeping slots.
 `ghidra/FindModeConsumers.java` lists every function that loads a mode-id constant (and xrefs to the manager
 vtables), and `ghidra/DecompileConsumers.java` decompiles the co-op mode-change handler `FUN_10fa1990` plus
-its constructor and loader sibling. The generic offline runner is `ghidra/run_headless.py <Script.java> <log>`
+its constructor and loader sibling. `ghidra/TraceDescriptor.java` finds xrefs to `FUN_10fa1990` (it is the
+manager vtable slot `+0x0C`) and decompiles its `param_3` usage; `ghidra/TraceRegistry.java` lists the
+READ/WRITE xrefs of the global mode-list singleton `DAT_128048c0` (and `DAT_12804acc`/`DAT_12804b3c`);
+`ghidra/DecompRegistry.java` decompiles its constructor `FUN_10048230` and teardown `FUN_11756e00`.
+At runtime `fc3_h3_run.py`'s `modes` command (`dumpModes` RPC) reads the live `DAT_128048c0` list and
+prints every registered mode entry (`id@+0x20`, `name@+0xC`), to check offline whether a CO-OP
+(`0x43521e6f`) entry already exists. The generic offline runner is `ghidra/run_headless.py <Script.java> <log>`
 (reuses the analyzed `FC3_106` project, no re-analysis).
 Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
 

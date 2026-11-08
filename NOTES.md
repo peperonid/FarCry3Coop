@@ -2612,3 +2612,47 @@ Only caller: `FUN_10fa1990` (+ one DATA xref at 0x11f910cc = a vtable slot in th
    session data) can only be settled by a live experiment. Next concrete offline lead: map the
    descriptor object's class (its vtable + `+0xC` string field) via the online-lobby producer, OR probe
    whether a single-player world string in `DAT_12804324` lets `FUN_117872f0` resolve a loadable map.
+
+### Session 8f (2026-11-08, offline Ghidra): the param_3 descriptor is a mode-entry of a global mode-list singleton `DAT_128048c0`
+
+Answer to "what object is passed as `param_3`": a **mode-descriptor entry** living in a global
+singleton list, NOT a per-call freshly built object. Scripts `TraceDescriptor.java`,
+`TraceRegistry.java`, `DecompRegistry.java` (xrefs + decompiles).
+
+**Entry point into the mode-change is a vtable slot:** `FUN_10fa1990` has exactly one xref, a DATA
+slot at `0x1200e604` = the mode-manager primary vtable `0x1200e5f8` **`+0x0C`**. So co-op entry is
+invoked as `mgr->vtable[+0x0C](destId, descriptor)` (virtual; no static caller, same reason the
+dispatcher has none). `FUN_10fa1990(this, param_2=destId, param_3=descriptor)` refcounts both, calls
+`FUN_11340d00(param_2, param_3)`, reads the resolved id via `this->vtable[+0x50]`, then the id branch
+(`0x43521e6f` -> "Coop_Fenrir_Loading").
+
+**Descriptor (`param_3`) layout** (from all its consumers): `+0x00` intrusive refcount (LOCK/`+1`/`-1`
+seen in every holder), `+0x0C` a **name string** (`char*`, validated by `FUN_10003f00`/`FUN_1011cb30`),
+`+0x20` a **mode id dword**. In `FUN_113409d0` the loader STORES the used descriptor at `[mgr+0x90]`
+(refcounted) and calls `**(*mgr+0x60))(destId,&x,&descriptor,1)` (re-dispatch).
+
+**Where the descriptor comes from - the global mode-list singleton `DAT_128048c0`:**
+```c
+piVar4 = *(int **)(DAT_128048c0 + 4);            // list data pointer (entries)
+piVar1 = piVar4 + *(int *)(DAT_128048c0 + 8);    // end = base + size
+for (; piVar4 != piVar1 && *(int*)(*piVar4 + 0x20) != *param_2; piVar4 = piVar4 + 1) {}
+```
+So `DAT_128048c0` is a manager whose internal array is at `+0x04` (data) / `+0x08` (size); the loader
+**linearly finds the entry whose `+0x20` == the target mode id**. That found entry is the descriptor.
+
+**Singleton lifecycle:** `DAT_128048c0` is created lazily by `FUN_10048230` (allocate via the
+`FUN_118db560` singleton factory, `*obj = &PTR_FUN_11f224c4` (the list-manager vtable), zero
+`+0x00..+0x18`, publish) and destroyed by `FUN_11756e00` (a **teardown/shutdown**: `(**(*obj))(1)`
+delete + set null, also clears `DAT_12804acc`). So this is not the online-populate site; the actual
+mode-entry registration is via the list-manager vtable `0x11f224c4` (virtual adder - not statically
+resolvable, needs a live read).
+
+**Net for "build a descriptor by hand":** a valid co-op descriptor = an object with `+0x20 = 0x43521e6f`
+and `+0x0C = a co-op map/world name`, reachable in the `DAT_128048c0` list. The decisive open question
+is now empirical and cheap to answer **live**: does the running DX9 game already contain a `+0x20 =
+0x43521e6f` entry in `DAT_128048c0`'s list offline? If yes -> hand-drive `mgr->vtable[+0x0C]` with that
+entry; if no -> the co-op entry registration is the real offline gate. Prepared `dumpModes` (tracer RPC)
+to enumerate `DAT_128048c0` list entries (`{id@+0x20, name@+0xC}`) next live session. Globals written
+by exactly 3 sites each: `DAT_128048c0` = {`FUN_10048230` ctor, `FUN_11756e00` dtor, `FUN_11756e00`};
+`DAT_12804acc` = {`FUN_100480f0`, `FUN_117567c0`, `FUN_11756e00`}; `DAT_12804b3c` = {`FUN_10136900`,
+`FUN_11629c30`}.

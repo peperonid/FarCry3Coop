@@ -193,6 +193,7 @@ def main():
             "  pop dry             H3b dry run (show svcInit addr)       (populate true)\n"
             "  pop go              H3b LIVE: call FUN_1127a0f0(service)  (may crash)\n"
             "  modeid <this> <id>  DANGEROUS poke: setModeId(this_hex, id_hex)\n"
+            "  modes               dump global mode-list DAT_128048c0 entries (id@+0x20, name@+0xC)\n"
             "  scanmm              scan memory for the live mode-manager (no transition needed)\n"
             "  scanmmv             scan heap for the mode-manager by its VTABLE pointer (robust)\n"
             "  modevt              auto-find ALL vtables dispatching to the mode switch + live instances\n"
@@ -241,6 +242,9 @@ def main():
             try:
                 if cmd in ("dump", "dumpservice"):
                     log.echo(json.dumps(call("dumpService"), ensure_ascii=False))
+                elif cmd in ("modes", "dumpmodes", "dmpmodes"):
+                    log.echo("reading the global mode-list singleton DAT_128048c0 (entries: id@+0x20, name@+0xC) ...")
+                    log.echo(json.dumps(call("dumpModes"), ensure_ascii=False))
                 elif cmd in ("mode", "lastmode"):
                     r = call("lastMode")
                     log.echo(json.dumps(r, ensure_ascii=False))
