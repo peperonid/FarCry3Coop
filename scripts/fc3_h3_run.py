@@ -46,14 +46,16 @@ def ts():
 class Logger:
     def __init__(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        backup = None
         if os.path.exists(path):
             stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             backup = path + "." + stamp + ".bak"
             os.replace(path, backup)
-            self.echo("(previous log saved to %s)" % backup)
         self.f = open(path, "a", encoding="utf-8", newline="\n")
         self.echo("=== fc3_h3_run session %s ===" % datetime.datetime.now().isoformat(timespec="seconds"))
         self.echo("log file: %s" % path)
+        if backup:
+            self.echo("(previous log saved to %s)" % backup)
 
     def echo(self, line):
         # print tolerates the cp1251 console; file is utf-8.
@@ -77,7 +79,12 @@ def find_game_pid(device, log):
     hits = [p for p in procs if p.name and p.name.lower().rsplit(".", 1)[0] in GAME_PROCS]
     if not hits:
         log.echo("No FC3 game process found (looked for: %s)." % ", ".join(GAME_PROCS))
-        log.echo("Launch H:\\FarCryCoop\\TestFC3\\bin\\farcry3.exe OFFLINE to the main menu, then re-run.")
+        log.echo("Launch H:\\FarCryCoop\\TestFC3\\bin\\farcry3.exe OFFLINE to the main menu, wait until you")
+        log.echo("ARE at the main menu, then re-run. If the game IS running but still not found:")
+        log.echo("  - it may be launched as Administrator: a non-elevated Python/Frida cannot see or")
+        log.echo("    attach an elevated process. Launch the game WITHOUT 'Run as administrator', or run")
+        log.echo("    this launcher from an elevated shell.")
+        log.echo("  - to see every process Frida can actually see, run: fc3_h3_run.bat --list")
         log.echo("Or pass the pid explicitly: python scripts/fc3_h3_run.py --pid <pid>")
         return None
     for p in hits:
@@ -94,11 +101,21 @@ def to_snake(name):
 def main():
     ap = argparse.ArgumentParser(description="H3 live-test launcher")
     ap.add_argument("--pid", type=int, default=None, help="attach to this pid instead of auto-detect")
+    ap.add_argument("--list", action="store_true", help="list processes Frida can see (diagnose attach) and exit")
+    ap.add_argument("--grep", default=None, help="with --list, only names containing this substring")
     args = ap.parse_args()
 
     log = Logger(LOG_PATH)
     try:
         device = frida.get_local_device()
+        if args.list:
+            ps = sorted(device.enumerate_processes(), key=lambda p: (p.name or "").lower())
+            log.echo("Frida sees %d processes:" % len(ps))
+            for p in ps:
+                if args.grep and args.grep.lower() not in (p.name or "").lower():
+                    continue
+                log.echo("  pid=%d  %s" % (p.pid, p.name))
+            return 0
         pid = args.pid or find_game_pid(device, log)
         if pid is None:
             return 2
