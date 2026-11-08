@@ -53,7 +53,12 @@ var ADDR = {
   idMaskReg:     0x128048c0, // id -> mask registry global
   centralObj:    0x12804acc, // central game object (4529 refs; +0x68 component container)
   installG_a:    0x12891ca0, // diagnostic install-global (NOT the live lever; see H1 demotion)
-  installG_b:    0x12891ca8
+  installG_b:    0x12891ca8,
+  // Mode-manager vtable addresses (Ghidra 0x10000000 space), recovered by DumpVtable.java:
+  // both are classes that implement FUN_11340560 (the mode dispatch, slot +0x38); a live
+  // instance's vptr == A(mmVtable*), and [instance+0x4c] is the current mode id.
+  mmVtable1:     0x1200e620, // 15-slot vtable (slot +0x38 = FUN_11340560)
+  mmVtable2:     0x11f910e8  // 16-slot vtable (shares first 5 slots; slot +0x38 = FUN_11340560)
 };
 
 // Co-op mode id + the five sibling mode-hash ids seen in the dispatch chain.
@@ -199,6 +204,53 @@ function findModeManagerCore() {
            cachedForSwitch: chosen ? chosen.this : null };
 }
 
+// --- Locate the live mode-manager instance directly by its vtable pointer (robust:
+// independent of the current mode id, unlike the id-scan). DumpVtable.java proved
+// the mode-manager classes have vtables at ADDR.mmVtable1 / mmVtable2 (Ghidra space),
+// and FUN_11340560 (the dispatcher we hook) is slot +0x38 of both. A live object's
+// vptr field == A(mmVtable); scan the heap for that pointer value -> real instances;
+// [instance+0x4c] is the current mode id. Caches the first into lastMode.mmPtr.
+function ptrToPat(p) {
+  var v = p.toUInt32 ? p.toUInt32() : (parseInt(p.toString(), 16) >>> 0);
+  return idPattern(v);
+}
+function findModeManagerByVtable() {
+  var vtG = [ADDR.mmVtable1, ADDR.mmVtable2];
+  var vtRt = vtG.map(function (g) { return A(g); });
+  var patList = vtRt.map(function (p, i) { return { pat: ptrToPat(p), vt: p, gh: vtG[i] }; });
+  var ranges = Process.enumerateRanges({ protection: 'rw-', coalesce: true });
+  var scanned = 0, MAXSCAN = 1200 * 1024 * 1024, found = [];
+  for (var r = 0; r < ranges.length && scanned < MAXSCAN && found.length < 24; r++) {
+    var rng = ranges[r]; scanned += rng.size;
+    for (var pi = 0; pi < patList.length && found.length < 24; pi++) {
+      var hits = [];
+      try { hits = Memory.scanSync(rng.base, rng.size, patList[pi].pat); } catch (e) { continue; }
+      for (var h = 0; h < hits.length && found.length < 24; h++) {
+        var thisp = hits[h].address; // vptr at object+0
+        var id = 0;
+        try { id = thisp.add(0x4c).readU32(); } catch (e) { continue; }
+        found.push({
+          this: thisp.toString(), via: 'vtable',
+          inModule: Process.findModuleByAddress(thisp) !== null,
+          vtable: thisp.readPointer().toString(),
+          vtableGhidra: '0x' + patList[pi].gh.toString(16),
+          modeId: '0x' + (id >>> 0).toString(16), modeIdName: nameOf(id)
+        });
+      }
+    }
+  }
+  var chosen = found.length ? found[0] : null;
+  if (chosen) {
+    lastMode.mmPtr = ptr(chosen.this);
+    lastMode.thisPtr = chosen.this;
+    lastMode.id = parseInt(chosen.modeId, 16);
+    lastMode.idName = chosen.modeIdName;
+    lastMode.at = 'vtable-scan';
+  }
+  return { scannedBytes: scanned, ranges: ranges.length, count: found.length,
+           candidates: found, cachedForSwitch: chosen ? chosen.this : null };
+}
+
 // --- RPC: read the live playlist-service container without calling anything.
 rpc.exports = {
   dumpService: function () {
@@ -222,6 +274,7 @@ rpc.exports = {
   },
   lastMode: function () { return lastMode; },
   scanModeManager: function () { return findModeManagerCore(); },
+  scanModeManagerByVtable: function () { return findModeManagerByVtable(); },
   // DANGEROUS, EXPERIMENTAL: write the live mode id [this+0x4c]. Only after the
   // trace confirms `this`; the plan does NOT expect an offline/global poke to
   // switch the mode (H1 demotion), so treat this as a live test, not a fix.
