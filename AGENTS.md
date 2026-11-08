@@ -229,26 +229,26 @@ this session`). Команды выполнять через `ctx_execute` с `l
 
 MCP tool calls in this session may fail silently: the tool result comes back as a rendered
 `<tool_call>…<tool_call>` block — the same markup the rule above forbids printing.
-Status 2026-11-08: `mcp__rea__*` is verified working again (`rea doctor --client pi --provider ghidra`
-healthy; a real `current_document` round-trip returned structured JSON), so it is no longer assumed
-broken — but the failure mode was seen in earlier sessions, so keep watching: if a `mcp__rea__*` call
-returns the echoed markup, report it and fall back to the read-only Python probes in `scripts/`
-(capstone + raw FC3.dll). `mcp__supermemory__*` is still under question (not re-verified). When a
-call returns the echoed markup, do not retry it — it burns a turn and produces nothing; use a
-declared alternative (for project memory, the repo's own documents `NOTES.md`, `PLAN.md`, `docs/`).
-Report the failure to the owner instead of repeating the call.
+Status 2026-11-08: both namespaces verified live — `mcp__rea__*` (`rea doctor --client pi --provider
+ghidra` healthy; a real `current_document` round-trip returned structured JSON) and
+`mcp__supermemory__*` (a real `memory` save landed in FarCry3Coop, id 3WTpQLTSaHNZujpZT6RQAi),
+so neither is assumed broken any more — but the failure mode was seen in earlier sessions, so both
+stay under watch: if a call returns the echoed markup, do not retry it (it burns a turn and produces
+nothing), report it to the owner, and use the declared alternative — for reverse engineering the
+read-only Python probes in `scripts/` (capstone + raw FC3.dll), for project memory the repo's own
+documents (`NOTES.md`, `PLAN.md`, `docs/`).
 
 **RU:** Вызовы MCP-инструментов в этой сессии могут молча падать: вместо результата приходит
 отрендеренный блок `<tool_call>…<tool_call>` — та самая разметка, которую правило выше
-запрещает печатать. Статус на 2026-11-08: `mcp__rea__*` снова проверен и работает
-(`rea doctor --client pi --provider ghidra` здоров; настоящий round-trip `current_document`
-вернул структурированный JSON), поэтому он больше не считается сломанным — но режим
-сбоя наблюдался в прошлых сессиях, за ним следим: если вызов `mcp__rea__*` вернёт
-эхо-разметку, сообщить и использовать черновые Python-зонды из `scripts/` (capstone и
-сырой FC3.dll). `mcp__supermemory__*` остаётся под вопросом — не перепроверен. Если вызов
-возвращает эхо-разметку, его повторно не звать — вызов сжигает ход и ничего не даёт;
-использовать объявленную альтернативу (для проектной памяти — документы этого репозитория
-`NOTES.md`, `PLAN.md`, `docs/`). О сбое сообщать владельцу.
+запрещает печатать. Статус на 2026-11-08: оба пространства имён проверены живым вызовом —
+`mcp__rea__*` (`rea doctor --client pi --provider ghidra` здоров; настоящий round-trip
+`current_document` вернул структурированный JSON) и `mcp__supermemory__*` (настоящий save
+через `memory` сохранился в FarCry3Coop, id 3WTpQLTSaHNZujpZT6RQAi), поэтому ни одно из них
+больше не считается сломанным — но режим сбоя наблюдался в прошлых сессиях, за обоими следим:
+если вызов вернёт эхо-разметку, повторно его не звать (он сжигает ход и ничего не даёт),
+сообщить владельцу и использовать объявленную альтернативу — для реверс-инжиниринга черновые
+Python-зонды из `scripts/` (capstone и сырой FC3.dll), для проектной памяти документы самого
+репозитория (`NOTES.md`, `PLAN.md`, `docs/`).
 
 ## Repo layout / Раскладка репозитория
 
@@ -382,9 +382,9 @@ about testing, networking, sync tools, or packaging, also read the hub's `playbo
   `chr(92)`.
 - MCP tools can fail silently: the tool result comes back as a literal `<tool_call>…</…>` text
   block instead of a real result. That is a FAILED call, not a success — do not treat the echoed
-  markup as the tool having done anything, and do not retry it in a loop. Status 2026-11-08:
-  `mcp__rea__*` verified working (`rea doctor` healthy + a real tool round-trip) — treated as
-  working but under watch; `mcp__supermemory__*` is still unverified, under question. On a failed
-  call fall back to the read-only Python probes in `scripts/` + `local/scratch/` (capstone over
-  the raw FC3.dll) and to `NOTES.md`/`docs/`, and report the failure to the owner.
+  markup as the tool having done anything, and do not retry it in a loop. Status 2026-11-08: both
+  `mcp__rea__*` (`rea doctor` healthy + a real tool round-trip) and `mcp__supermemory__*` (a real
+  `memory` save landed) verified working — treated as working but under watch. On a call that
+  returns echoed markup, fall back to the read-only Python probes in `scripts/` + `local/scratch/`
+  (capstone over the raw FC3.dll) and to `NOTES.md`/`docs/`, and report the failure to the owner.
 
