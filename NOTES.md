@@ -2555,3 +2555,60 @@ conclusion: offline there is no self-contained co-op bring-up to hijack; the des
 produced by the online lobby flow we cannot observe offline.** Next candidate worth a static read is
 `FUN_11340d00` (the transition core) and `FUN_1011cb30` (the availability gate), to confirm whether a
 fake descriptor could bypass the predicate.
+
+### Session 8e (2026-11-08, offline Ghidra): the transition core + availability predicate are NOT netplay-gated (offline co-op is not precluded at the mode layer)
+
+Continued H4b offline (owner asked): decompile `FUN_11340d00` (transition core) and `FUN_1011cb30`
+(co-op availability predicate as earlier believed), and judge whether a fake descriptor `param_3`
+could bring up a co-op world offline. Scripts `DecompileCore.java` (targets 11340d00, 1011cb30,
+10003f00, then 117872f0, 103a2d50, 11788030); out `decomp_core.txt` / `decomp_core2.txt`.
+
+**Correction to session 8d:** `FUN_1011cb30` is NOT an availability/netplay gate. It is a trivial
+empty-string predicate called from 30+ generic sites:
+```c
+bool __fastcall FUN_1011cb30(int *param_1) {        // not void; the arg is ecx/pushed
+  if (*param_1 == 0) return *in_EAX == ' ';
+  return FUN_10003f00(*param_1 + 0xc) == 0;         // "is the descriptor's +0xC name string empty?"
+}
+```
+So in `FUN_10fa1990`'s co-op branch the `FUN_1011cb30()` calls are just re-checking descriptor
+name-string fields, not a network availability check.
+
+**`FUN_11340d00` (transition core) is a thin guard wrapper**, no netplay:
+```c
+void __thiscall FUN_11340d00(int this, int *destId, int *descriptor) {
+  if (*(char *)(this + 0x19) == 0) {                // guard: not already transitioning
+    refcount destId, descriptor;
+    FUN_113409d0(this, this + 0x48, destId, descriptor);   // loader; 2nd arg = &this->modeId
+  }
+  *(undefined1 *)(this + 0x70) = 1;                 // "a mode change was requested" flag
+  ... refcount cleanup
+}
+```
+Only caller: `FUN_10fa1990` (+ one DATA xref at 0x11f910cc = a vtable slot in the secondary cluster).
+
+**The two load handoffs the loader calls are generic engine helpers, not session calls:**
+- `FUN_117872f0` reads the global `DAT_12804324` (a current-game/world string global); if set, copies a
+  string and resolves it via `FUN_11787e80` (returns an id pair into EDI, else `{0xffffffff,0xffffffff}`).
+- `FUN_103a2d50(param_1=&out, param_2=keyPair)` is a hash-table lookup: `idx = ((param_2 ^ 0xdeadbeef)
+  * ...) % buckets` into `unaff_EDI + 0xc`, walks the bucket list comparing the key pair
+  (`piVar3[2]`,`piVar3[3]`) and returns the entry pointer (or `{0,0}`). A generic registry find-by-id.
+
+**Verdict on the owner's three questions:**
+1. **`FUN_1011cb30` dependency:** only the descriptor's `+0xC` string being non-empty. Trivially
+   satisfied by a well-formed descriptor; NOT a netplay/online gate, so "forcing it true offline" is
+   not even the issue.
+2. **What `FUN_11340d00` does on a co-op id:** guards on `[this+0x19]==0`, refcounts the id/descriptor,
+   calls the loader `FUN_113409d0` (which checks the target id against the six special ids and sets up
+   the multiplayer/co-op loading screen + Worlds textures), and sets `[this+0x70]=1`. No network code.
+3. **Can a fake descriptor push a co-op world offline?** The **mode layer is not offline-locked** - none
+   of `FUN_10fa1990` / `FUN_11340d00` / `FUN_113409d0` / `FUN_117872f0` / `FUN_103a2d50` calls the
+   network service. The "service unavailable" abort is UPSTREAM in the online lobby that (a) refuses to
+   advance offline and (b) normally builds `param_3` and populates the session globals. So the offline
+   blocker is not a hard check but *missing inputs*: a valid `param_3` co-op descriptor object (its
+   class/vtable + the `+0xC` map-name string layout are not yet mapped) and coherent session globals
+   (`DAT_12804acc+0x6c` flag, `+0x68` handle, `DAT_12804324` world string). Whether a hand-built
+   descriptor yields a **playable** co-op world (vs stalling at the async engine load that expects
+   session data) can only be settled by a live experiment. Next concrete offline lead: map the
+   descriptor object's class (its vtable + `+0xC` string field) via the online-lobby producer, OR probe
+   whether a single-player world string in `DAT_12804324` lets `FUN_117872f0` resolve a loadable map.
