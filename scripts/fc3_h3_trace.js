@@ -63,7 +63,10 @@ var MODE = {
 };
 
 var mod = Process.findModuleByName(MODULE);
-if (mod === null) { throw new Error(MODULE + ' not loaded; launch the game offline first'); }
+if (mod === null) {
+  throw new Error(MODULE + ' not loaded; launch the DX9 build (farcry3.exe -> FC3.dll) offline first. '
+    + 'The DX11 build (farcry3_d3d11.exe) loads FC3_d3d11.dll, which this tool does NOT target.');
+}
 var base = mod.base;
 function A(va) { return base.add(va - IMAGE_BASE); }
 

@@ -47,15 +47,23 @@ class Logger:
     def __init__(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         backup = None
+        rotate_note = None
         if os.path.exists(path):
             stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             backup = path + "." + stamp + ".bak"
-            os.replace(path, backup)
+            try:
+                os.replace(path, backup)
+            except OSError as exc:
+                # Another launcher instance holds the log open: do not crash, append instead.
+                rotate_note = "(could not rotate locked log: %s; appending)" % exc.__class__.__name__
+                backup = None
         self.f = open(path, "a", encoding="utf-8", newline="\n")
         self.echo("=== fc3_h3_run session %s ===" % datetime.datetime.now().isoformat(timespec="seconds"))
         self.echo("log file: %s" % path)
         if backup:
             self.echo("(previous log saved to %s)" % backup)
+        elif rotate_note:
+            self.echo(rotate_note)
 
     def echo(self, line):
         # print tolerates the cp1251 console; file is utf-8.
@@ -89,6 +97,25 @@ def find_game_pid(device, log):
         return None
     for p in hits:
         log.echo("found game process: pid=%d name=%s" % (p.pid, p.name))
+    # Our 1.06 addresses are for the DX9 build (FC3.dll). The DX11 build runs as
+    # farcry3_d3d11.exe and loads FC3_d3d11.dll, a different binary we have NOT mapped.
+    base_names = [p.name.lower().rsplit(".", 1)[0] for p in hits]
+    dx9 = [p for p, bn in zip(hits, base_names) if bn == "farcry3"]
+    dx11 = [p for p, bn in zip(hits, base_names) if bn == "farcry3_d3d11"]
+    if dx9:
+        if dx11:
+            log.echo("Both DX9 (farcry3) and DX11 (farcry3_d3d11) found; attaching to the DX9 one "
+                     "because our addresses target FC3.dll. Use --pid to pick the other.")
+        return dx9[0].pid
+    if dx11:
+        log.echo("STOP: only the DX11 build is running (farcry3_d3d11.exe loads FC3_d3d11.dll).")
+        log.echo("This tool's addresses are for the DX9 build (FC3.dll), which is NOT loaded here;")
+        log.echo("fc3_h3_trace.js refuses to run without FC3.dll on purpose.")
+        log.echo("Fix: quit this game and launch the DX9 executable")
+        log.echo("  H:\\FarCryCoop\\TestFC3\\bin\\farcry3.exe   (NOT farcry3_d3d11.exe),")
+        log.echo("then re-run the launcher. If farcry3.exe still ends up as a d3d11 process, tell me")
+        log.echo("and we will force the DX9 path (game setting / launch option).")
+        return None
     if len(hits) > 1:
         log.echo("Multiple candidates; attaching to the first. Use --pid to choose another.")
     return hits[0].pid
