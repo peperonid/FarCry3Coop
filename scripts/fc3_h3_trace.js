@@ -20,7 +20,9 @@
  * rules: never touch the real install, use the working copy only.
  *
  * Usage (owner's machine, game already running offline):
- *   frida -n FC3 -l scripts/fc3_h3_trace.js        # by image name
+ *   scripts\fc3_h3_run.bat                            # one-command launcher (auto-detects the game pid,
+ *                                                       loads this script, logs to h3_live.log, cmd loop)
+ *   frida -n farcry3 -l scripts/fc3_h3_trace.js      # by process name (game is farcry3.exe, NOT FC3)
  *   frida -p <pid> -l scripts/fc3_h3_trace.js      # by pid
  * In the REPL:
  *   rpc.exports.dumpService()      # read the live playlist-service container

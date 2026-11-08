@@ -23,23 +23,30 @@ Frida в PATH (`frida`, `frida-ps`), игра запущена офлайн до
 `python -m pip install frida-tools`. `frida`, `frida-ps`, `frida-trace` в PATH
 (`C:\Users\<user>\AppData\Local\Programs\Python\Python311\Scripts`). Проверить: `frida --version`
 (выведет `17.26.2`) и `frida-ps -a`. FC3 — **32-битный** процесс; 64-битный CLI frida цепляет его через
-встроенный согласующий агент — если первый `frida -n FC3` споткнётся о разрядность, сообщите
+встроенный согласующий агент — если первый `frida -n farcry3` споткнётся о разрядность, сообщите
 (понадобится 32-битный агент).
 
-**Сохраняйте лог.** Скрипт печатает все свидетельства через `console.log` (строки `[dispatch]` и
-возвращаемые значения каждого `rpc.exports.*`). Сохраните всю сессию REPL, чтобы разобрать потом.
-В PowerShell: `frida -n FC3 -l scripts\fc3_h3_trace.js 2>&1 | Tee-Object -FilePath H:\FarCryCoop\scratch\h3_live.log`.
+**Сохраняйте лог.** `scripts\fc3_h3_run.bat` уже пишет всю сессию (каждый `console.log` скрипта и каждый
+результат команды) в `H:\FarCryCoop\scratch\h3_live.log`, сохраняя предыдущий прогон бэкапом. Если цепляетесь
+вручную — не гоняйте REPL через `Tee-Object` (prompt-toolkit у frida не любит перенаправленный stdout);
+используйте собственный флаг frida: `frida -n farcry3 -l scripts\fc3_h3_trace.js -o H:\FarCryCoop\scratch\h3_live.log`.
 
 ## Шаги
 
 1. Запустите игру офлайн и дойдите до **главного меню** (обычную миссию одиночной игры не начинайте).
-2. Прицепитесь:
+2. **Прицепиться — одной командой (рекомендуется):** запустите `scripts\fc3_h3_run.bat`. Он находит
+   запущенный `farcry3.exe` / `farcry3_d3d11.exe`, грузит `fc3_h3_trace.js`, пишет всю сессию в
+   `H:\FarCryCoop\scratch\h3_live.log` (сохраняя предыдущий бэкапом) и даёт цикл команд. Должно быть видно
+   `attached dispatch @ ...`, `attached installer/callerA/callerB` и `fc3_h3_trace loaded. base=...`. С
+   лаунчером шаги ниже — короткие команды: `dump` = `dumpService`, `mode` = `lastMode`,
+   `switch dry` / `switch go` = `switchCoop(true/false)`, `pop dry` / `pop go` = `populate(true/false)`.
+   Передайте `--pid <n>`, чтобы пропустить автопоиск.
+
+   Или вручную — процесс игры называется `farcry3` (НЕ `FC3`):
    ```
-   frida -n FC3 -l scripts/fc3_h3_trace.js
+   frida -n farcry3 -l scripts\fc3_h3_trace.js -o H:\FarCryCoop\scratch\h3_live.log
    ```
-   Должно быть видно `attached dispatch @ ...`, `attached installer/callerA/callerB` и
-   `fc3_h3_trace loaded. base=...`. Если `FC3` не найден, возьмите pid через `frida-ps -a` и используйте
-   `frida -p <pid> -l scripts/fc3_h3_trace.js`.
+   `-o` пишет лог, REPL остаётся интерактивным; дальше используйте `rpc.exports.*` как в шагах ниже.
 3. **Проверка только-чтение.** В REPL:
    ```
    rpc.exports.dumpService()   // this сервиса + контейнер [service+0x8c0] + install-глобалы

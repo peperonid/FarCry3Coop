@@ -92,9 +92,13 @@ callers `0x1127a0f0` / `0x11279fc0` with backtraces, and reads the live `CFCXPla
 calls `FUN_1127a0f0(service)` to build the co-op entry. Always run `dryRun=true` first — calling an engine
 virtual blind can crash the game. Addresses are 1.06 (`FC3.dll` base `0x10000000`); map to 1.05 with
 `fc3_addrmap.py` before use. Attach to an `-offline` instance only — never an online / Ubisoft Connect
-session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run
-`frida -n FC3 -l scripts/fc3_h3_trace.js`; in the REPL use `rpc.exports.dumpService()` / `lastMode()` /
-`switchCoop(true)` / `populate(true)`. The owner's ordered procedure is in `docs/h3-live-test.md` (+ `.ru.md`).
+session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run it one-command with
+`scripts\fc3_h3_run.bat` (attaches to the running `farcry3.exe` / `farcry3_d3d11.exe`, loads this script,
+mirrors the whole session to `H:\FarCryCoop\scratch\h3_live.log`, and gives a `dump`/`mode`/`switch`/`pop`
+command loop). Or attach by hand: the game process is `farcry3` (not `FC3`), so
+`frida -n farcry3 -l scripts/fc3_h3_trace.js` and use `rpc.exports.dumpService()` / `lastMode()` /
+`switchCoop(true)` / `populate(true)` in the REPL. `fc3_h3_run.py` is the driver the `.bat` calls; pass
+`--pid` to skip auto-detect. The owner's ordered procedure is in `docs/h3-live-test.md` (+ `.ru.md`).
 
 ## Ghidra offline project (headless)
 Session 7 built an offline Ghidra project of the 1.06 `FC3.dll` so pseudocode can be exported for any RVA
