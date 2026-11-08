@@ -30,14 +30,18 @@
 var MODULE = 'FC3.dll';
 var IMAGE_BASE = 0x10000000; // FC3.dll preferred/actual base; A() re-anchors to the real one
 
-// --- 1.06 anchors (NOTES.md session 5-6). Map to 1.05 before use. ---
+// --- 1.06 anchors (NOTES.md session 5-7). Map to 1.05 before use. ---
 var ADDR = {
-  dispatchMode:  0x113405a0, // mov eax,[ebx+0x4c]; 6-way cmp-chain; ebx = mode-manager this
+  dispatchMode:  0x113405a0, // cmp-chain inside FUN_11340560 (body 11340560-113409cd); ebx=this, [this+0x4c]=mode id
+  modeSwitchVt:  0x5c,        // *(this->vtable+0x5c)(&id) is the real "switch to mode" virtual (FUN_11340560)
+  svcInit:       0x1127a0f0, // FUN_1127a0f0(this): builds [svc+0x8c0] container + runs installer; sets +0x488/+0x4b0..
+  containerAddVt:0x5c,        // *(svc+0x8c0)->vtable+0x5c(&obj,id,0) = Add a co-op entry into the container
+  byKeyLookup:   0x113224e0, // FUN_113224e0(&id): resolve playlist entries by mode-key (used with 0x43521e6f)
   installer:     0x11279910, // co-op-id installer (thiscall, this in ecx); static callers 0x1127a0f0 / 0x11279fc0
   callerA:       0x1127a0f0, // one of the two static callers of the installer (playlist-service method)
   callerB:       0x11279fc0, // the other static caller
-  svcSingleton:  0x12863890, // CFCXPlaylistService instance global (guard [0x1286388c])
-  svcGetter:     0x103d1640, // singleton getter (NOT called here; we read the global instead)
+  svcSingleton:  0x12863890, // CFCXPlaylistService: the instance is the object AT this addr (guard 1286388c), not a ptr
+  svcGetter:     0x103d1640, // singleton getter: returns &DAT_12863890 directly (NOT called here)
   idMaskReg:     0x128048c0, // id -> mask registry global
   centralObj:    0x12804acc, // central game object (4529 refs; +0x68 component container)
   installG_a:    0x12891ca0, // diagnostic install-global (NOT the live lever; see H1 demotion)
@@ -115,7 +119,10 @@ function installerHook(label) {
 rpc.exports = {
   dumpService: function () {
     var out = {};
-    var svc = A(ADDR.svcSingleton).readPointer();
+    // FUN_103d1640 returns &DAT_12863890: the singleton instance is the object AT
+    // this address (C++ magic-static guarded by _DAT_1286388c), NOT a pointer stored
+    // there. So `this` = the address itself; do NOT readPointer() it. (session 7)
+    var svc = A(ADDR.svcSingleton);
     out.service = svc.toString();
     if (!svc.isNull()) {
       try {

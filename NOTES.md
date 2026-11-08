@@ -2282,3 +2282,83 @@ of six ids sharing the IngameToLobby/menu path, and `0x2100ced7` is the one mode
 textures. The *static* thread on the mode dispatch is exhausted. Next real step is the owner's runtime trace
 of what writes `[ebx+0x4c]` (set a breakpoint there, capture the writer + `this`), and/or recovering the
 Dunia id-hash to name the five siblings.
+---
+
+## Session 7 (2026-11-08): offline Ghidra project + decompiled co-op mode-switch mechanism (agent session, REA/Ghidra headless)
+
+**Provenance.** After the coop-anything / supermemory / REA MCP tooling check (see `docs/tools/`),
+development continued with the new capability: the offline Ghidra project `FC3_106` (built 2026-11-08
+with `analyzeHeadless`, `-default` analysis, ~2 h, 647 MB `.rep`) now lets us export pseudocode for any
+1.06 RVA without a game run. The project lives in scratch `H:\FarCryCoop\scratch\ghidra\proj\FC3_106`
+(not committed). The reusable recipe is: `analyzeHeadless <projDir> FC3_106 -process "FC3.dll"
+-noanalysis -scriptPath <scripts> -postScript <script.java>` — loads the saved analysis and runs the
+script in about 3 minutes (no re-analysis). Proven with `DecompileH3.java`, output
+`H:\FarCryCoop\scratch\ghidra\out\decomp_H3.txt`. The owner opened the same project in the Ghidra GUI
+in parallel; read-only, no conflict.
+
+### What was decompiled (`FUN_` = Ghidra default names = 1.06 RVAs)
+
+- **Mode dispatcher `FUN_11340560`** (contains the `0x113405a0` compare-chain, body
+  `[0x11340560,0x113409cd]`, `__thiscall`, `param_1` = mode-manager `this`). Key lines:
+  - `iVar13 = param_1[0x13]` — `param_1` is `int*`, so this reads **`[this+0x4c]` = the current mode
+    id**. The six ids compared are exactly `-0x54b0371e`(=`0xAB4FC8E2`), `0x43521e6f`(CO-OP),
+    `-0x666e2514`(=`0x9991DAEC`), `0x6c2b3868`, `-0x9900479`(=`0xF66FFB87`), `0x2100ced7` — confirms
+    the static session-6 finding.
+  - If `[this+0x4c]` is one of the six AND the destination string equals `FUN_11788030("FCXMainMenu")`,
+    the target is remapped to `0x63ddbbcb` and `"IngameToLobby"` is logged. So `0x63ddbbcb` is the
+    **lobby** mode id reached when leaving a co-op-class session to the main menu.
+  - `(**(code **)(*param_1 + 0x5c))(&target)` — **the mode-manager vtable slot `+0x5c` is the actual
+    "switch to mode" virtual method**; it is called with the chosen id.
+  - `iVar13 = param_1[0x1d]` reads `[this+0x74]` (a gate flag); when set and the target is one of the
+    six or the lobby, and `param_5 == 2`, the loader builds
+    `"UI\Multiplayer\Textures\Menu\Loading\Worlds\" + "_01_1.xbt"` (the per-world loading texture,
+    the `0x2100ced7` path). Existence checked via `(*DAT_12804308)->vtable+0x10`.
+
+- **Playlist-service init `FUN_1127a0f0(int this)`** — the service activate/init method:
+  - `this[0x8c0] = FUN_1025f3f0(this)`; `this[0x8c4] = FUN_1032fbd0(this)` — creates the container
+    stored at **`[service+0x8c0]`** (and a companion at `+0x8c4`), confirming the `0x8c0` field is
+    populated at runtime (not dead, as session 5 suspected).
+  - `[container]->vtable+0x60(this+0x54)` registers a listener at `this+0x54`; then a listener array at
+    `[FUN_1031c5d0(this)+0xe0/+0xe4]` is searched/extended with `this+0x60` (`FUN_1003b4b0(1)` = new).
+  - Calls `FUN_11279a90(this)` then **`FUN_11279910(this)`** (the co-op installer, two variants).
+  - Then sets tuning fields: `[this+0x488]=2`, `[this+0x503]=0`, `[this+0x4b0]=0x32`(50),
+    `[this+0x4b4]=10`, `[this+0x4b8]=5`.
+
+- **Co-op installer `FUN_11279910(int this)`** (body `[0x11279910,0x11279a8c]`) — resolves the co-op
+  session:
+  - Lazy static seed: `if ((_DAT_12891ca4 & 1)==0){ _DAT_12891ca4 |= 1; _DAT_12891ca0 = 0x43521e6f; }`
+    — confirms session 5's H1 demotion: the `0x43521e6f` is just the **co-op query key** stored at
+    `_DAT_12891ca0` once, not a live mode lever.
+  - `FUN_113224e0(&DAT_12891ca0)` looks up entries by that key into a result array
+    (`local_14`, count `local_10[0]`, stride 3 pointers).
+  - For each entry, builds a small object on `&PTR_FUN_11f94d08`, calls `FUN_112916e0()`, then
+    `(**(code **)(**(int **)(this+0x8c0) + 0x5c))(&obj, uVar2, 0)` — i.e. **calls the container's
+    vtable slot `+0x5c` to Add the resolved co-op entry into `[service+0x8c0]`**; on success also
+    `FUN_11258c40(this+0x204, …)`.
+  - `FUN_11279fc0(this+0x54)` is a thin wrapper that re-runs the installer for the listener at
+    `this+0x54` (`FUN_11279a90(p-0x54); FUN_11279910(p-0x54)`).
+
+- **Playlist-service singleton getter `FUN_103d1640`** (body `[0x103d1640,0x103d1670]`):
+  `if ((_DAT_1286388c & 1)==0){ FUN_10302770(); FUN_10037ef0("CFCXPlaylistService"); }
+  return &DAT_12863890;`. So the singleton **instance is the object AT `0x12863890` itself**
+  (a C++ magic-static guarded by `_DAT_1286388c`), not a pointer stored there. Correction for the
+  Frida probe: the service `this` = `base + (0x12863890 - 0x10000000)` directly; do NOT
+  `readPointer()` it. `0x11fab710` (PrivateCoopPlaylist) has no function body — it is a vtable/data
+  region referenced by the installer, consistent with session 4.
+
+### Concrete Phase-2 levers now derived from static analysis
+
+1. **Populate a co-op session** without UI: call the service init path
+   `FUN_1127a0f0(service)` (with `service = 0x12863890` as `this`), which builds the `[+0x8c0]`
+   container and runs `FUN_11279910` to Add the co-op entries — or, finer-grained, resolve the entry
+   by key `0x43521e6f` via `FUN_113224e0` and Add it through the container's `vtable+0x5c`.
+2. **Switch into co-op mode**: set `[modeManager+0x4c] = 0x43521e6f` and call
+   `modeManager->vtable[+0x5c](0x43521e6f)`. `[modeManager+0x74]` gates the loading-texture branch.
+   The mode-manager `this` is still runtime-only (a debugger/Frida read), but the method and offset are
+   now pinned, so the trace is one breakpoint, not a hunt.
+
+### New Frida script
+`scripts/fc3_h3_trace.js` (committed with this section): reads the live `[this+0x4c]` from the mode
+manager, the `[service+0x8c0]` container, and logs the playlist-service slots. NOTE: its `service`
+line must use `0x12863890` as `this` directly (see the getter correction above), not
+`readPointer()`.
