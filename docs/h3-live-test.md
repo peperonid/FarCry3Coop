@@ -19,11 +19,12 @@ on the owner's machine. See NOTES.md "Session 7" for the mechanism and the disas
 Frida on PATH (`frida`, `frida-ps`), game running offline to the main menu, `FC3.dll` at its 1.06 build
 (the script re-anchors from `base`; addresses are 1.06, base `0x10000000`).
 
-**Frida is NOT installed on the owner's PC yet** (checked 2026-11-08: no `frida`/`frida-ps` on PATH, no
-`frida`/`frida-tools` in the active Python, no `frida.exe` in the project or `H:\FarCryCoop`). Install it
-before step 2, e.g. `python -m pip install frida-tools` (this pulls the matching `frida` core and puts
-`frida`, `frida-ps`, `frida-trace` on PATH). Installing is a download, so the owner runs it (or approves
-it). Confirm afterwards with `frida --version` and `frida-ps -a`.
+**Frida installed on the owner's PC 2026-11-08**: `frida 17.26.2` + `frida-tools 14.13.0` via
+`python -m pip install frida-tools`. `frida`, `frida-ps`, `frida-trace` are on PATH
+(`C:\Users\<user>\AppData\Local\Programs\Python\Python311\Scripts`). Verify with `frida --version`
+(prints `17.26.2`) and `frida-ps -a`. Note FC3 is a **32-bit** process; the 64-bit frida CLI attaches to
+it via its built-in matching agent — if a first `frida -n FC3` ever fails on architecture, report it
+(we would then need the 32-bit agent).
 
 **Capture the log.** The script prints all evidence with `console.log` (the `[dispatch]` lines, and the
 return values of every `rpc.exports.*`). Save the whole REPL session so it can be reviewed afterwards.
