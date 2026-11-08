@@ -83,15 +83,29 @@ behind the accessor chain in NOTES.md. Usage `python -I scripts/fc3_accessor_thu
 thunks in 523 runs in both 1.06 modules).
 
 ## Runtime tracing (Frida)
-`fc3_h3_trace.js` — runtime trace of the co-op mode switch (the H3 lead in PLAN.md, "Hook status after
-sessions 5-6"). Attaches to a live **offline** FC3 process and logs (read-only) the mode dispatch at
+`fc3_h3_trace.js` — runtime trace + the two H3 levers for the co-op mode switch (PLAN.md, "Hook status
+after session 7"). Attaches to a live **offline** FC3 process and logs (read-only) the mode dispatch at
 `0x113405a0` (mode-manager field `[this+0x4c]`), the co-op-id installer `0x11279910` and its two static
 callers `0x1127a0f0` / `0x11279fc0` with backtraces, and reads the live `CFCXPlaylistService` container
-`[service+0x8c0]` through the RPC `dumpService()`. Addresses are 1.06 (`FC3.dll` base `0x10000000`);
-map to 1.05 with `fc3_addrmap.py` before use. Attach to an `-offline` instance only — never an online /
-Ubisoft Connect session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run
-`frida -n FC3 -l scripts/fc3_h3_trace.js`; in the REPL use `rpc.exports.dumpService()` /
-`lastMode()` / (experimental) `setModeId(addr, id)`.
+`[service+0x8c0]` through `dumpService()`. The RPC `switchCoop(dryRun)` (H3a) writes
+`[modeManager+0x4c]=0x43521e6f` and calls `modeManager->vtable[+0x5c](&id)`; `populate(dryRun)` (H3b)
+calls `FUN_1127a0f0(service)` to build the co-op entry. Always run `dryRun=true` first — calling an engine
+virtual blind can crash the game. Addresses are 1.06 (`FC3.dll` base `0x10000000`); map to 1.05 with
+`fc3_addrmap.py` before use. Attach to an `-offline` instance only — never an online / Ubisoft Connect
+session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run
+`frida -n FC3 -l scripts/fc3_h3_trace.js`; in the REPL use `rpc.exports.dumpService()` / `lastMode()` /
+`switchCoop(true)` / `populate(true)`.
+
+## Ghidra offline project (headless)
+Session 7 built an offline Ghidra project of the 1.06 `FC3.dll` so pseudocode can be exported for any RVA
+**without running the game**. The `.gpr` lives in scratch (`H:\FarCryCoop\scratch\ghidra\proj\FC3_106`,
+~647 MB, `-default` analysis, ~2 h once) — not committed. To re-export more functions, reuse the saved
+analysis (loads in ~3 min, no re-analysis) with a headless postScript:
+`analyzeHeadless <projDir> FC3_106 -process "FC3.dll" -noanalysis -scriptPath <dir> -postScript <name>.java`.
+`ghidra/DecompileH3.java` is the worked example (exports the mode dispatcher `FUN_11340560`, the service
+init `FUN_1127a0f0`, the installer `FUN_11279910`, the singleton getter `FUN_103d1640` and the mode
+switch vtable `+0x5c`); `ghidra/run_decomp_h3.bat` shows the invocation (paths point at the scratch
+project — edit them). Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
 
 ## Caches and ignored files
 
