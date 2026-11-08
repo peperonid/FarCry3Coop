@@ -82,6 +82,17 @@ behind the accessor chain in NOTES.md. Usage `python -I scripts/fc3_accessor_thu
 [--helper 0x10004b70] [--min-count 3] [--range START:END] [--show-va <VA>] [--json]`; verified: 3228
 thunks in 523 runs in both 1.06 modules).
 
+## Runtime tracing (Frida)
+`fc3_h3_trace.js` — runtime trace of the co-op mode switch (the H3 lead in PLAN.md, "Hook status after
+sessions 5-6"). Attaches to a live **offline** FC3 process and logs (read-only) the mode dispatch at
+`0x113405a0` (mode-manager field `[this+0x4c]`), the co-op-id installer `0x11279910` and its two static
+callers `0x1127a0f0` / `0x11279fc0` with backtraces, and reads the live `CFCXPlaylistService` container
+`[service+0x8c0]` through the RPC `dumpService()`. Addresses are 1.06 (`FC3.dll` base `0x10000000`);
+map to 1.05 with `fc3_addrmap.py` before use. Attach to an `-offline` instance only — never an online /
+Ubisoft Connect session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run
+`frida -n FC3 -l scripts/fc3_h3_trace.js`; in the REPL use `rpc.exports.dumpService()` /
+`lastMode()` / (experimental) `setModeId(addr, id)`.
+
 ## Caches and ignored files
 
 `*_dis_cache.json` (disassembly cache), `__pycache__/`, `../Temp/` (agent scratch) and
