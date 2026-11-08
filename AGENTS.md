@@ -238,6 +238,14 @@ nothing), report it to the owner, and use the declared alternative — for rever
 read-only Python probes in `scripts/` (capstone + raw FC3.dll), for project memory the repo's own
 documents (`NOTES.md`, `PLAN.md`, `docs/`).
 
+**Clarification 2026-11-08 (mechanism, not a failure):** all three MCP servers are registered with
+`exposure=codemode`, so their tools are intentionally **not** in the direct function schema — reach
+them through the `codemode` tool (`ALL_TOOLS`, `searchTools(query)`, `describeNamespace(name)`, or
+`tools.mcp__<server>__<tool>({...})`; the prefix uses `_`, e.g. `mcp__coop_anything__list_docs`).
+`pi mcp list` shows coop-anything, supermemory and rea all connected. Do not read their absence from
+the schema as "MCP is broken". Details in `docs/tools/coop-anything.md`, `docs/tools/supermemory.md`,
+`docs/tools/rea.md`.
+
 **RU:** Вызовы MCP-инструментов в этой сессии могут молча падать: вместо результата приходит
 отрендеренный блок `<tool_call>…<tool_call>` — та самая разметка, которую правило выше
 запрещает печатать. Статус на 2026-11-08: оба пространства имён проверены живым вызовом —
@@ -249,6 +257,14 @@ documents (`NOTES.md`, `PLAN.md`, `docs/`).
 сообщить владельцу и использовать объявленную альтернативу — для реверс-инжиниринга черновые
 Python-зонды из `scripts/` (capstone и сырой FC3.dll), для проектной памяти документы самого
 репозитория (`NOTES.md`, `PLAN.md`, `docs/`).
+
+**Уточнение 2026-11-08 (механизм, а не сбой):** все три MCP-сервера зарегистрированы с
+`exposure=codemode`, поэтому их инструменты намеренно **не** в прямом наборе функций схемы — доступ
+через инструмент `codemode` (`ALL_TOOLS`, `searchTools(query)`, `describeNamespace(name)` или
+`tools.mcp__<server>__<tool>({...})`; префикс через `_`, напр. `mcp__coop_anything__list_docs`).
+`pi mcp list` показывает, что coop-anything, supermemory и rea подключены. Не считать их отсутствие в
+схеме признаком «MCP сломан». Подробности в `docs/tools/coop-anything.md`, `docs/tools/supermemory.md`,
+`docs/tools/rea.md`.
 
 ## Repo layout / Раскладка репозитория
 
