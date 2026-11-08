@@ -1,11 +1,13 @@
 /*
  * fc3_h3_trace.js — H3 runtime trace for the FC3 co-op mode switch (Frida).
  *
- * Implements the Phase-2 "H3" lead in PLAN.md ("Hook status after sessions 5-6"):
- * the offline global pokes are exhausted; the live mode is the mode-manager field
- * [this+0x4c] and the live co-op session is a PrivateCoopPlaylist entry in the
- * CFCXPlaylistService container [service+0x8c0]. This script OBSERVES those at
- * runtime (read + log) and optionally lets you poke [this+0x4c] by hand.
+ * Implements the Phase-2 "H3" lead in PLAN.md ("Hook status after session 7"):
+ * session-7 decompilation pinned the mechanism. The mode-manager field [this+0x4c]
+ * holds the live mode id; the real "switch to mode" call is modeManager->vtable[+0x5c]
+ * (inside FUN_11340560); the co-op session lives in the CFCXPlaylistService container
+ * [service+0x8c0], populated by FUN_1127a0f0 -> FUN_11279910 (see NOTES.md session 7).
+ * This script OBSERVES those at runtime and exposes the two static levers as RPC
+ * (switchCoop / populate) for the owner to run against an OFFLINE instance.
  *
  * All addresses below are the 1.06 build (H:\FarCryCoop\TestFC3\bin\FC3.dll,
  * image base 0x10000000). 1.05 is the primary target: re-locate every address
@@ -24,6 +26,10 @@
  *   rpc.exports.dumpService()      # read the live playlist-service container
  *   rpc.exports.lastMode()         # last mode-manager this + [this+0x4c] seen
  *   rpc.exports.setModeId(addr, id)  # DANGEROUS experimental poke, see below
+ *   rpc.exports.switchCoop(true)   # H3a: dryRun first; enter a menu so lastMode() caches `this`
+ *   rpc.exports.switchCoop(false)  # H3a: write [this+0x4c]=CO-OP + call vtable[+0x5c] (may crash)
+ *   rpc.exports.populate(true)     # H3b: dryRun, show svcInit address
+ *   rpc.exports.populate(false)    # H3b: call FUN_1127a0f0(service) to build the co-op entry (may crash)
  */
 'use strict';
 
@@ -59,7 +65,7 @@ if (mod === null) { throw new Error(MODULE + ' not loaded; launch the game offli
 var base = mod.base;
 function A(va) { return base.add(va - IMAGE_BASE); }
 
-var lastMode = { at: 0, thisPtr: 0, id: 0, idName: '' };
+var lastMode = { at: 0, thisPtr: 0, id: 0, idName: '', mmPtr: null };
 function nameOf(id) {
   if (id === MODE.coop) return 'CO-OP';
   return '?';
@@ -75,6 +81,7 @@ try {
       try { id = ebx.add(0x4c).readU32(); } catch (e) {}
       lastMode.at = ADDR.dispatchMode;
       lastMode.thisPtr = ebx.toString();
+      lastMode.mmPtr = ebx;
       lastMode.id = id;
       lastMode.idName = nameOf(id);
       console.log('[dispatch] this(ebx)=' + ebx + ' [this+0x4c]=0x' +
@@ -145,8 +152,45 @@ rpc.exports = {
     p.writeU32(id >>> 0);
     return { wrote: p.toString(), value: '0x' + (id >>> 0).toString(16),
              nowAt: p.readU32().toString(16) };
+  },
+  // H3a - switch into co-op. NEEDS the live mode-manager `this` first: enter a
+  // menu/lobby once so the dispatch hook caches it (check lastMode() != null),
+  // then call switchCoop(false) to write [this+0x4c]=CO-OP and call
+  // modeManager->vtable[+0x5c](&id). dryRun=true only shows what it WOULD do.
+  // Calling an engine virtual blind can crash the game: run dryRun first.
+  switchCoop: function (dryRun) {
+    if (!lastMode.mmPtr) return { error: 'no cached mode-manager this; enter a menu so the dispatch hook fires, then check lastMode()' };
+    var mm = lastMode.mmPtr;
+    var id = MODE.coop;
+    var slot = mm.readPointer().add(ADDR.modeSwitchVt).readPointer(); // *(mm->vtable + 0x5c)
+    var modeAddr = Memory.alloc(4); modeAddr.writeU32(id >>> 0);
+    var cur = mm.add(0x4c).readU32();
+    if (dryRun) {
+      return { modeManager: mm.toString(), curMode: '0x' + (cur >>> 0).toString(16),
+               vtable5c: slot.toString(), argId: '0x' + id.toString(16), dryRun: true };
+    }
+    mm.add(0x4c).writeU32(id >>> 0);
+    var switchFn = new NativeFunction(slot, 'int', ['pointer', 'pointer'], 'thiscall');
+    var ret = switchFn(mm, modeAddr); // this=mm (ecx), arg=&id
+    return { modeManager: mm.toString(), prevMode: '0x' + (cur >>> 0).toString(16),
+             newMode: '0x' + id.toString(16), vtable5c: slot.toString(), ret: ret };
+  },
+  // H3b - populate the co-op session: call FUN_1127a0f0(service). service `this`
+  // is the object AT svcSingleton (0x12863890), not a pointer. dryRun=true only
+  // resolves the function address. Same crash caveat as switchCoop.
+  populate: function (dryRun) {
+    var svc = A(ADDR.svcSingleton);
+    var initFn = A(ADDR.svcInit);
+    if (dryRun) {
+      return { service: svc.toString(), svcInit: initFn.toString(), dryRun: true };
+    }
+    var f = new NativeFunction(initFn, 'void', ['pointer'], 'thiscall');
+    f(svc);
+    var c = 'n/a';
+    try { c = svc.add(0x8c0).readPointer().toString(); } catch (e) {}
+    return { service: svc.toString(), svcInit: initFn.toString(), container8c0: c };
   }
 };
 
 console.log('fc3_h3_trace loaded. base=' + base + ' module=' + MODULE +
-  ' ; rpc: dumpService(), lastMode(), setModeId(addr,id)');
+  ' ; rpc: dumpService(), lastMode(), setModeId(addr,id), switchCoop(dryRun), populate(dryRun)');
