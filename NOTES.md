@@ -2362,3 +2362,28 @@ in parallel; read-only, no conflict.
 manager, the `[service+0x8c0]` container, and logs the playlist-service slots. NOTE: its `service`
 line must use `0x12863890` as `this` directly (see the getter correction above), not
 `readPointer()`.
+
+### Session 7 addendum — the switch-virtual ABI is disasm-confirmed (headless `DisasmSwitch.java`)
+
+We disassembled `FUN_11340560` from the offline `FC3_106` project (`scripts/ghidra/DisasmSwitch.java`,
+output `H:\FarCryCoop\scratch\ghidra\out\disasm_switch.txt`, 364 insns). The vtable `+0x5c` call site is
+`0x11340605` and the calling convention is a plain MSVC **thiscall** (this in ECX, the one argument pushed):
+
+```
+11340605  MOV EDX,[EBX]          ; EDX = this->vtable            (EBX = modeManager this)
+11340607  MOV EDX,[EDX+0x5c]     ; EDX = vtable[+0x5c]           (function pointer)
+1134060a  LEA EAX,[ESP+0x10]     ; EAX = &target_id (4-byte local on stack)
+1134060e  PUSH EAX               ; push the single &id argument
+1134060f  MOV ECX,EBX            ; ECX = this  (thiscall)
+11340611  CALL EDX               ; the mode switch
+11340613  MOV EDX,[EBX+0x74]     ; after: the gate [this+0x74]
+```
+
+At function entry `MOV EBX,ECX` (`0x1134056a`) shows the dispatcher itself gets `this` in ECX. So
+`switchCoop`'s `NativeFunction(slot,'int',['pointer','pointer'],'thiscall')` called as
+`(this=mm, &id)` is correct: Frida `thiscall` puts arg1 in ECX and the rest on the stack. `[this+0x4c]`
+is read at `0x113405a0` (`MOV EAX,[EBX+0x4c]`); the six-id compare that follows the switch is the
+`0x11340622` chain (matches the session-6 "three chains"). **Residual risk is not the ABI but context:**
+`switchCoop` calls the switch-virtual directly, outside the dispatcher, which also runs
+`(**(code**)(*param_1+0x20))()` and other bookkeeping at entry — so the live test can still misbehave or
+crash for reasons other than the register convention. Hence dryRun + offline instance first.

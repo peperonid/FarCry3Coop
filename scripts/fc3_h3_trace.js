@@ -170,6 +170,10 @@ rpc.exports = {
                vtable5c: slot.toString(), argId: '0x' + id.toString(16), dryRun: true };
     }
     mm.add(0x4c).writeU32(id >>> 0);
+    // ABI disasm-confirmed (FC3_106, FUN_11340560 @ 0x11340605):
+    //   MOV EDX,[EBX] ; MOV EDX,[EDX+0x5c] ; LEA EAX,[&id] ; PUSH EAX ; MOV ECX,EBX ; CALL EDX
+    // i.e. thiscall: this in ECX, the single &id argument on the stack. Frida 'thiscall'
+    // maps (this, arg) -> (ECX, [esp+4]), matching this exactly.
     var switchFn = new NativeFunction(slot, 'int', ['pointer', 'pointer'], 'thiscall');
     var ret = switchFn(mm, modeAddr); // this=mm (ecx), arg=&id
     return { modeManager: mm.toString(), prevMode: '0x' + (cur >>> 0).toString(16),

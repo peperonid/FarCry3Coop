@@ -94,7 +94,7 @@ virtual blind can crash the game. Addresses are 1.06 (`FC3.dll` base `0x10000000
 `fc3_addrmap.py` before use. Attach to an `-offline` instance only — never an online / Ubisoft Connect
 session (anti-cheat + the `OpenMutexA("FarCry3Instance")` guard). Run
 `frida -n FC3 -l scripts/fc3_h3_trace.js`; in the REPL use `rpc.exports.dumpService()` / `lastMode()` /
-`switchCoop(true)` / `populate(true)`.
+`switchCoop(true)` / `populate(true)`. The owner's ordered procedure is in `docs/h3-live-test.md` (+ `.ru.md`).
 
 ## Ghidra offline project (headless)
 Session 7 built an offline Ghidra project of the 1.06 `FC3.dll` so pseudocode can be exported for any RVA
@@ -105,7 +105,8 @@ analysis (loads in ~3 min, no re-analysis) with a headless postScript:
 `ghidra/DecompileH3.java` is the worked example (exports the mode dispatcher `FUN_11340560`, the service
 init `FUN_1127a0f0`, the installer `FUN_11279910`, the singleton getter `FUN_103d1640` and the mode
 switch vtable `+0x5c`); `ghidra/run_decomp_h3.bat` shows the invocation (paths point at the scratch
-project — edit them). Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
+project — edit them). `ghidra/DisasmSwitch.java` (+ `run_disasm.bat`) is the linear-disasm variant used to
+disasm-confirm the switch ABI. Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
 
 ## Caches and ignored files
 
