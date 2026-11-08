@@ -43,16 +43,16 @@ Russian version: [coop-anything.ru.md](coop-anything.ru.md)
 
 ## Health on this PC (verified 2026-11-08)
 
-- The server **starts and lists all 9 tools** (round-trip OK).
-- **Caveat — PyYAML is not installed** in the interpreter named `python`. So the two tools that read
-  `data\directory.yaml` — `search_directory` and `validate_entry` — fail at call time
-  (`PyYAML missing: pip install pyyaml`). The other 7 work. Fix: `pip install pyyaml`, or point the
-  server's `command` at an interpreter that has it.
-- Registered for pi, but in the session that wrote this it was **not surfaced as a callable
-  `mcp__coop_anything__*` tool** to the model. If a task needs these tools, check the running session
-  exposes them; otherwise fall back to reading the hub files directly (this repo's `AGENTS.md` "Hub
-  tools and documents" lists the paths).
-
+- `pi mcp list`: `coop-anything: connected, 9 tools (codemode, global)`. The exposure is **`codemode`**,
+  so the tools are **not** in the direct function schema — that is expected, not a failure. Reach them
+  through the `codemode` tool: `await ALL_TOOLS`, `await searchTools("…")`,
+  `await describeNamespace("mcp__coop_anything")`, or call directly
+  `await tools.mcp__coop_anything__list_docs({})`. The tool-name prefix replaces `-` with `_`
+  (`mcp__coop_anything__…`, not `mcp__coop-anything__…`).
+- **PyYAML was missing** and broke `search_directory` / `validate_entry`. **Fixed 2026-11-08**:
+  `pyyaml 6.0.3` installed into `C:\Users\<user>\AppData\Local\Programs\Python\Python311\Lib\site-packages`
+  (the interpreter named `python` that the MCP launches). Both now return results — `search_directory`
+  → entries, `validate_entry` → `valid: true` (verified through the codemode gateway).
 ## Rules of use (from the hub)
 
 Read the hub, **do not edit it from this project**. A hub change goes into the hub's own repo following

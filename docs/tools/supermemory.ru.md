@@ -33,15 +33,14 @@ English version: [supermemory.md](supermemory.md)
 
 ## Состояние на этом ПК (проверено 2026-11-08)
 
-- Сервер **запускается под Bun**, `tools/list` отдаёт 4 инструмента выше.
-- **`recall`** по `FarCry3Coop` вернул настоящие актуальные записи проекта (например про страж
-  `OpenMutexA("FarCry3Instance")` и фабрику `FUN_111e9540`), то есть путь memory/recall реально жив и
-  связан с бэкендом supermemory.
-- Зарегистрирован для pi, но в сессии, которая это писала, он **не был доступен модели как вызываемый
-  инструмент `mcp__supermemory__*`**. Действует запасной путь из AGENTS.md: если инструментов в текущей
-  сессии нет — не выдумывать их, а записывать состояние в документы репозитория (`NOTES.md`, `PLAN.md`,
-  `docs/`) и сообщить владельцу.
-
+- `pi mcp list`: `supermemory: connected, 4 tools (codemode, global)`. Доступ через инструмент
+  `codemode`, напр. `await tools.mcp__supermemory__recall({query, containerTag:"FarCry3Coop"})` или
+  `await tools.mcp__supermemory__memory({action:"save", …, containerTag:"FarCry3Coop"})`. Передавать
+  только собственные поля инструмента: `recall` принимает `query`/`containerTag` (лишнее `limit` падает
+  на валидации).
+- **`recall`** по `FarCry3Coop` возвращает настоящие актуальные записи, то есть `memory`/`recall` живы
+  и связаны с бэкендом supermemory. `whoAmI` отвечает заглушкой `Using local fixed MCP server`, поэтому
+  связь с облаком проверяет именно `recall`, а не `whoAmI`.
 ## Правила использования (из AGENTS.md)
 
 - Делать recall (`FarCry3Coop`) перед началом задачи; сохранять при каждом изменении состояния (новая

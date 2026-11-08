@@ -148,13 +148,12 @@ pointed to `E:\FarCryCoop`. `claude mcp get rea` from `E:\FarCryCoop\FarCry3Coop
 
 ## Health on this PC (re-checked 2026-11-08)
 
-- `rea doctor --client pi --provider ghidra` -> `healthy: true`, `environment_healthy: true`. All
-  scope checks pass: node `24.22.2` (the `rea` PATH shim resolves to this; the pi entry pins
-  `C:\Program Files\nodejs\node.exe`, which the table above lists as v22.23.4), Ghidra 12.1.4 at
-  `C:\tools\ghidra_12.1.4_PUBLIC`, `analyzeHeadless.bat` present, win32/x64.
-- Registered for pi in `C:\Users\<user>\.pi\agent\mcp.json` (stdio, `node …\rea-agents\scripts\rea.mjs mcp`,
-  `GHIDRA_INSTALL_DIR` + `JAVA_HOME` set).
-- Registered for pi, but in the session that wrote this it was **not surfaced as a callable
-  `mcp__rea__*` tool** to the model. AGENTS.md's fallback applies: if the tools are not in the running
-  session, do not invent them — use the read-only Python probes in `scripts\` (capstone over the raw
-  `FC3.dll`) and record findings in `NOTES.md`/`docs/`, and tell the owner.
+- `rea doctor --client pi --provider ghidra` -> `healthy: true`, `environment_healthy: true`; node
+  `24.22.2` (the `rea` PATH shim; the pi entry pins `C:\Program Files\nodejs\node.exe`, listed in the
+  table above as v22.23.4), Ghidra 12.1.4 at `C:\tools\ghidra_12.1.4_PUBLIC`, `analyzeHeadless.bat`
+  present, win32/x64.
+- `pi mcp list`: `rea: connected, 229 tools (codemode, global)`. Reach through `codemode`
+  (`await searchTools("ghidra …")`, `await describeNamespace("mcp__rea")`, or
+  `await tools.mcp__rea__<tool>({…})`). The AGENTS.md caution that these tools are "not exposed / fall
+  back to scripts" is **resolved**: they are reachable via the codemode gateway; keep the raw Python
+  probes in `scripts\` only as a convenience fallback.

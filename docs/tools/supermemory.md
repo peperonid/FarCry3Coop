@@ -33,15 +33,13 @@ never copy it into a doc, commit, or PR):
 
 ## Health on this PC (verified 2026-11-08)
 
-- The server **starts under Bun** and `tools/list` returns the 4 tools above.
-- A **`recall`** for `FarCry3Coop` returned real, current project entries (e.g. notes about the
-  `OpenMutexA("FarCry3Instance")` guard and the factory `FUN_111e9540`), so the memory/recall path is
-  genuinely live against the supermemory backend.
-- Registered for pi, but in the session that wrote this it was **not surfaced as a callable
-  `mcp__supermemory__*` tool** to the model. AGENTS.md's fallback applies: if the tools are not in the
-  running session, do not invent them — record state in the repo documents (`NOTES.md`, `PLAN.md`,
-  `docs/`) instead, and tell the owner.
-
+- `pi mcp list`: `supermemory: connected, 4 tools (codemode, global)`. Reach it through the `codemode`
+  tool, e.g. `await tools.mcp__supermemory__recall({query, containerTag:"FarCry3Coop"})` or
+  `await tools.mcp__supermemory__memory({action:"save", …, containerTag:"FarCry3Coop"})`. Pass only the
+  tool's own fields: `recall` takes `query`/`containerTag` (an extra `limit` fails validation).
+- A **`recall`** for `FarCry3Coop` returns real, current entries, so `memory`/`recall` are live against
+  the supermemory backend. `whoAmI` answers with a stub note `Using local fixed MCP server`, so it does
+  **not** prove connectivity — `recall` does.
 ## Rules of use (from AGENTS.md)
 
 - Recall (`FarCry3Coop`) before starting a task; save on every state change (new feature/version,

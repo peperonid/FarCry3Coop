@@ -43,16 +43,16 @@ English version: [coop-anything.md](coop-anything.md)
 
 ## Состояние на этом ПК (проверено 2026-11-08)
 
-- Сервер **запускается и показывает все 9 инструментов** (round-trip ОК).
-- **Оговорка — PyYAML не установлен** в интерпретаторе `python`. Поэтому два инструмента, читающих
-  `data\directory.yaml`, — `search_directory` и `validate_entry` — падают при вызове
-  (`PyYAML missing: pip install pyyaml`). Остальные 7 работают. Починить: `pip install pyyaml` либо
-  указать в `command` интерпретатор, где PyYAML есть.
-- Зарегистрирован для pi, но в сессии, которая это писала, он **не был доступен модели как вызываемый
-  инструмент `mcp__coop_anything__*`**. Если задача требует этих инструментов, проверьте, что текущая
-  сессия их отдаёт; иначе читайте файлы хаба напрямую (пути перечислены в «Инструменты и документы
-  хаба» этого репозитория `AGENTS.md`).
-
+- `pi mcp list`: `coop-anything: connected, 9 tools (codemode, global)`. Режим подачи — **`codemode`**,
+  поэтому инструментов **нет** в прямом наборе функций схемы — это норма, не сбой. Доступ через
+  инструмент `codemode`: `await ALL_TOOLS`, `await searchTools("…")`,
+  `await describeNamespace("mcp__coop_anything")` или прямой вызов
+  `await tools.mcp__coop_anything__list_docs({})`. Префикс имени заменяет `-` на `_`
+  (`mcp__coop_anything__…`, а не `mcp__coop-anything__…`).
+- **PyYAML отсутствовал** и ломал `search_directory` / `validate_entry`. **Исправлено 2026-11-08**:
+  `pyyaml 6.0.3` установлен в `C:\Users\<user>\AppData\Local\Programs\Python\Python311\Lib\site-packages`
+  (тот интерпретатор `python`, который запускает MCP). Оба возвращают результат — `search_directory`
+  → записи, `validate_entry` → `valid: true` (проверено через шлюз codemode).
 ## Правила использования (из хаба)
 
 Хаб читать и **не править из этого проекта**. Правку хаба делать в его собственном репозитории по
