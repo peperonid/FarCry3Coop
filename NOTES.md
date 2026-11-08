@@ -2493,3 +2493,65 @@ container `[svc+0x8c0]` is still `0x0` in-world, so the co-op session/playlist (
 must be brought up before any co-op target id would do anything - which offline is blocked by the Ubisoft
 network-service gate. A clean co-op transition most likely must be **captured online** (watch a real 2p join)
 and only then reasoned about for offline/4p reconstruction.
+
+### Session 8d (2026-11-08, offline Ghidra, H4b): the real co-op mode-change handler + its preconditions
+
+Offline path (owner chose H4b: online co-op unavailable). Reused the analyzed `FC3_106` Ghidra
+project (no re-analysis; `scripts/ghidra/run_headless.py <Script.java> <log>` wrapper). Two new
+scripts: `FindModeConsumers.java` (every function that loads a mode-id immediate as a scalar
+constant, + xrefs to the manager vtables) and `DecompileConsumers.java` (decompile the hits).
+Out: `H:\FarCryCoop\scratch\ghidra\out\decomp_consumers.txt` + `find_mode_consumers` log.
+
+**Mode-id constant universe (13 of 128384 functions load one of the ids as a constant).** The
+co-op key `0x43521e6f` appears in: `FUN_10f0c770`, `FUN_10f4ca20`, `FUN_10f92420`, `FUN_11279910`/
+`FUN_11279a90` (the H1 installer, known), `FUN_11a7f9d0`, the dispatcher `FUN_11340560`, its loader
+sibling `FUN_113409d0`, and the handler `FUN_10fa1990`. Functions loading the FULL six-id set
+{`0xab4fc8e2`,`0x43521e6f`,`0x9991daec`,`0x6c2b3868`,`0xf66ffb87`,`0x2100ced7`}: `FUN_10fa1990`,
+`FUN_11204b00` (five, no co-op key), `FUN_11340560`, `FUN_113409d0`. Lobby id `0x63ddbbcb` only in
+`FUN_113401c0` and `FUN_11340560`.
+
+**Mode-manager class identity (primary vtable `0x1200e5f8` has exactly two xrefs, both DATA):**
+`FUN_10fa1e30` (destructor/`__fastcall`) and `FUN_10fa1eb0` (constructor) write `*obj = &PTR_FUN_1200e5f8`.
+Constructor object layout (dword indices, so byte offset = idx*4): `[*0]` vptr `0x1200e5f8`;
+`[2]`(+0x08) = `&PTR_LAB_1200e660`; `[0xf]`(+0x3c) = `&PTR_LAB_1200e668`; a secondary base subobject is
+constructed at `obj+0x28` by `FUN_112709d0` (explains the earlier 0x1200e620 secondary being at
+primary+0x28); fields `[0x4d]`,`[0x4e]`,`[0x52]`,`[0x53]`=0, `[0x51]`byte=0, `[0x50]`=-1 then set to a
+handle copied out of global `DAT_12821398` via `FUN_1015b680`. Vtable slots (confirmed): `+0x50` getter,
+`+0x5c`=`FUN_1030f8a0` (the id-swizzle), `+0x60`=`FUN_11340560` (the dispatcher). So the earlier
+"vtable+0x5c is only an id-setter" stands, and this is the full class layout.
+
+**The real mode-change handler is `FUN_10fa1990`** (`__thiscall(this=manager, param_2, param_3)`),
+in the SAME page as the constructor and the full-six-id compare. Flow:
+- refcounts `param_2` (a wrapped destination mode-id) and `param_3` (a descriptor object), sets
+  `local_c = this`;
+- calls **`FUN_11340d00(param_2, param_3)`** - the transition CORE that actually applies the new mode;
+- calls `this->vtable[+0x50](&local_10)` to read the resolved current/new mode id into `iStack_14`;
+- reads the central object `DAT_12804acc`: gate `[DAT_12804acc+0x6c]`, handle `[DAT_12804acc+0x68]`
+  passed to `FUN_103a9ea0` (a session/handle lookup);
+- then branches on the resolved id and picks the LOADING SCREEN text: **`iStack_14 == 0x43521e6f`
+  (CO-OP) -> logs `"Coop_Fenrir_Loading"`** (Fenrir = the co-op codename); `-0x54b0371e` ->
+  `"PvP_Dom_Loading"`; the other special ids just jump ahead. For co-op it also reads
+  `param_3+0xC` three times via `FUN_10003f00` (a name/string predicate) and gates on
+  **`FUN_1011cb30()`** (a co-op availability/enabled predicate, called up to 5x).
+- finally `FUN_110252d0(...)` and, if `[DAT_12804b3c+0x70]==1`, two virtual calls through
+  `*(int*)(local_10+0xa0)+0x64/0x6c`.
+
+Its loader sibling **`FUN_113409d0`** (`this, param_2=destId, param_3, param_4`) is the multiplayer/
+co-op loading-screen SETUP: if `*param_2` is one of the six ids it sets byte `[this+0x44]=1`, stores
+`param_3` to `[this+0x90]` (refcounted), loads `"UI\Multiplayer\Textures\Menu\Loading\Worlds\"`
++ `"_01_1.xbt"`, then `FUN_117872f0(...)` and `FUN_103a2d50(...)`.
+
+**Answer to the H4b question (is there ONE function that brings up the co-op world by target id, and
+what does it need besides `this`?):** the single entry is **`FUN_10fa1990`** (core `FUN_11340d00`),
+NOT a poke of `[this+0x48]`+`vtable[+0x5c]`. Besides `this` it needs: (a) `param_2` = a wrapped
+CO-OP id (`0x43521e6f`), (b) `param_3` = a co-op **descriptor object** whose `+0xC` holds a map/world
+name string (validated by `FUN_10003f00`), (c) the availability predicate `FUN_1011cb30()` to return
+true, and (d) a live **session handle** reachable from `DAT_12804acc+0x68` / the co-op playlist
+`[svc+0x8c0]`. Items (c) and (d) are the offline wall: `FUN_1011cb30` reflects co-op availability and
+the handle/playlist come from netplay, which is offline-disabled ("service no longer available") and
+`[svc+0x8c0]` stays `0x0` even in a loaded world. So even calling `FUN_10fa1990(this, coOpId, desc)`
+directly offline reaches `"Coop_Fenrir_Loading"` and then has no session/map to load. **Net H4b
+conclusion: offline there is no self-contained co-op bring-up to hijack; the descriptor + session are
+produced by the online lobby flow we cannot observe offline.** Next candidate worth a static read is
+`FUN_11340d00` (the transition core) and `FUN_1011cb30` (the availability gate), to confirm whether a
+fake descriptor could bypass the predicate.

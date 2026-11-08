@@ -114,6 +114,10 @@ disasm-confirm the switch ABI. `ghidra/DumpCallers.java` (+ `run_dump_callers.ba
 dispatcher (proved it is invoked only virtually), `ghidra/DumpVtable.java` (+ `run_dump_vtable.bat`) walks a
 function's vtable, and `ghidra/DecompileModeSwitch.java` (+ `run_decomp_modeswitch.bat`) decompiles the live
 mode-switch virtual `vtable+0x5c` (`FUN_1030f8a0`, an id-setter) and the dispatcher's entry-bookkeeping slots.
+`ghidra/FindModeConsumers.java` lists every function that loads a mode-id constant (and xrefs to the manager
+vtables), and `ghidra/DecompileConsumers.java` decompiles the co-op mode-change handler `FUN_10fa1990` plus
+its constructor and loader sibling. The generic offline runner is `ghidra/run_headless.py <Script.java> <log>`
+(reuses the analyzed `FC3_106` project, no re-analysis).
 Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
 
 ## Caches and ignored files
