@@ -58,7 +58,8 @@ var ADDR = {
   // both are classes that implement FUN_11340560 (the mode dispatch, slot +0x38); a live
   // instance's vptr == A(mmVtable*), and [instance+0x4c] is the current mode id.
   mmVtable1:     0x1200e620, // 15-slot vtable (slot +0x38 = FUN_11340560)
-  mmVtable2:     0x11f910e8  // 16-slot vtable (shares first 5 slots; slot +0x38 = FUN_11340560)
+  mmVtable2:     0x11f910e8, // 16-slot vtable (shares first 5 slots; slot +0x38 = FUN_11340560)
+  mmDispatchFn:  0x11340560  // the vtable slot VALUE = function ENTRY (NOT the 0x113405a0 dispatch point)
 };
 
 // Co-op mode id + the five sibling mode-hash ids seen in the dispatch chain.
@@ -259,48 +260,63 @@ function findModeManagerByVtable() {
 // vtableBase = slotAddr - 0x38. Enumerate every such live vtable (auto-discovers derived
 // classes). Then report how many live objects point at each. Never calls anything.
 function findModeVtablesByDispatch() {
-  var dispAddr = A(ADDR.dispatchMode); // dispatch slot address = function entry, runtime
-  var disp = ptrToPat(dispAddr);
-  var ranges = Process.enumerateRanges({ protection: 'rw-', coalesce: true });
-  var scanned = 0, MAXSCAN = 1400 * 1024 * 1024;
-  var vtableBases = {};  // vtableBase -> count of dispatch-slot hits
-  var objs = {};         // objectAddr -> true
-  for (var r = 0; r < ranges.length && scanned < MAXSCAN; r++) {
-    var rng = ranges[r]; scanned += rng.size;
+  // The vtable stores the function ENTRY address (0x11340560), NOT the mid-function
+  // dispatch point (0x113405a0). And vtables live in the IMAGE (r-x/.rdata/.data),
+  // not on the rw- heap. So: (1) scan every readable IMAGE range for the entry pointer
+  // -> each hit is a vtable slot -> vtableBase = hit - 0x38; (2) for each vtable found
+  // in the image, scan the rw- heap for live objects whose vptr == vtableBase.
+  var fnAddr = A(ADDR.mmDispatchFn);      // runtime function entry stored in the vtable
+  var entryPat = ptrToPat(fnAddr);
+  var modRanges = [];
+  Process.enumerateRanges({ protection: 'r--', coalesce: false }).concat(
+    Process.enumerateRanges({ protection: 'r-x', coalesce: false })).concat(
+    Process.enumerateRanges({ protection: 'rw-', coalesce: false })).forEach(function (rng) {
+      if (Process.findModuleByAddress(rng.base) !== null) modRanges.push(rng);
+    });
+  var vtableBases = {};
+  for (var r = 0; r < modRanges.length; r++) {
     var hits = [];
-    try { hits = Memory.scanSync(rng.base, rng.size, disp); } catch (e) { continue; }
+    try { hits = Memory.scanSync(modRanges[r].base, modRanges[r].size, entryPat); } catch (e) { continue; }
     for (var h = 0; h < hits.length; h++) {
-      var vtBase = hits[h].address.sub(0x38);
-      vtableBases[vtBase.toString()] = (vtableBases[vtBase.toString()] || 0) + 1;
+      var vb = hits[h].address.sub(0x38);
+      vtableBases[vb.toString()] = (vtableBases[vb.toString()] || 0) + 1;
     }
   }
-  // for each discovered vtable base, find live objects whose vptr == base
+  // now scan the rw- heap for live instances of each discovered vtable
+  var heapRanges = Process.enumerateRanges({ protection: 'rw-', coalesce: true });
   var bases = Object.keys(vtableBases);
   var vtInfo = [];
   for (var b = 0; b < bases.length; b++) {
     var vb = ptr(bases[b]);
-    var inImg = Process.findModuleByAddress(vb) !== null;
     var objs2 = [];
-    // only scan for instances if the vtable is in the image (a real vtable);
-    // a heap 'slot' hit would be a coincidental data value.
-    if (inImg) {
-      for (var r2 = 0; r2 < ranges.length; r2++) {
-        var rng2 = ranges[r2];
-        var hh = [];
-        try { hh = Memory.scanSync(rng2.base, rng2.size, ptrToPat(vb)); } catch (e) { continue; }
-        for (var k = 0; k < hh.length && objs2.length < 12; k++) {
-          var o = hh[k].address; var id = 0;
-          try { id = o.add(0x4c).readU32(); } catch (e) {}
-          objs2.push({ this: o.toString(), modeId: '0x' + (id >>> 0).toString(16), modeIdName: nameOf(id) });
-        }
-        if (objs2.length >= 12) break;
+    for (var r2 = 0; r2 < heapRanges.length; r2++) {
+      var hh = [];
+      try { hh = Memory.scanSync(heapRanges[r2].base, heapRanges[r2].size, ptrToPat(vb)); } catch (e) { continue; }
+      for (var k = 0; k < hh.length && objs2.length < 12; k++) {
+        var o = hh[k].address; var id = 0;
+        try { id = o.add(0x4c).readU32(); } catch (e) {}
+        objs2.push({ this: o.toString(), modeId: '0x' + (id >>> 0).toString(16), modeIdName: nameOf(id) });
       }
+      if (objs2.length >= 12) break;
     }
-    vtInfo.push({ vtableBase: bases[b], inImage: inImg, slotHits: vtableBases[bases[b]],
-                  instances: objs2 });
+    vtInfo.push({ vtableBase: bases[b], inImage: Process.findModuleByAddress(vb) !== null,
+                  slotHits: vtableBases[bases[b]], instances: objs2 });
   }
-  return { scannedBytes: scanned, dispatchAddr: dispAddr.toString(),
-           vtableCount: bases.length, vtables: vtInfo };
+  // cache the first live instance for switchCoop
+  for (var v = 0; v < vtInfo.length; v++) {
+    if (vtInfo[v].instances.length) {
+      var inst = vtInfo[v].instances[0];
+      lastMode.mmPtr = ptr(inst.this);
+      lastMode.thisPtr = inst.this;
+      lastMode.id = parseInt(inst.modeId, 16);
+      lastMode.idName = inst.modeIdName;
+      lastMode.at = 'dispatchslot-scan';
+      break;
+    }
+  }
+  return { fnEntry: fnAddr.toString(), scannedModRanges: modRanges.length,
+           vtableCount: bases.length, vtables: vtInfo,
+           cachedForSwitch: lastMode.at === 'dispatchslot-scan' ? lastMode.thisPtr : null };
 }
 
 // --- RPC: read the live playlist-service container without calling anything.
