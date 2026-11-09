@@ -447,6 +447,40 @@ rpc.exports = {
     } catch (e) { out.spErr = '' + e; }
     return out;
   },
+  // Read-only dump of the NETPLAY SESSION LIST that FUN_103a9ea0 scans. The session-list
+  // object is the dword at (DAT_12804acc + 0x68); array = list+0x08, count = list+0x0C;
+  // each entry's vtable[+0x04]() returns an info with type at info+0x4 (active: >3) and
+  // id at info+0x14. The CO-OP gate also needs entry+0x1c == DAT_1216ca90/DAT_1216ca9c and
+  // entry+0x8c / entry+0x90 != -1. Reading the count answers: is there any live session
+  // offline (count>0 -> something to reuse; count==0 -> must be fabricated by netplay).
+  sessions: function () {
+    var g = A(ADDR.netSess);
+    var out = {};
+    try {
+      var list = g.add(0x68).readPointer();  // FUN_103a9ea0 param_1
+      out.listObj = list.toString();
+      if (!list.isNull()) {
+        out.count = list.add(0x0c).readU32();
+        out.array = list.add(0x08).readPointer().toString();
+        var arr = list.add(0x08).readPointer();
+        var cnt = out.count; if (cnt > 32) cnt = 32;
+        out.entries = [];
+        for (var i = 0; i < cnt; i++) {
+          var e = arr.add(i * 4).readPointer();
+          var rec = { i: i, e: e.toString() };
+          if (!e.isNull()) {
+            try { var vt = e.readPointer(); rec.vtable = vt.toString();
+              rec.vtableGhidra = '0x' + (vt.sub(mod.base).add(0x10000000)).toString(16); } catch (er) {}
+            try { rec.kind1c = '0x' + (e.add(0x1c).readU32() >>> 0).toString(16); } catch (er) {}
+            try { rec.f8c = '0x' + (e.add(0x8c).readU32() >>> 0).toString(16); } catch (er) {}
+            try { rec.f90 = '0x' + (e.add(0x90).readU32() >>> 0).toString(16); } catch (er) {}
+          }
+          out.entries.push(rec);
+        }
+      }
+    } catch (e) { out.err = '' + e; }
+    return out;
+  },
   // Read-only dump of the global mode-list singleton DAT_128048c0 (idMaskReg). The
   // loader (FUN_113409d0) finds a co-op descriptor by scanning this list for the
   // entry whose +0x20 mode id == the target id. Each entry: +0x00 refcount,

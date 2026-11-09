@@ -258,6 +258,8 @@ def main():
                     log.echo(json.dumps(call("coopEnter", mode == "dry", mgr, entry), ensure_ascii=False))
                 elif cmd in ("netgate", "ng", "gate"):
                     log.echo(json.dumps(call("netgate"), ensure_ascii=False))
+                elif cmd in ("sessions", "sess"):
+                    log.echo(json.dumps(call("sessions"), ensure_ascii=False))
                 elif cmd in ("mmf", "mmfields", "fields"):
                     log.echo(json.dumps(call("mmFields", rest[0] if rest else None), ensure_ascii=False))
                 elif cmd in ("loadcoop", "lc"):

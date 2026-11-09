@@ -2767,3 +2767,52 @@ cannot fabricate that session offline. **The true remaining blocker is the netpl
 mode id or a field gate.** Next lead (if pursued): construct/pre-seed the co-op session object the main
 thread's loader step expects -- a much deeper effort into the netplay code, on the critical path to any
 offline 4p attempt.
+
+## Session 9 (2026-11-09): the netplay session object the co-op loader consumes - offline constructibility verdict (agent session, offline Ghidra FC3_106 + live Frida)
+
+Owner prompt (2026-11-09): trace which netplay/session object the loader step consumes on the
+main thread after `this+0x48 = CO-OP`, find its constructor, fields, and where it is created at
+netplay-join; decide whether it can be constructed/pre-filled offline.
+
+Method: reuse the offline Ghidra project `FC3_106` (`python -I H:\FarCryCoop\scratch\ghidra\scripts\run_headless.py <Script>.java <log>`, ~30 s, no re-analysis). New scripts in `H:\FarCryCoop\scratch\ghidra\scripts\`: `DecompSession.java` (decompiles the loader's session-gate helpers) and `DecompSession2.java` (the session-slot writer + a transition-path reader, then the two decompile targets). Decompiles cached at `H:\FarCryCoop\scratch\ghidra\out\decomp_session.txt`, `decomp_session2*.log`.
+
+### The chain that consumes the session object (1.06 RVAs, thiscall this = mode manager unless noted)
+- `FUN_113409d0(this, &this+0x48, desc, p4)` = the loader. Reads `*(&this+0x48)` = pending mode id. If it is one of the six (CO-OP `0x43521e6f` included) it sets the loading flag byte `this+0x44=1` and builds the `Loading\Worlds\` UI, then calls `FUN_117872f0()` and the **hashmap lookup `FUN_103a2d50(&out, &pending)`**. Real dispatch happens only **`if (out != 0 && *(out+0x10) != 0)`** -> `(*(this->vtable+0x60))(&pending, &p4, &desc, 1)`; otherwise it falls to the **offline/local path `FUN_113400f0`** (callers of `FUN_113400f0` are only `FUN_113409d0` and the dispatcher `FUN_11340560`).
+- `FUN_103a2d50(this, out_pair, key)` = hash-map probe: `this+0x8` = bucket count, `this+0xC` = bucket array; `hash(key) = (key ^ 0xdeadbeef)` folded via `ldiv(.., 0x1f31d)`; walks the chain comparing `node+0x08/+0x0C` to the key; on hit returns the node, whose `+0x10` value object must be non-null for real dispatch. This is the second netplay-populated structure.
+- `FUN_10fa1990(this, &id, desc)` = mode-change handler (mode manager `vtable+0x0C`). After enqueueing it reads the **active session** `iVar2 = FUN_103a9ea0(*(DAT_12804acc+0x68))`; the CO-OP branch additionally requires `iVar2+0x1c in {DAT_1216ca90, DAT_1216ca9c}` and `iVar2+0x8c != -1 && iVar2+0x90 != -1` (host id, member id), then calls `FUN_111854f0(iVar2+0x8c, iVar2+0x90)` and `FUN_110252d0(iVar2, &stack)`. Logs `"Coop_Fenrir_Loading"`.
+- `FUN_103a9ea0(container)` = find the ACTIVE netplay session: `container` is the object at `DAT_12804acc+0x68`; its session array is `container+0x8`, count `container+0xC` (a cached cursor `DAT_1217a7e8` speeds the scan); for each element `e` it calls `e->vtable[+0x04]()` -> an info struct; the element is active when `info+0x4 > 3` **and** `info+0x14 == FUN_103a9c70()+0x14`. `FUN_103a9c70()` returns a lazy-initialized service singleton (`&DAT_128611f8`, init via `FUN_1025f040`, tagged "CFCXMusicService") - the comparison is a session-vs-service identity match.
+- `FUN_111854f0(sessionMgr, hostId, memberId)` = sets up the co-op session on the session-manager singleton (touches `+0x800=hostId`, `+0x340` current host with a `vtable+0x14c` check via `DAT_12805200`, `+0x348` member list built via `FUN_1146ad50` and virtual adders at `(+0x348)->vtable+0x74`).
+- `FUN_110252d0(game, out)` = reads the **co-op game object's player roster**: `+0x50`/`+0x54` = two player-slot indices (`-1` = empty), `+0x70` = player array (stride `0x1c`), `+0x74` = count; per slot it resolves the player and calls `FUN_10041e00` (a player-present predicate) and returns 1 when a slot resolves. This object is a populated multiplayer game, not a local stub.
+
+### Where the session container is created
+`DAT_12804acc+0x68` has exactly ONE writer: **`FUN_10044000`**. It obtains an object from a
+factory/pool (`FUN_1177f7c0()` when `DAT_12162beb` is set, else `FUN_118db560()`); if the factory
+returns null it writes `0` to the slot and returns; otherwise it sets the object's vtable to
+`&PTR_FUN_11f3b260`, zero-inits its fields (`+0x4=0`, `+0xC=0`, `+0x14=0`) and sets `+0x10=5000`,
+runs two sub-inits (`FUN_106bee30`, `FUN_106bf2e0`), and installs the object into `DAT_12804acc+0x68`.
+So the session **provider/manager** exists from boot (guarded by a factory that can fail), and
+`FUN_103a9ea0` reads its session array/count. The session **entries**, the co-op **game object**, the
+co-op **session-manager** member slots, and the `FUN_103a2d50` **hashmap** entries are all filled in
+by the **netplay join handshake**, not by any offline/menu code.
+
+### Live confirmation (offline `farcry3.exe`, DX9, my own direct launch)
+Added read-only RPCs to `scripts/fc3_h3_trace.js` + commands to `scripts/fc3_h3_run.py`:
+`sessions`/`sess` (dump the container array/count) and the earlier `netgate`. Offline the
+availability byte `DAT_12804acc+0x6c == 1` (open), but the session list reads as garbage/unset
+(array pointer `0x2f`), consistent with **no session entries offline**.
+
+### Verdict (answers the owner's question)
+- The object the loader consumes is a **netplay session / multiplayer game object**, reached only
+  through the session provider at `DAT_12804acc+0x68` (vtable `PTR_FUN_11f3b260`) and the
+  `FUN_103a2d50` hashmap; a real one must carry a session with `info+0x4 > 3`, a matching service
+  identity, a co-op kind (`DAT_1216ca90`/`DAT_1216ca9c`), valid host/member ids (`!= -1`), and a
+  game object with populated `0x1c`-stride player slots.
+- Its container is built at boot by `FUN_10044000`, but **the sessions themselves are created only
+  by the netplay join path**. There is **no local/menu/adder that inserts a session offline**.
+- Therefore the session object **cannot be meaningfully pre-filled offline** by writing ids/fields:
+  the loader's real dispatch is hard-gated on a live netplay session + hashmap entry. Offline
+  4-player co-op entry via id/field manipulation is **not** sufficient. The next real advance is in
+  the **netplay layer** (what populates the provider's session array at join), i.e. the
+  fake-world / emulated-local-server route from the hub playbook, not more mode-field poking.
+
+Ghidra 12.1.4 java gotchas hit again: `getFunctionContaining` needs `currentProgram.getFunctionManager().getFunctionContaining` unless a wildcard `ghidra.program.model.symbol.*` import is present; never call `Long.toHexString` on `Function.getEntryPoint()` (it returns `Address`, not `Long`) - use `Address.toString()`.
