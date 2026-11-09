@@ -168,3 +168,10 @@ Step-B concrete offsets (from `final2.txt`, session 22): provider member array =
 array base `provider+0x3c`, entry size 0x20, member id at entry `+0x14`; provider gate = party type `>2`
 AND party id `== DAT_1285fe3c`; host test `FUN_1006f990() == *(session+0x120)`. Single-instance
 multi-slot is reachable with these; true 2-human offline still needs the Rv join (`FUN_10207af0`).
+
+Transport verdict (session 22, decisive): the engine's co-op transport (`uplay_r14.dll` / RendezVous) is
+service-bound only — zero LAN/loopback/listen/socket/p2p primitives, single `connectToNamedPipe` path,
+`SessionFactory` asserts `!IsStandalone()`. So offline **2 real humans via the engine's transport is not
+achievable**. Reachable offline: single-instance multi-slot (`local/scratch/multislot_design.md`). True
+2-4 humans requires external netcode (transport B: reimplement the Rv GameSession + `CParty*NetMessage`
+handshake in a custom layer) — a re-hosting project, decide scope with the owner.

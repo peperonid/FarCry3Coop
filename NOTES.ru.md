@@ -2783,3 +2783,26 @@ Ghidra FC3_106 только на чтение + статический трас�
   тесты/ИИ-подобные доп. слоты). Два живых человека офлайн по-прежнему требуют, чтобы второй экземпляр
   ВОШЁЛ в живую Rv GameSession (`CJoinGameSessionParam` `FUN_10207af0`); loopback/UDP Rv-вход пока не
   найден. Эта плоскость данных и остаётся твёрдой стеной для «остров с друзьями» / офлайн 2-4.
+
+
+### Дополнение к сессии 22 — вердикт по транспорту: сетевой слой коопы самого движка привязан к сервису (офлайн-входа нет)
+
+Независимый скан строк/API `uplay_r14.dll` 1.05 (`H:\FarCryCoop\TestFC3_105\bin`, 4 808 512 Б) и
+полный проход Ghidra сходятся: **в сетевом стеке игры нет LAN / broadcast / loopback / bind / listen /
+Winsock / p2p / relay-транспорта.** Подробности (артефакты
+`H:\FarCryCoop\scratch\ghidra\out\rvc2\*.txt`, `rv_transport.txt`, `uplayr14_strings_rv.txt`;
+supermemory `ry8sddUUPksVT5PKJv4FZs`):
+
+- У `uplay_r14.dll` нет таблицы экспорта; FC3 привязывает его через `GetProcAddress("OrbitApi_InterfaceRequest")`.
+- Все операции GameSession (`CreateSession`/`JoinSession`/`RegisterHost`/`SendChatMessage`/…) — это слоты
+  vtable объекта `CGameSessionAPI` (слоты 19/21/25/26/31/33/40/43/54 …), вызываемые через трэнки FC3
+  (`RVCreateGameSession` @ 0x10cf6790, `RVJoinGameSession` @ 0x10cf6690, …).
+- Rv `SessionFactory.cpp` жёстко ассертит `!_multiplayer->IsStandalone()`; FC3 вызывает `RvInit` в
+  `FC3.exe+0x644879` — standalone-сборка валит фабрику сессий.
+- Единственный примитив соединения — `connectToNamedPipe` → канал сервиса Orbit/Uplay. Никакого socket
+  connect, никакого listen. Сессии привязаны к сервису.
+- Следствие: «остров с друзьями» / «офлайн 2-4 живых человека» НЕ достижимы через собственный транспорт
+  движка. Что движок поддерживает офлайн — это одноместный экземпляр с многими слотами (подделка
+  достоверного массива участников провайдера). Настоящему второму человеку нужен внешний транспорт
+  (транспорт B в PLAN): свой слой, заново реализующий рукопожатие Rv `GameSession` /
+  `CParty*NetMessage` — это перезапуск сети, а не патч. (Также подтверждает «LAN: нет» от автора solo262.)

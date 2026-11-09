@@ -3049,3 +3049,45 @@ Read-only Ghidra FC3_106 + loader-shim static trace (supermemory `Cz8Ja9zSjzAEGH
   extra slots). Two real humans offline still need the second instance to JOIN a live Rv GameSession
   (`CJoinGameSessionParam` `FUN_10207af0`); no loopback/UDP Rv join found yet. That transport stays
   the hard wall for island-with-friends / offline 2-4.
+
+### Session 22 addendum — transport verdict: the engine's co-op transport is service-bound (no offline join)
+
+Independent string/API scan of `uplay_r14.dll` 1.05 (`H:\FarCryCoop\TestFC3_105\bin`, 4,808,512 B) and a
+full Ghidra pass agree: **there is no LAN / broadcast / loopback / bind / listen / Winsock / p2p / relay
+transport in the game's own stack.** Details (artifacts `H:\FarCryCoop\scratch\ghidra\out\rvc2\*.txt`,
+`rv_transport.txt`, `uplayr14_strings_rv.txt`; supermemory `ry8sddUUPksVT5PKJv4FZs`):
+
+- `uplay_r14.dll` has no export table; FC3 binds it via `GetProcAddress("OrbitApi_InterfaceRequest")`.
+- All GameSession operations (`CreateSession`/`JoinSession`/`RegisterHost`/`SendChatMessage`/…) are vtable
+  slots of a `CGameSessionAPI` (slots 19/21/25/26/31/33/40/43/54 …), dispatched through FC3 thunks
+  (`RVCreateGameSession` @ 0x10cf6790, `RVJoinGameSession` @ 0x10cf6690, …).
+- Rv `SessionFactory.cpp` hard-asserts `!_multiplayer->IsStandalone()`; FC3 calls `RvInit` at
+  `FC3.exe+0x644879` — a standalone build fails the session factory.
+- The only connect primitive is `connectToNamedPipe` → the Orbit/Uplay service channel. No socket
+  connect, no listen. Sessions are service-bound.
+- Consequence: 'island with friends' / 'offline 2-4 real humans' is NOT reachable through the engine's
+  own transport. What the engine does support offline is single-instance multi-slot (fake the trusted
+  provider member array). A true second human needs an external transport (PLAN transport B): a custom
+  layer that reimplements the Rv `GameSession`/`CParty*NetMessage` handshake — a re-hosting effort, not
+  a patch. (Also corroborates the solo262 author's own "LAN: no".)
+
+### Session 22 addendum — transport verdict: the game's co-op transport is service-bound (no offline join)
+
+Independent string/API scan of `uplay_r14.dll` 1.05 (`H:\FarCryCoop\TestFC3_105\bin`, 4,808,512 B) and a
+full Ghidra deep-dive converge: **the network stack has NO LAN / broadcast / loopback / bind / listen /
+Winsock / p2p / relay primitive.** Artifacts `H:\FarCryCoop\scratch\ghidra\out\{rv_transport.txt,
+uplayr14_strings_rv.txt, uplayr14_apis.txt}`; supermemory `ry8sddUUPksVT5PKJv4FZs`.
+
+- `uplay_r14.dll` has **no export table**; FC3 binds it via `GetProcAddress("OrbitApi_InterfaceRequest")`.
+- All GameSession ops (`CreateSession`/`JoinSession`/`RegisterHost`/`SendChatMessage`/…) are vtable slots of
+  the `CGameSessionAPI` object (slots 19/21/25/26/31/33/40/43/54 …) called through FC3 thunks
+  (`RVCreateGameSession` @ 0x10cf6790, `RVJoinGameSession` @ 0x10cf6690, …).
+- Rv `SessionFactory.cpp` hard-asserts `!_multiplayer->IsStandalone()`; FC3 calls `RvInit` at
+  `FC3.exe+0x644879` — a standalone build kills the session factory.
+- The only connect primitive is `connectToNamedPipe` -> the Orbit/Uplay service channel. No socket connect,
+  no listen. Sessions are service-bound.
+- Consequence: island-with-friends / offline 2-4 real humans is NOT reachable through the engine's own
+  transport. The engine only supports single-instance multi-slot offline (fake the trusted provider member
+  array). Real 2-player co-op needs an EXTERNAL transport (PLAN transport B: reimplement the Rv GameSession
+  handshake + `CParty*NetMessage` in your own layer) — a netcode re-host, not a patch. Corroborates the
+  solo262 author's "LAN: no".
