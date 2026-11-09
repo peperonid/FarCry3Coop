@@ -128,3 +128,38 @@ is unchanged. Authoritative evidence: `NOTES.md`.
 
 Until B/C, stay read-only: the engine's co-op session transport is online-only by the mod author's
 own report (LAN = no), so offline multiplayer needs the host path, not more online joining.
+
+## Critical path v3 — concrete hook points (agent, 2026-11-09, read-only)
+
+Deeper pass over the party controller (FC3_106). The three `FUN_1056ec80 / 1056f3d0 / 103642f0`
+that first looked like the logic are only lazy-singleton getters; the real co-op join/host logic is
+below. Authoritative record: `NOTES.md` + supermemory (ids `nvjxCfpQn79eavDMBirw1P`, `chzyBsC2o83CHAcLdYT3Uu`).
+
+Key objects (FC3.dll 1.06, Ghidra addresses):
+- Master live session object = `*(DAT_12805180 + 4)`. `+0x118/+0x11c` identity args; `+0x120` = the
+  host/principal id. The local player id comes from `FUN_1006f990()`; host check is
+  `FUN_1006f990() == *(session + 0x120)`.
+- Co-op join / reject gate = `FUN_11218480` (virtual). It trusts the current member list built by
+  `FUN_11273650(provider, &list)`, where the provider is returned by `FUN_103660e0()`; it compares
+  counts against the **config variable `MaxPartySize` at config-block offset `0xa88`**
+  (registered `FUN_10065cd0("MaxPartySize",0xa88,0,3)` in `FUN_112250c0`), then emits the
+  "Rejecting partyId … max allowed size / team size difference > 2" verdicts.
+- Party netcode ctor = `FUN_11275750` (vtable `PTR_FUN_11faba78`) — ships the `CParty*NetMessage`.
+
+**Path 1 (offline host: let the in-game party layer, not the Rv GameSession, decide membership).**
+Minimal set of levers, all reversible, to be validated on solo-262 (1.05) first:
+1. Raise config `MaxPartySize` (cfg offset `0xa88`) from 1 to the target (2/4).
+2. Hook the member-list builder `FUN_11273650` (or its provider `FUN_103660e0`) so the host's
+   session reports the desired number of members.
+3. Relax/skip the reject branches in `FUN_11218480` so a locally-synthesized member is not refused.
+4. Make `*(session+0x120)` equal the local principal so the host/leader gate passes.
+
+**Open question that decides if Path 1 can give >1 real human:** a second game *instance* still has
+to find and join a live session; that join goes through the RendezVous `GameSession`
+(`CJoinGameSessionParam` `FUN_10207af0`). Synthesizing the host's member list lets one window behave
+as a full 2-player session (good for solo, AI-like slots, testing), but two separate windows need
+either the Rv GameSession to carry a real second participant (Rv relay/NAT — normally online) or a
+second path that bypasses Rv join entirely. **Next read-only step:** decompile `FUN_11273650`,
+`FUN_103660e0`, and the `CJoinGameSessionParam` path `FUN_10207af0` to see exactly which list the
+joiner validates against, and whether a loopback/UDP Rv join is even reachable offline. No game code
+is written until the owner approves step B.
