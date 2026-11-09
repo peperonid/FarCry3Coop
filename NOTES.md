@@ -2656,3 +2656,33 @@ to enumerate `DAT_128048c0` list entries (`{id@+0x20, name@+0xC}`) next live ses
 by exactly 3 sites each: `DAT_128048c0` = {`FUN_10048230` ctor, `FUN_11756e00` dtor, `FUN_11756e00`};
 `DAT_12804acc` = {`FUN_100480f0`, `FUN_117567c0`, `FUN_11756e00`}; `DAT_12804b3c` = {`FUN_10136900`,
 `FUN_11629c30`}.
+
+### Session 8g (2026-11-09, LIVE, self-run): the CO-OP mode entry is already in the offline mode registry
+
+Self-served the whole live loop (no owner clicks needed for this one): launched the offline test copy
+`H:\FarCryCoop\TestFC3\bin\farcry3.exe` (direct exe, cwd `bin`, DETACHED_PROCESS), let it boot, then
+drove `scripts/fc3_h3_run.py` with piped stdin `dump\nmodes\nquit` (frida 17.26.2). The `modes` command
+needs NO in-game action, so unlike the dispatch-hook capture this is fully automatable by the agent.
+
+**Milestone answer to the session-8f open question:** the live global mode-list singleton
+`DAT_128048c0` is **populated with 16 entries OFFLINE**, and **entry index 7 has `+0x20 = 0x43521e6f`
+(CO-OP)**. So entering co-op is NOT gated on the online path at the registry level - the co-op mode
+descriptor already exists in a running offline game. Hand-driving `mgr->vtable[+0x0C](destId,
+descriptor)` with that entry does not require an online 2p join.
+
+Live capture (this run, base varied): manager `this` runtime `0x10270a60`, vtable `0x7aa024c4`
+(= Ghidra `0x11f224c4`, matches the static ctor finding), `+0x08` count = `16`, data ptr list base.
+All 16 mode ids (`+0x20`), in order: `0x7520e174, 0x83ae70ef, 0xcd0b222f, 0xcb5df48c, 0x863659d2,
+0x9216b3de, 0x80608f71, 0x43521e6f[COOP], 0xff56cf71, 0xc8ab0853, 0x8b40f692, 0x6c2b3868, 0xab4fc8e2,
+0x9991daec, 0xf66ffb87, 0x2100ced7`. All six dispatcher ids are present, plus `0x80608f71` (a previously
+observed live current-mode id).
+
+**Layout correction:** `+0x0C` read as `char*` returned "(unreadable)" for every entry, so `+0x0C` is
+NOT the name-string for these list entries (the `+0xC` name in the session-8f note applies to the
+`param_3` use inside `FUN_10fa1990`, not to the registry-entry struct at the same offset). Confirmed
+field remains `+0x20` = mode id; `+0x00` = refcount. Next: identify each entry's real fields (esp. the
+map/world string and the per-mode data the loader reads) so the co-op entry can be driven.
+
+**Constraint reaffirmed:** the game was launched DIRECT (not via Ubisoft Connect) so it runs offline;
+frida attach must stay to such offline instances only (anticheat/mutex guard). Ubisoft Connect was
+running (UplayWebCore.exe x6) but the direct `farcry3.exe` launch boots its own offline instance.
