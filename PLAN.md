@@ -207,3 +207,39 @@ Staged (each stage is a gate; do not proceed if a gate fails):
 Blockers that would downgrade this: TB1 shows the game socket is keyed by a service-minted secret,
 or the peer endpoint is opaque service data we cannot synthesize. Both would push us back toward a
 deeper Orbit/Rv protocol reimplementation. Decide after TB1.
+
+
+## PLAN revision 2026-11-10 (session 23): offline 2-4 is a session-establishment shim, not a netcode re-host
+
+Downgrades the Session 22 "offline 2-human infeasible via engine transport" verdict. That verdict only
+looked at `uplay_r14.dll` (Orbit front-end). The engine's own `storm::echo` netcode has a **LAN + loopback
+matchmaking layer** and FC3 has a **first-class command-line session launch**. Full detail in
+`NOTES.md` / `NOTES.ru.md` "Session 23". Memory `cLjJUL76bobvfWw9AWxBPF`.
+
+Confirmed offline-relevant primitives (FC3_106, RVA = VA - 0x10000000; map to 1.05 by string later):
+- LAN/loopback discovery: `storm::echo::lan::BroadcastLanDiscovery2`, `storm::echo::lan::DiscoverSession`.
+- LAN config vars (registered in `FUN_111f6650`): `LanMatchmakingDiscoveryOnLoopbackEnable` ("discover
+  sessions on the local machine only"), `LanMatchmakingReuseAddress`, `LanHostBroadcastPort`,
+  `LanClientBroadcastPort`.
+- CLI launch (`InitDuniaEngine` @ 0x117a5750): `-coop` (0x11fb81fc), `-online` (0x11fb8234), `-ranked`,
+  `-sessionuid` (0x11fb81e4), `-dedicated` (0x11f0e7dc) + `dedicatedConfig`, `-client` requiring
+  `-login` + `-ip` ("Missing -login or -ip for -client."), `-offline` (0x11f37244) which skips the online
+  frontend world + online-only session localization.
+- Winsock fully imported (43 funcs): `WSASocketA` 0x10abeb9b, `WSASendTo` 0x10abed37, `WSARecvFrom`
+  0x10abef04 = FC3's own UDP data plane. Orbit named-pipe is only matchmaking/rendezvous/auth.
+- Rv GameSession param builders (hook points): `CJoinGameSessionParam` getter `FUN_10207af0` (caller
+  `FUN_1188ca20`), `CCreateGameSessionParam` getter `FUN_10208000` (caller `FUN_11956990`).
+
+Revised path (replaces TB1-TB4 severity):
+- S1 — Live loopback probe: with the working solo262/1.05 mod (already boots a co-op-ruleset session
+  offline), set `LanMatchmakingDiscoveryOnLoopbackEnable=1` + `LanMatchmakingReuseAddress=1` +
+  `LanHostBroadcastPort`/`LanClientBroadcastPort`, and see whether a second instance discovers/joins the
+  first offline. Cheap, decisive, no code yet.
+- S2 — If discovery works but join is gated: detour `FUN_1188ca20` (join-param builder) so the session
+  endpoint is `127.0.0.1` instead of the service relay. If join needs a `SessionTicket`, stub the ticket
+  check (`SessionTicketRequestAttachment` path).
+- S3 — Drive a co-op campaign mission across two instances; fix desyncs with hub sync tools.
+
+Blockers still to settle (they shape S2, they no longer gate feasibility):
+1. Does `storm::echo` join validate a service-minted `SessionTicket`? (stub-able if yes)
+2. Is the UDP payload encrypted/signed? (affects whether a raw shim or a detour-inside-FC3 is needed)
