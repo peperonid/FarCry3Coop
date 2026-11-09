@@ -2900,3 +2900,52 @@ project and locate the `mpdlc1_aegir`/session-string and loader call sites; (2) 
 verify by launching `TestFC3_105\bin\farcry3.exe` (offline direct, our known method) optionally with
 the solo262 loader set to reproduce solo-offline co-op, then design the 4-player extension.
 All paths offline / working copies only (AGENTS golden rule 2).
+
+
+## Session 11 (2026-11-09): the 1.05 install boots offline; the solo262 loader set swaps in cleanly
+
+Goal: verify the new vanilla 1.05 working copy `H:\FarCryCoop\TestFC3_105\bin\farcry3.exe`
+launches offline by the direct method (`DETACHED_PROCESS` 0x8, cwd = `bin`), then temporarily
+install the `patch_solo_offline_coop_vanilla-262` loader set and check the game still boots,
+to prepare a reproduction of solo-offline co-op. Backups first; offline only; TestFC3_105 only.
+
+Backups: `H:\FarCryCoop\TestFC3_105\bin_backup_vanilla105\` holds the five original files
+(`FC3.dll`, `FC3_d3d11.dll`, `uplay_r1_loader.dll`, `ubiorbitapi_r2_loader.dll`, `farcry3.exe`);
+restore by copying them back over `bin\`.
+
+Test harness: `H:\FarCryCoop\scratch\fc3_win.py <tag> <bindir> [keep]` (kill any running
+`farcry3.exe`, launch DETACHED with cwd=bin, poll every 5s for 50s for a visible top-level
+window whose title contains "Far Cry" and whose size >= 120x120, optional screenshot, then kill
+unless `keep`). A PowerShell screenshot helper `H:\FarCryCoop\scratch\shot.ps1` (System.Drawing)
+is used because Pillow is not installed.
+
+### Finding A — vanilla 1.05 boots offline (direct method)
+
+`farcry3.exe` is a small launcher stub: the process we spawn exits with rc=0 within ~5s, but it
+re-execs the real game as a sibling process. A `Far Cry(R) 3` 1920x1080 window is present from
+~10s to 50s+ (confirmed by window enumeration), with the process still alive at 50s. Six
+`UplayWebCore.exe` helper processes are running (the Ubisoft Connect web core). Conclusion: the
+1.05 build does launch offline to its main window; the earlier 1.06 finding "no window, exited
+rc=0" was a harness artifact of tracking the wrong (stub) PID. So our direct-launch method works
+on the 1.05 copy.
+
+### Finding B — the solo262 loader set installs and the game still boots
+
+Installed into `TestFC3_105\bin`: `uplay_r1_loader.dll` -> patched md5 `dacd14c07775` (from
+`Far Cry 3\bin\uplay_r1_loader.dll`) and `uplay_r14.dll` md5 `6c75cb01cef6` (4808512 B, the solo
+co-op emulator, from the mod root). The other two bin loaders are already correct
+(`ubiorbitapi_r2_loader.dll` = `ba6015e566c9`, identical to the mod's dependency pack); `FC3.dll`
+and `FC3_d3d11.dll` were left vanilla because the solo mod does not patch them. With those two
+files in place, `farcry3.exe` again boots to the `Far Cry(R) 3` 1920x1080 window and stays alive
+at least 50s — the loader swap does not break startup. `uplay_r14.dll` is normally copied next to
+the Ubisoft Connect launcher per the mod README; placing it in the game `bin` works for the
+direct-launch path (DLL search order). Note the loader swap is still temporary; vanilla is
+restorable from `bin_backup_vanilla105`.
+
+### Not yet verified — entering the solo co-op session
+
+Whether the in-game menu now leads into a solo co-op session (Play -> Co-op -> Private Session ->
+Start) is a manual menu action that cannot be driven from the harness (fullscreen, no PIL, cannot
+reliably send input to a fullscreen exclusive game without disturbing the owner's live desktop).
+The loader boot + process stability are green; the actual session entry needs one manual run on
+the owner's screen. This is the immediate next step for the reproduction and it is owner-side.
