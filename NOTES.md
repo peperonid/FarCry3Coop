@@ -2686,3 +2686,30 @@ map/world string and the per-mode data the loader reads) so the co-op entry can 
 **Constraint reaffirmed:** the game was launched DIRECT (not via Ubisoft Connect) so it runs offline;
 frida attach must stay to such offline instances only (anticheat/mutex guard). Ubisoft Connect was
 running (UplayWebCore.exe x6) but the direct `farcry3.exe` launch boots its own offline instance.
+
+### Session 8h (2026-11-09, LIVE): robust mode-manager capture + hand-driving the mode-change virtual is safe but a no-op offline
+
+Two concrete results from a live self-run (offline `farcry3.exe` on this PC).
+
+1. **Robust manager capture, no mode change needed.** `scanModeManagerByVtable` now includes the
+   CONFIRMED primary vtable `0x1200e5f8` (added as `ADDR.mmVtable0`). A single heap vptr scan returned
+   exactly one instance: live mode-manager `this = 0x294dd3a0`, `[this+0x4c] = 0x83ae70ef`, vtable
+   `0x7aaee5f8` (= `0x1200e5f8`). This finally yields the manager without relying on catching a real
+   transition (the old scan only looked at the bogus secondary bases `0x1200e620`/`0x11f910e8`).
+
+2. **`coopEnter` RPC (`coop dry|go`)** calls `modeManager->vtable[+0x0C]` with `(&CO-OP id, descriptor)`
+   and auto-resolves the live CO-OP registry entry (the `DAT_128048c0` entry with `+0x20 == 0x43521e6f`)
+   in-session. Dry run confirmed slot `+0x0C -> 0x79a81990` = Ghidra **`FUN_10fa1990`** (the real
+   mode-change handler, not the `+0x5c` no-op setter `FUN_1030f8a0` that `switchCoop` calls).
+
+3. **LIVE `coop go` result:** the call RETURNED (no crash; game still alive, pid 14932, ~548 MB) with
+   `ret = 0x1026...` but **`[this+0x4c]` was UNCHANGED (`0x83ae70ef` before and after)**. So calling the
+   mode-change virtual from the Frida thread is SAFE but does **not itself flip the current mode**. The
+   handler does bookkeeping/refcounts; the actual switch is polled/driven later on the game's main
+   update thread (and, for the CO-OP branch, almost certainly needs a co-op session object that an
+   offline game does not construct). The outer driver timed out only because the RPC read blocked a while
+   after the call; the script itself logged `ret` + clean `detaching`.
+
+Next lead: find what CONSUMES the handler's pending target on the main thread (which `[this+...]` field
+it reads next frame) and whether an offline co-op session can be pre-seeded, rather than blindly calling
+the entry virtual.

@@ -57,7 +57,8 @@ var ADDR = {
   // Mode-manager vtable addresses (Ghidra 0x10000000 space), recovered by DumpVtable.java:
   // both are classes that implement FUN_11340560 (the mode dispatch, slot +0x38); a live
   // instance's vptr == A(mmVtable*), and [instance+0x4c] is the current mode id.
-  mmVtable1:     0x1200e620, // 15-slot vtable (slot +0x38 = FUN_11340560)
+  mmVtable0:     0x1200e5f8, // CONFIRMED live mode-manager PRIMARY vtable (session 8c probeMode); dispatcher at +0x60
+  mmVtable1:     0x1200e620, // secondary base subobject at primary+0x28
   mmVtable2:     0x11f910e8, // 16-slot vtable (shares first 5 slots; slot +0x38 = FUN_11340560)
   mmDispatchFn:  0x11340560  // the vtable slot VALUE = function ENTRY (NOT the 0x113405a0 dispatch point)
 };
@@ -216,7 +217,7 @@ function ptrToPat(p) {
   return idPattern(v);
 }
 function findModeManagerByVtable() {
-  var vtG = [ADDR.mmVtable1, ADDR.mmVtable2];
+  var vtG = [ADDR.mmVtable0, ADDR.mmVtable1, ADDR.mmVtable2];
   var vtRt = vtG.map(function (g) { return A(g); });
   var patList = vtRt.map(function (p, i) { return { pat: ptrToPat(p), vt: p, gh: vtG[i] }; });
   var ranges = Process.enumerateRanges({ protection: 'rw-', coalesce: true });
@@ -410,6 +411,47 @@ rpc.exports = {
       out.entries.push(ent);
     }
     return out;
+  },
+  // H4b - the REAL co-op enter: call modeManager->vtable[+0x0C] (FUN_10fa1990, the
+  // mode-change handler) with (&destId, descriptor). NOT vtable+0x5c (the no-op
+  // id-setter that switchCoop calls). Needs the live mode-manager `this` (from the
+  // dispatch hook OR scanModeManagerByVtable against the primary vtable 0x1200e5f8)
+  // and the live CO-OP registry entry (from dumpModes: the entry with +0x20==0x43521e6f).
+  // dryRun=true resolves and prints without calling. Calling an engine virtual blind
+  // can crash the game: run dryRun first, watch the log AND the game window on go.
+  coopEnter: function (dryRun, mgrAddrStr, entryAddrStr) {
+    var mm = mgrAddrStr ? ptr(parseInt(mgrAddrStr, 16)) : lastMode.mmPtr;
+    if (!mm || mm.isNull()) return { error: 'no mode-manager this (pass addr or capture via scanModeManagerByVtable)' };
+    var id = MODE.coop;
+    var vt = mm.readPointer();
+    var slot = vt.add(0x0c).readPointer();           // *(mgr->vtable + 0x0c) = FUN_10fa1990
+    var idBuf = Memory.alloc(4); idBuf.writeU32(id >>> 0);
+    var entry = entryAddrStr ? ptr(parseInt(entryAddrStr, 16)) : null;
+    // Auto-resolve the live CO-OP registry entry from the DAT_128048c0 singleton when
+    // not supplied, so the call uses a same-session address (heap base shifts per run).
+    if (!entry) {
+      try {
+        var gobj = A(ADDR.idMaskReg).readPointer();
+        var data = gobj.add(0x04).readPointer();
+        var cnt = gobj.add(0x08).readU32();
+        for (var i = 0; i < cnt; i++) {
+          var e0 = data.add(i * 4).readPointer();
+          if (!e0.isNull() && (e0.add(0x20).readU32() >>> 0) === id) { entry = e0; break; }
+        }
+      } catch (e) { entry = null; }
+    }
+    var info = { modeManager: mm.toString(), vtable: vt.toString(),
+                 vtable0C: slot.toString(),
+                 vtable0CGhidra: '0x' + (slot.sub(mod.base).add(0x10000000)).toString(16),
+                 curMode: '0x' + (mm.add(0x4c).readU32() >>> 0).toString(16),
+                 destId: '0x' + id.toString(16), descriptor: entry ? entry.toString() : '(null)' };
+    if (dryRun) { info.dryRun = true; return info; }
+    // thiscall: this in ECX, two pointer args (&destId, descriptor) on the stack.
+    var f = new NativeFunction(slot, 'int', ['pointer', 'pointer', 'pointer'], 'thiscall');
+    var ret = f(mm, idBuf, entry || ptr(0));
+    info.ret = ret;
+    try { info.modeAfter = '0x' + (mm.add(0x4c).readU32() >>> 0).toString(16); } catch (e) {}
+    return info;
   },
   // DANGEROUS, EXPERIMENTAL: write the live mode id [this+0x4c]. Only after the
   // trace confirms `this`; the plan does NOT expect an offline/global poke to

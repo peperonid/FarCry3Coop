@@ -193,6 +193,7 @@ def main():
             "  pop dry             H3b dry run (show svcInit addr)       (populate true)\n"
             "  pop go              H3b LIVE: call FUN_1127a0f0(service)  (may crash)\n"
             "  modeid <this> <id>  DANGEROUS poke: setModeId(this_hex, id_hex)\n"
+            "  coop dry/go [mgr [entry]]  H4b LIVE: call vtable[+0x0C](&id,descriptor) (may crash)\n"
             "  modes               dump global mode-list DAT_128048c0 entries (id@+0x20, name@+0xC)\n"
             "  scanmm              scan memory for the live mode-manager (no transition needed)\n"
             "  scanmmv             scan heap for the mode-manager by its VTABLE pointer (robust)\n"
@@ -245,6 +246,16 @@ def main():
                 elif cmd in ("modes", "dumpmodes", "dmpmodes"):
                     log.echo("reading the global mode-list singleton DAT_128048c0 (entries: id@+0x20, name@+0xC) ...")
                     log.echo(json.dumps(call("dumpModes"), ensure_ascii=False))
+                elif cmd in ("coop", "entercoop"):
+                    mode = rest[0].lower() if rest else "dry"
+                    if mode not in ("dry", "go"):
+                        log.echo("use: coop dry [mgr_hex [entry_hex]] | coop go [mgr_hex [entry_hex]]")
+                        continue
+                    mgr = rest[1] if len(rest) > 1 else None
+                    entry = rest[2] if len(rest) > 2 else None
+                    if mode == "go":
+                        log.echo("LIVE call: modeManager vtable[+0x0C](&CO-OP id, descriptor). May crash.")
+                    log.echo(json.dumps(call("coopEnter", mode == "dry", mgr, entry), ensure_ascii=False))
                 elif cmd in ("mode", "lastmode"):
                     r = call("lastMode")
                     log.echo(json.dumps(r, ensure_ascii=False))
