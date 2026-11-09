@@ -2816,3 +2816,87 @@ availability byte `DAT_12804acc+0x6c == 1` (open), but the session list reads as
   fake-world / emulated-local-server route from the hub playbook, not more mode-field poking.
 
 Ghidra 12.1.4 java gotchas hit again: `getFunctionContaining` needs `currentProgram.getFunctionManager().getFunctionContaining` unless a wildcard `ghidra.program.model.symbol.*` import is present; never call `Long.toHexString` on `Function.getEntryPoint()` (it returns `Address`, not `Long`) - use `Address.toString()`.
+
+## Session 10 (2026-11-09): two community co-op mods acquired, vanilla 1.05 rolled out, first byte-diffs (agent session)
+
+Owner prompt (2026-11-09): in `H:\FarCryCoop\Downloads` the owner placed two different co-op mods -
+`FarCry 3-OpenWorldCo-op(Patch1.5)` (Nexus mod 220) and `patch_solo_offline_coop_vanilla-262`
+(Nexus mod 262) - plus a `FarCry3-1.05` folder (files to downgrade 1.06 -> 1.05). Asked to (a) roll
+out a SEPARATE 1.05 version from the TestFC3 copy, and (b) continue the research using the mods'
+experience + our findings + my proposals.
+
+### Vanilla 1.05 install built (separate, non-destructive)
+
+- Built `H:\FarCryCoop\TestFC3_105` as a **separate 1.05 install** from the 1.06 working copy,
+  preserving TestFC3 (1.06) for our Frida work. Method (background `robocopy`, log
+  `H:\FarCryCoop\scratch\downgrade_105.log`): copy TestFC3 -> TestFC3_105 with `/E /XD bin`, then
+  `robocopy H:\FarCryCoop\Downloads\FarCry3-1.05\Bin TestFC3_105\bin /MIR` (bin mirrored to 1.05,
+  removing the 1.06-only `upc_r1_loader.dll`). The 1.06 game data (`data_win32\patch.dat`
+  `5a788dd5f7be`, 202 MB) is kept unchanged - the 1.05->1.06 update is Bin-only.
+- Verified clean vanilla 1.05 in TestFC3_105\bin: `farcry3.exe` md5 `3cf63ffd73d7`,
+  `farcry3_d3d11.exe` `df7fc8a341ce`, `FC3.dll` `5ff045331557` (29,994,856 B),
+  `FC3_d3d11.dll` `46bcc0975905` (30,057,832 B), `uplay_r1_loader.dll` `8313de5eb4f4`,
+  `ubiorbitapi_r2_loader.dll` `ba6015e566c9`. 19 bin files. `upc_r1_loader.dll` (1.06) gone.
+- NOTE: 1.06 `FC3.dll` is 40,720,424 B vs 1.05 29,994,856 B - a substantially different binary, so
+  our 1.06 Ghidra map (session 8/9) does NOT transfer directly; a Ghidra `FC3_105` project must be
+  built to analyze the 1.05 binaries/mods.
+
+### The two mods - what they are (from their READMEs + binary hashes)
+
+- **solo_offline_coop (mod 262, v1.01, "based on version 1.05v2"):** lets a solo player start and
+  play **alone in Co-op game mode** (Private Session, Public Session, and after update 1.01 also
+  Local Session), offline, DX9 & DX11. Installs by replacing `bin\FC3.dll` + `FC3_d3d11.dll`
+  (backup originals) and needs "The Dependencies" = `ubiorbitapi_r2_loader.dll` +
+  `uplay_r1_loader.dll` in bin and `uplay_r14.dll` in the Ubisoft Connect dir. LAN play = No. Other
+  clients CAN still join. Default loadout only. The author states the co-op mode "relied on a
+  specific file that only [is] in [a] legitIMATE copy of the game even [when] the mod only run[s] in
+  offline mode" - i.e. the orbit/Uplay session components.
+- **OpenWorldCo-op (mod 220, Patch 1.5):** a full open-world co-op total conversion. Install = copy
+  the whole "Far Cry 3" folder (bin FC3.dll + `data_win32\patch.dat/patch.fat`, 3.38 GB) over the
+  game. Single player + vanilla co-op maps are unavailable while installed. To play: create a
+  **private co-op session from the main menu** and set the chapter to **"ROOK ISLANDS" / "fc3_main"**.
+
+### Where the co-op patch actually lives (binary hash comparison)
+
+- `FC3.dll` md5: vanilla 1.05 `5ff045331557`; **solo262 `5ff045331557` = IDENTICAL to vanilla** (solo
+  does NOT patch FC3.dll); **OpenWorld220 `927a1a30c51d` = patched 1.05** (same size, in-place edits).
+- `FC3_d3d11.dll`: vanilla `46bcc0975905`; solo262 identical; OpenWorld220 `07abaf666a6d` patched.
+- `uplay_r1_loader.dll`: vanilla 1.05 `8313de5eb4f4`; **BOTH mods `dacd14c07775`** (same size 294,400).
+  Byte-diff (`H:\FarCryCoop\scratch\loader_uplay_r1_diff.txt`): differs by **exactly ONE byte** at
+  file offset `0x3B030` (`00` -> `34` = ASCII '4'), immediately before the export-name strings
+  `UPLAY_Init` / `UPLAY_Startup...`. So the loader shim is a thin hook loader; the real offline co-op
+  emulator is **`uplay_r14.dll`** (4,808,512 B, md5 `6c75cb01cef6`), shipped in the mod root and NOT
+  present in the vanilla 1.05 Bin nor in TestFC3 - it must be a Uplay-API shim that fakes the co-op
+  session so the game runs co-op offline. **This file is the primary next RE target.**
+- `ubiorbitapi_r2_loader.dll` is byte-identical to vanilla in all sets (`ba6015e566c9`) - it is just
+  the legit "dependency", not patched.
+
+### OpenWorldCo-op FC3.dll patch map (diff vanilla 1.05 vs OpenWorld220, file offsets)
+
+Full diff: `H:\FarCryCoop\scratch\fc3_openworld_vs_105_diff.txt` (100 differing bytes, 27 runs). The
+material changes:
+- **Map/chapter override at `0x15345D0`:** the co-op session's default map string
+  `mpdlc1_aegir` (vanilla co-op DLC map) is replaced with **`fc3_main`** (the single-player open
+  world). This is the core of the mod - co-op runs on the campaign world (matches readme "fc3_main").
+- **Two NOP-5 -> CALL hooks** (code injection into existing flow): at `0x8C406B`
+  `90 90 90 90 90` -> `e8 99 fe ff ff` (call rel -0x167) and at `0x8C5036` `90*5` ->
+  `e8 ce ee ff ff` (call rel -0x1332). These sit in 5-byte padding inside functions (prologue
+  `55 8b ec` follows) and redirect into existing routines - the engine-level co-op injections.
+- **~20 float tuning constants** (matches the changelog "Reduced entity streaming radius",
+  "Decreased AI health"): e.g. `0x15343B0` (64 B block of doubles/floats), `0x14F2A30`, `0x1535D59`,
+  `0x155239C`, `0x1552618`, `0x1552AB8` (spawn/stream/radius values rewritten).
+- **A batch of first-char string corruptions `F`/`C` -> `X`** (`FOV`->`XOV`, `Coop`->`Xoop`,
+  `CRadio`->`XRadio` at `0x151BFAD`, `0x15D6620`, `0x1569A18`, ...): the modder renamed resource/UI
+  strings so certain features/asset lookups fail - used to disable vanilla co-op-only UI/features.
+
+### Strategic read / next steps
+
+Both mods prove offline co-op on **1.05** is achievable: solo262 entirely at the **loader-shim layer**
+(`uplay_r14.dll` fakes the session, FC3.dll untouched), OpenWorld220 additionally with **engine
+patches** (`fc3_main` map override + NOP->CALL hooks + tuning). Our 1.06 netplay-session-object
+blocker (session 9) is exactly what `uplay_r14.dll` sidesteps. Next: (1) build a Ghidra `FC3_105`
+project and locate the `mpdlc1_aegir`/session-string and loader call sites; (2) reverse
+`uplay_r14.dll` (the offline co-op emulator) to see which Uplay/orbit session APIs it stubs; (3)
+verify by launching `TestFC3_105\bin\farcry3.exe` (offline direct, our known method) optionally with
+the solo262 loader set to reproduce solo-offline co-op, then design the 4-player extension.
+All paths offline / working copies only (AGENTS golden rule 2).
