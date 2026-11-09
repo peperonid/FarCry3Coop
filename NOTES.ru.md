@@ -2759,3 +2759,27 @@ H7b (настоящий второй игрок в офлайн-коопе) пр
 - Владелец дал набор инструментов **Gibbed.Dunia2** в `H:\FarCryCoop\Downloads\dunia2-r178_b113` (github.com/gibbed/Gibbed.Dunia2). `bin\Gibbed.Dunia2.Unpack.exe --ns -v <patch.fat> <out>` работает на этом ПК (.NET есть); `Pack.exe` пакует обратно; `ConvertBinaryObject.exe` делает bobj↔xml; LZO через `lzo_32/64.dll`. `patch.dat/.fat` = большой файл «Domino» от Ubisoft (магик `-- {\v/} Domino `). Распакованы оба: соло → `scratch\patch_top` (431 файл), OpenWorld → `scratch\patch_ow_top` (3316 файлов).
 - **Дифф (OpenWorld против соло)**: +2910 файлов только у OpenWorld (в основном `__unknown\game\*.fcb`, `__unknown\scripts\*.lua`, `__unknown\gfx\*.xbt`, `__unknown\misc\*.profile.xml`). Изменено: `worlds\fc3_main\generated\fc3_main_depload.dat` **1 353 370 → 2 923 685 Б** (OpenWorld почти удваивает загрузку зависимостей острова = его кооп-сущности, главный подозреваемый по регистрации острова); `generated\nomadobjecttemplates.fcb` 2,6 МБ → 1,04 МБ; все `domino\library\sp\lib_defend.outpost_{easy,med,hard,nowave}_core2_*.lua` сжимаются ~46–60 КБ → ~18 161 Б (переписаны библиотеки целей кооп-миссий); среди соло-only файлов — `ui\multiplayer\menu\multimain.feu` и 136 МБ `ui\multiplayer\video\fc3coopintro.bik` (OpenWorld приносит свои/удаляет их).
 - **ГЛАВНЫЙ ВЫВОД — причина «только онлайн» у OpenWorld это НЕ конфиг-файл.** Поиск по ключевым словам во всех `__unknown\scripts` OpenWorld (`uplay/online/session/host/steam`) **пуст**. OpenWorld уводит в онлайн потому, что остров-кооп запускается через **нативный путь хоста многопользовательской UPLAY-сессии** игры; `uplay_r14` подделывает эту сессию лишь ровно настолько, чтобы войти в **одиночную/офлайн кооп-миссию**, но не чтобы хостить настоящую кооп-игру с игроками. Поэтому **остров с друзьями (B) и второй игрок (H7b) — это ОДНА И ТА ЖЕ задача**: научить фейковую офлайн-сессию хостить настоящую кооп-игру. **Слой хоста сессии — единственный критический путь.** Дальше: реверс нативного кооп-хоста → инициализации UPLAY-сессии (FC3.dll) и того, где `uplay_r14.dll` подделывает её для соло, чтобы найти точку офлайн-хоста.
+
+
+## Сессия 22 (агент, 2026-11-09) — стена офлайн-хоста сведена к входу в Rv GameSession
+
+Ghidra FC3_106 только на чтение + статический трассировщик лоадеров (supermemory `Cz8Ja9zSjzAEGHfJi4K1xq`,
+`nvjxCfpQn79eavDMBirw1P`, `chzyBsC2o83CHAcLdYT3Uu`, `KcD1dL5WTEUN7f5fUd4hYA`; артефакты
+`H:\FarCryCoop\scratch\ghidra\out\party106\{strs.txt,deep.txt,final2.txt}`,
+`local\scratch\out\{fc3_party_glue.txt,fc3_rv_strings.txt}`).
+
+- Хост кооп-игры — это нативный путь группы Uplay + RendezVous GameSession. Контроллер группы FC3
+  вызывает `UPLAY_PARTY_*` (RVA 1.05; якорь игровой сессии 1.06 — `DAT_12805180`). Игра проверяет
+  **список участников Rv GameSession** (`E_SESSION_ERROR_RENDEZVOUS_GAMESESSION_*`:
+  `HOSTORPARTICIPANTREQUIRED`, `PARTICIPANTNOTCONNECTED`, `HOSTPRIVILEGEREQUIRED`,
+  `E_SESSION_ERROR_PARTY_NOT_HOST`), а не только список Uplay.
+- Достоверный список участников кооп = внутренний массив провайдера, строит его `FUN_11273650`: число
+  в `provider+0x38`, база массива в `provider+0x3c`, каждый элемент 0x20 байт, id участника в элементе
+  по `+0x14`. Гейт входа `FUN_11218480` сверяет это же число. Геттер провайдера `FUN_103660e0`
+  возвращает провайдер, только если тип группы `> 2` и id группы `== DAT_1285fe3c`. Проверка
+  хоста/лидера: `FUN_1006f990() == *(session + 0x120)`. `MaxPartySize` — конфиг-переменная по
+  смещению `0xa88`.
+- Вывод: подделка массива участников провайдера даёт одноместный-экземпляр-со-многими-слотами (соло/
+  тесты/ИИ-подобные доп. слоты). Два живых человека офлайн по-прежнему требуют, чтобы второй экземпляр
+  ВОШЁЛ в живую Rv GameSession (`CJoinGameSessionParam` `FUN_10207af0`); loopback/UDP Rv-вход пока не
+  найден. Эта плоскость данных и остаётся твёрдой стеной для «остров с друзьями» / офлайн 2-4.

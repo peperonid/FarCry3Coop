@@ -3027,3 +3027,25 @@ H7b (a real second peer in offline co-op) was probed by installing the **OpenWor
 - Owner supplied the **Gibbed.Dunia2** toolset at `H:\FarCryCoop\Downloads\dunia2-r178_b113` (github.com/gibbed/Gibbed.Dunia2). `bin\Gibbed.Dunia2.Unpack.exe --ns -v <patch.fat> <out>` runs on this PC (.NET ok); `Pack.exe` repacks; `ConvertBinaryObject.exe` does bobj↔xml; LZO via `lzo_32/64.dll`. `patch.dat/.fat` = Ubisoft "Domino" big-file (magic `-- {\v/} Domino `). Unpacked both: solo → `scratch\patch_top` (431 files), OpenWorld → `scratch\patch_ow_top` (3316 files).
 - **Diff (OpenWorld vs solo)**: +2910 OpenWorld-only files (mostly `__unknown\game\*.fcb`, `__unknown\scripts\*.lua`, `__unknown\gfx\*.xbt`, `__unknown\misc\*.profile.xml`). Changed: `worlds\fc3_main\generated\fc3_main_depload.dat` **1 353 370 → 2 923 685 B** (OpenWorld nearly doubles the island dep-load = the island's co-op entities, PRIME island-registration suspect); `generated\nomadobjecttemplates.fcb` 2.6 MB → 1.04 MB; all `domino\library\sp\lib_defend.outpost_{easy,med,hard,nowave}_core2_*.lua` shrink ~46–60 KB → ~18 161 B (the co-op mission objective libs rewritten); solo-only files include `ui\multiplayer\menu\multimain.feu` and the 136 MB `ui\multiplayer\video\fc3coopintro.bik` (OpenWorld ships its own / deletes them).
 - **KEY CONCLUSION — why OpenWorld is online-only is NOT a config file.** A keyword scan of all OpenWorld `__unknown\scripts` for `uplay/online/session/host/steam` is **empty**. OpenWorld forces online because island co-op runs through the game's **native multiplayer UPLAY-session HOST path**; `uplay_r14` fakes that session only far enough for a **solo/offline co-op mission**, not for hosting a real co-op game with peers. Therefore **island-with-friends (B) and second-peer (H7b) are the SAME problem**: make the fake offline session host a real co-op game. **The session-host layer is the single critical path.** Next: reverse the native co-op host → UPLAY session init (FC3.dll) and where `uplay_r14.dll` fakes it for solo, to find an offline-host hook point.
+
+## Session 22 (agent, 2026-11-09) — offline-host wall pinned to the Rv GameSession join
+
+Read-only Ghidra FC3_106 + loader-shim static trace (supermemory `Cz8Ja9zSjzAEGHfJi4K1xq`,
+`nvjxCfpQn79eavDMBirw1P`, `chzyBsC2o83CHAcLdYT3Uu`, `KcD1dL5WTEUN7f5fUd4hYA`; artifacts
+`H:\FarCryCoop\scratch\ghidra\out\party106\{strs.txt,deep.txt,final2.txt}`,
+`local\scratch\out\{fc3_party_glue.txt,fc3_rv_strings.txt}`).
+
+- Co-op hosting is the native Uplay party + RendezVous GameSession path. FC3's party controller
+  calls `UPLAY_PARTY_*` (1.05 RVAs; the 1.06 game-session anchor is `DAT_12805180`). The game
+  validates the **Rv GameSession participant list** (`E_SESSION_ERROR_RENDEZVOUS_GAMESESSION_*`:
+  `HOSTORPARTICIPANTREQUIRED`, `PARTICIPANTNOTCONNECTED`, `HOSTPRIVILEGEREQUIRED`,
+  `E_SESSION_ERROR_PARTY_NOT_HOST`), not only the Uplay member list.
+- Trusted co-op member list = provider's internal array, built by `FUN_11273650`: count at
+  `provider+0x38`, array base at `provider+0x3c`, each entry 0x20 bytes, member id at entry `+0x14`.
+  Join gate `FUN_11218480` counts against this same array. Provider getter `FUN_103660e0` returns the
+  provider only when party type `> 2` and party id `== DAT_1285fe3c`. Host/leader test is
+  `FUN_1006f990() == *(session + 0x120)`. `MaxPartySize` is a config var at config offset `0xa88`.
+- Verdict: faking the provider member array gives single-instance multi-slot (solo/testing/AI-like
+  extra slots). Two real humans offline still need the second instance to JOIN a live Rv GameSession
+  (`CJoinGameSessionParam` `FUN_10207af0`); no loopback/UDP Rv join found yet. That transport stays
+  the hard wall for island-with-friends / offline 2-4.

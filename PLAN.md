@@ -163,3 +163,8 @@ second path that bypasses Rv join entirely. **Next read-only step:** decompile `
 `FUN_103660e0`, and the `CJoinGameSessionParam` path `FUN_10207af0` to see exactly which list the
 joiner validates against, and whether a loopback/UDP Rv join is even reachable offline. No game code
 is written until the owner approves step B.
+
+Step-B concrete offsets (from `final2.txt`, session 22): provider member array = count `provider+0x38`,
+array base `provider+0x3c`, entry size 0x20, member id at entry `+0x14`; provider gate = party type `>2`
+AND party id `== DAT_1285fe3c`; host test `FUN_1006f990() == *(session+0x120)`. Single-instance
+multi-slot is reachable with these; true 2-human offline still needs the Rv join (`FUN_10207af0`).
