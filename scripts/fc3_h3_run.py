@@ -256,6 +256,20 @@ def main():
                     if mode == "go":
                         log.echo("LIVE call: modeManager vtable[+0x0C](&CO-OP id, descriptor). May crash.")
                     log.echo(json.dumps(call("coopEnter", mode == "dry", mgr, entry), ensure_ascii=False))
+                elif cmd in ("netgate", "ng", "gate"):
+                    log.echo(json.dumps(call("netgate"), ensure_ascii=False))
+                elif cmd in ("mmf", "mmfields", "fields"):
+                    log.echo(json.dumps(call("mmFields", rest[0] if rest else None), ensure_ascii=False))
+                elif cmd in ("loadcoop", "lc"):
+                    mode = rest[0].lower() if rest else "dry"
+                    if mode not in ("dry", "go"):
+                        log.echo("use: loadcoop dry [mgr [entry]] | loadcoop go [mgr [entry]]")
+                        continue
+                    mgr = rest[1] if len(rest) > 1 else None
+                    entry = rest[2] if len(rest) > 2 else None
+                    if mode == "go":
+                        log.echo("LIVE call: write this+0x48=CO-OP then loader FUN_113409d0(this,&+0x48,desc,0). May crash.")
+                    log.echo(json.dumps(call("loadCoop", mode == "dry", mgr, entry), ensure_ascii=False))
                 elif cmd in ("mode", "lastmode"):
                     r = call("lastMode")
                     log.echo(json.dumps(r, ensure_ascii=False))

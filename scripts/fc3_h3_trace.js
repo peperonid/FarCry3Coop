@@ -51,6 +51,8 @@ var ADDR = {
   svcSingleton:  0x12863890, // CFCXPlaylistService: the instance is the object AT this addr (guard 1286388c), not a ptr
   svcGetter:     0x103d1640, // singleton getter: returns &DAT_12863890 directly (NOT called here)
   idMaskReg:     0x128048c0, // id -> mask registry global
+  netSess:       0x12804acc, // session/netplay manager global; +0x6c byte = 'co-op session available' gate; +0x68 = handle ptr
+  loader9d0:     0x113409d0, // FUN_113409d0(this,&this+0x48,descriptor,p4): the actual mode loader; reads id from *(&this+0x48); CO-OP 0x43521e6f is in its branch set
   centralObj:    0x12804acc, // central game object (4529 refs; +0x68 component container)
   installG_a:    0x12891ca0, // diagnostic install-global (NOT the live lever; see H1 demotion)
   installG_b:    0x12891ca8,
@@ -371,6 +373,78 @@ rpc.exports = {
           inModule: Process.findModuleByAddress(f) !== null };
       }
     } catch (e) { out.vtableErr = '' + e; }
+    return out;
+  },
+  // Read-only dump of the mode-manager fields the transition path keys on:
+  // +0x11 loading-branch flag, +0x19 "transition in progress" gate (must be 0),
+  // +0x24 held descriptor, +0x48 PENDING TARGET ID (what FUN_113409d0 actually
+  // reads as the destination), +0x4c current id, +0x70 set-to-1 after enqueue.
+  mmFields: function (addrStr) {
+    var t = addrStr ? ptr(parseInt(addrStr, 16)) : lastMode.mmPtr;
+    if (!t || t.isNull()) return { error: 'no this (pass addr or capture via scanModeManagerByVtable)' };
+    function b(o) { try { return '0x' + (t.add(o).readU8() >>> 0).toString(16); } catch (e) { return 'err'; } }
+    function w(o) { try { return '0x' + (t.add(o).readU32() >>> 0).toString(16); } catch (e) { return 'err'; } }
+    return { this: t.toString(), f11_loading: b(0x11), f19_inProgress: b(0x19),
+      desc24: w(0x24), pending48: w(0x48), cur4c: w(0x4c), f70: b(0x70), f71: b(0x71) };
+  },
+  // H4b-v2: set the PENDING TARGET field the loader actually reads (this+0x48) to
+  // CO-OP and drive the loader FUN_113409d0(this, &this+0x48, descriptor, 0) which
+  // has a CO-OP branch (id 0x43521e6f in its set). dryRun=true only reads+reports.
+  loadCoop: function (dryRun, mgrAddrStr, entryAddrStr) {
+    var mm = mgrAddrStr ? ptr(parseInt(mgrAddrStr, 16)) : lastMode.mmPtr;
+    if (!mm || mm.isNull()) return { error: 'no mode-manager this' };
+    var id = MODE.coop;
+    var f19 = mm.add(0x19).readU8();
+    var info = { modeManager: mm.toString(), before48: '0x' + (mm.add(0x48).readU32() >>> 0).toString(16),
+                 cur4c: '0x' + (mm.add(0x4c).readU32() >>> 0).toString(16), inProgress19: f19 };
+    // resolve the live CO-OP descriptor (the DAT_128048c0 entry with +0x20==0x43521e6f)
+    var entry = entryAddrStr ? ptr(parseInt(entryAddrStr, 16)) : null;
+    if (!entry) {
+      try {
+        var gobj = A(ADDR.idMaskReg).readPointer();
+        var data = gobj.add(0x04).readPointer();
+        var cnt = gobj.add(0x08).readU32();
+        for (var i = 0; i < cnt; i++) {
+          var e0 = data.add(i * 4).readPointer();
+          if (!e0.isNull() && (e0.add(0x20).readU32() >>> 0) === id) { entry = e0; break; }
+        }
+      } catch (e) { entry = null; }
+    }
+    info.descriptor = entry ? entry.toString() : '(null)';
+    if (dryRun) { info.dryRun = true; return info; }
+    var loader = A(ADDR.loader9d0);   // FUN_113409d0, cdecl (this, &pending, descriptor, p4)
+    var p48 = mm.add(0x48);
+    mm.add(0x48).writeU32(id >>> 0);  // set the destination the loader reads
+    var f = new NativeFunction(loader, 'void', ['pointer', 'pointer', 'pointer', 'pointer']);
+    var crashed = false;
+    try { f(mm, p48, entry || ptr(0), ptr(0)); } catch (e) { crashed = '' + e; }
+    try { info.after48 = '0x' + (mm.add(0x48).readU32() >>> 0).toString(16); } catch (e) {}
+    try { info.cur4cAfter = '0x' + (mm.add(0x4c).readU32() >>> 0).toString(16); } catch (e) {}
+    try { info.f11After = '0x' + (mm.add(0x11).readU8() >>> 0).toString(16); } catch (e) {}
+    info.loaderGhidra = '0x' + loader.sub(mod.base).add(0x10000000).toString(16);
+    if (crashed) info.exception = crashed;
+    return info;
+  },
+  // Read-only: the offline co-op gate. FUN_10fa1990 skips the CO-OP branch unless
+  // *(DAT_12804acc + 0x6c) != 0 (a co-op/netplay session is available). Read the
+  // global both ways (struct-base vs pointer-to-struct) to see which is live.
+  netgate: function () {
+    var g = A(ADDR.netSess);
+    var out = { global: g.toString() };
+    try { out.p = g.readPointer().toString(); } catch (e) { out.pErr = '' + e; }
+    // interpretation A: DAT_12804acc is the struct base
+    try { var _av = '0x' + (g.add(0x6c).readU8() >>> 0).toString(16); out.availBase = _av; } catch (e) {}
+    try { out.handleBase = '0x' + (g.add(0x68).readU32() >>> 0).toString(16); } catch (e) {}
+    // interpretation B: DAT_12804acc holds a pointer to the struct
+    try {
+      var sp = g.readPointer();
+      if (!sp.isNull()) {
+        out.availPtr = '0x' + (sp.add(0x6c).readU8() >>> 0).toString(16);
+        out.handlePtr = '0x' + (sp.add(0x68).readU32() >>> 0).toString(16);
+        out.availVtable = sp.readPointer().toString();
+        out.availVtableGhidra = '0x' + (sp.readPointer().sub(mod.base).add(0x10000000)).toString(16);
+      }
+    } catch (e) { out.spErr = '' + e; }
     return out;
   },
   // Read-only dump of the global mode-list singleton DAT_128048c0 (idMaskReg). The

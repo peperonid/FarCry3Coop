@@ -2713,3 +2713,57 @@ Two concrete results from a live self-run (offline `farcry3.exe` on this PC).
 Next lead: find what CONSUMES the handler's pending target on the main thread (which `[this+...]` field
 it reads next frame) and whether an offline co-op session can be pre-seeded, rather than blindly calling
 the entry virtual.
+
+### Session 8i (2026-11-09, OFFLINE Ghidra FC3_106 + LIVE): the mode-change call topology is fully mapped; the offline blocker is the netplay session object, not an id/field gate
+
+Continued the H4b offline lead (online co-op is unavailable to the owner, so we cannot capture a real
+join). Combined the cached FC3_106 decompilation with new live reads. Added three Frida RPCs to
+`scripts/fc3_h3_trace.js` + commands to `scripts/fc3_h3_run.py`: `mmFields`/`mmf` (reads the
+mode-manager fields the transition path keys on), `loadCoop`/`loadcoop dry|go` (writes the pending
+destination then calls the loader directly), `netgate`/`ng` (reads the co-op-availability gate).
+`scripts/ghidra/DecompTransition.java` lists the CALL xrefs of the three transition functions.
+
+Call topology (static, FC3_106):
+
+- `FUN_10fa1990` = **modeManager->vtable[+0x0C]** (confirmed: its only xref is the DATA slot at
+  `0x1200e604` = primary vtable `0x1200e5f8` + 0x0C). No direct CALL xrefs -> invoked purely by vtable
+  dispatch. It refcounts `(param_2, param_3)`, calls `FUN_11340d00(piVar4, piVar5)`, calls
+  `vtable[+0x50](&local_10)` (which supplies the destination id `iStack_14` the branches switch on),
+  then gates the whole CO-OP/PvP setup on `*(char*)(DAT_12804acc + 0x6c) != 0` (the **co-op / netplay
+  "session available" byte**). For `iStack_14 == 0x43521e6f` (CO-OP) it reads the descriptor string at
+  `param_3 + 0x0C` and logs `"Coop_Fenrir_Loading"`; sibling ids log `"PvP_Dom_Loading"` etc.
+- `FUN_11340d00` = the **enqueue driver** (only caller of the loader). `if (*(char*)(this + 0x19) == 0)`
+  (transition-in-progress gate) -> `FUN_113409d0(this, &this[0x48], piVar2, piVar3)`; then sets
+  `this[0x70] = 1`. The **PENDING DESTINATION MODE ID is stored at `modeManager + 0x48`** (passed by
+  address to the loader). Also installed as a vtable slot at `0x11f910cc`.
+- `FUN_113409d0` = the **actual loader** (its only CALL caller is `FUN_11340d00`). Reads the destination
+  id via `iVar2 = *param_2` (i.e. `[this + 0x48]`); stores the descriptor at `this + 0x90`
+  (`param_1 + 0x24`, `param_1` is `int*` here so the offset is x4); if the id is in
+  `{0xAB4FC8E2, 0x43521e6f (CO-OP), 0x9991DAEC, 0x6c2b3868, 0xF66FFB87, 0x2100CED7}` it sets a
+  "loading" flag byte at `this + 0x44` (`*(undefined1*)(param_1 + 0x11)`) and logs
+  `"UI\Multiplayer\Textures\Menu\Loading\Worlds\"`. **The CO-OP branch is keyed off `[this+0x48]`, not
+  an argument.** (Watch the `int*` vs raw-byte offset difference: in `FUN_11340d00` `param_1` is a raw
+  `int`, so `+0x19`/`+0x70` are raw byte offsets; in `FUN_113409d0` `param_1` is `int*`, so the
+  decompiler's `+0x11`/`+0x24` are byte `0x44`/`0x90`.)
+
+Live results (offline `farcry3.exe`, manager found by `scanmmv` at vtable `0x1200e5f8`):
+
+- `mmf` on the live manager (`this = 0x29256950`): `pending48 = 0x83ae70ef` (= `cur4c`) -> confirms
+  `+0x48` is the pending/destination field; in-progress gate byte `+0x19 = 0` (open); held descriptor
+  at `+0x90 = 0x78de4500`. `loadcoop dry` resolves the live CO-OP registry entry descriptor `0x10253d00`.
+- `netgate`: **`DAT_12804acc + 0x6c = 0x1` -- the co-op "session available" gate is OPEN offline.** This
+  REFUTES the earlier guess that an offline gate blocks the co-op branch. Handle `+0x68 = 0x1033ca00`.
+- `loadcoop go`: write `this+0x48 = 0x43521e6f` then call the loader `FUN_113409d0(this, &this+0x48,
+  descriptor, 0)` from the Frida thread. The game SURVIVES (no crash), `[this+0x48]` stays CO-OP, but
+  the current mode `[this+0x4c]` stays `0x83ae70ef` -- the mode does **not** flip. (Frida x86 rejects the
+  NativeFunction abi string `'cdecl'`; omit the abi arg to get cdecl semantics.)
+
+Verdict: the entire mode-change subsystem is present and its CO-OP code-path is statically reachable
+(gate open, CO-OP registry entry exists, loader has a CO-OP branch keyed off `[this+0x48]`). But calling
+the handler (`vtable+0x0C`) or the loader directly from the Frida thread only performs bookkeeping and
+sets a "loading" flag; the actual world/session bring-up happens later on the game's main thread and
+needs a real co-op **session object** that only a netplay join constructs. Driving ids/fields alone
+cannot fabricate that session offline. **The true remaining blocker is the netplay/session layer, not a
+mode id or a field gate.** Next lead (if pursued): construct/pre-seed the co-op session object the main
+thread's loader step expects -- a much deeper effort into the netplay code, on the critical path to any
+offline 4p attempt.
