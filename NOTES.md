@@ -2978,3 +2978,21 @@ Goal: make a co-op session load the single-player campaign world instead of the 
 Patch: overwrite the 12 bytes at `0x15345D0` with `fc3_main\0\0\0\0` (same width, cleanly null-terminated). Wrote tool `scripts/h7a_coopmap_patch.py` (subcommands `status`/`apply`/`restore`; `apply` writes in-place backup `FC3.dll.bak_h7a` and kills the game first; `restore` reverts). Applied it to the copy: FC3.dll md5 `5ff045331557…` -> `e4516487fd07…`; byte-diff vs backup is **exactly 12 bytes** (`0x15345D0..0x15345DB`), file size unchanged, `mpdlc1_idun` intact. Rollback: `python -I scripts\h7a_coopmap_patch.py restore`.
 
 Open question for the live test: the copy's `data_win32` is solo262's `patch.dat` (212 MB, vanilla-based), which contains the base campaign world assets, so `fc3_main` should be loadable; but co-op spawn/missions inside the campaign world are not guaranteed (OpenWorld220 ships its own 3.38 GB `data_win32` and instructs setting the co-op chapter to "ROOK ISLANDS"/`fc3_main`). Next = owner launches the copy and enters solo co-op to see whether the campaign world loads. If it breaks the previously-working island solo, `restore` returns it. This is a single-player step (still solo); real peers remain H7b.
+
+
+### Session 15 (2026-11-09, agent) — H7a refined: co-op loads a "coop mission" not the open world; OpenWorld 1.5 installed
+
+Result of the H7a one-string patch live test (owner): co-op did NOT load the open campaign island; a stock **co-op mission** launched instead. Diagnosis: the vanilla co-op flow is mission-based; flipping only the world string `mpdlc1_aegir`->`fc3_main` at `0x15345D0` is not enough — the open-world co-op needs the full patched FC3.dll (the two `NOP5->CALL` hooks at `0x8C406B`/`0x8C5036` and ~20 tuning float constants that the community mod ships), plus a modded `fc3_main_vistas.dat`.
+
+Data check: our copy ALREADY carries the full campaign world (`worlds\fc3_main\fc3_main.dat` 3.49 GB + all 7 language `.dat` + a stock `fc3_main_vistas.dat` 152 MB) and `multicommon` — so the campaign terrain/objects are present; what was missing was the **open-world co-op vistas** (the mod ships a 3.06 GB `fc3_main_vistas.dat`) and the patched FC3.dll logic. Conclusion: the H7a string-patch is the map *selector* but the open-world *behaviour* is the mod's patched FC3.dll + vistas, i.e. the OpenWorld mod, not a one-byte edit.
+
+Action (owner authorised adding these files): installed OpenWorld Co-op Patch 1.5 (`H:\FarCryCoop\Downloads\FarCry 3-OpenWorldCo-op(Patch1.5)`, nexus 220) over the junctioned test-bed copy `H:\FarCryCoop\TestFC3_105` via `H:\FarCryCoop\scratch\install_openworld.py`. Files laid down (md5 after -> before):
+- `bin\FC3.dll` `e4516487…`(h7a hand-patch) -> `927a1a30c51d` (mod open-world build)
+- `bin\FC3_d3d11.dll` `46bcc097…` -> `07abaf666a6d`
+- `bin\uplay_r1_loader.dll` `dacd14c07775`, `bin\ubiorbitapi_r2_loader.dll` `ba6015e566c9` (unchanged — identical to solo262's; OpenWorld 1.5 bundles the same offline co-op loader)
+- `data_win32\patch.dat` `96f74843…` -> `90482fbeee7e` (192 MB mod), `patch.fat` `850412635760` -> `2bae1147067d`
+- `data_win32\worlds\fc3_main\fc3_main_vistas.dat` `87151f18…`(152 MB stock) -> `cb5da2c2d18c` (3.06 GB mod open-world vistas), `fc3_main_vistas.fat` `a6ebc6e7` -> `858bf128a3c6`
+
+Backups of every overwritten file in `H:\FarCryCoop\scratch\backup_pre_openworld\` with `manifest.json` (bin FC3/FC3_d3d11/loaders, patch.dat `157f2d76`, vistas `87151f18`). Rollback: copy those back (or `h7a_coopmap_patch.py restore` only reverts the string-patched FC3.dll, not vistas/patch.dat). `uplay_r14.dll` stays in the launcher dir (C:) — still the offline session enabler the mod's loader needs. The mod README warns SP and vanilla co-op are unplayable while installed (fine — dedicated test bed).
+
+Next: owner launches via upc (junctioned copy) -> main menu -> create a **PRIVATE co-op session** -> set the chapter to **ROOK ISLANDS / fc3_main**, and reports whether the open campaign world loads. This is still single-player solo (H7a); real peers remain H7b.
