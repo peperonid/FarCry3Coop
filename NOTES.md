@@ -3091,3 +3091,55 @@ uplayr14_strings_rv.txt, uplayr14_apis.txt}`; supermemory `ry8sddUUPksVT5PKJv4FZ
   array). Real 2-player co-op needs an EXTERNAL transport (PLAN transport B: reimplement the Rv GameSession
   handshake + `CParty*NetMessage` in your own layer) — a netcode re-host, not a patch. Corroborates the
   solo262 author's "LAN: no".
+
+
+## Session 23 (2026-11-10): FC3 LAN/loopback co-op discovery + command-line session launch = offline path found
+
+Goal (m03668 / m04365): island-with-friends AND offline 2-4 real humans. Read-only RE of FC3.dll 1.06
+offline Ghidra project `FC3_106`. This supersedes the Session 22 "infeasible via engine transport" verdict:
+that verdict only inspected `uplay_r14.dll` (the Orbit front-end), not the engine's own
+`storm::echo` netcode. Artifacts `H:\FarCryCoop\scratch\ghidra\out\coopnet\{cli_args.txt,lan_cfg.txt,
+session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `cLjJUL76bobvfWw9AWxBPF`,
+`gpEXomdVhKJWD1TGf5ujJC`, `gX9Fyx5PTBWHhHjBfcGjZn`.
+
+- **The engine's own netcode is `storm::echo` (RendezVous), and it HAS a LAN + loopback matchmaking
+  layer.** Strings: `storm::echo::lan::BroadcastLanDiscovery2`, `storm::echo::lan::DiscoverSession`.
+- LAN config vars are registered (big init fn `FUN_111f6650` RVA 0x111f6650 via `FUN_11ab6ed0(name,ptr,
+  off,0x12)`): `LanMatchmakingReuseAddress` (name VA 0x11fb7210), `LanMatchmakingDiscoveryOnLoopbackEnable`
+  (name VA 0x11fb72e4; desc "Enable this option to discover sessions on the local machine only"),
+  `LanHostBroadcastPort` (name VA 0x11f1b2ac), `LanClientBroadcastPort` (name VA 0x11f1b2c4).
+- **Command-line session launch is first-class**, parsed in `InitDuniaEngine` @ 0x117a5750 (RVA 0x17a5750):
+  - `-dedicated` (LIT VA 0x11f0e7dc) + config var `dedicatedConfig` (`FUN_116feea0`; registered
+    `FUN_11ab6750("dedicatedConfig",0xc,0,3)`) = a headless dedicated host mode.
+  - coop/quickmatch launcher `FUN_11a8c440` (RVA 0x1a8c440) + `FUN_11a8c8b0` (RVA 0x1a8c8b0) parse via
+    strstr on the command line: `-coop` (LIT VA 0x11fb81fc), `-online` (LIT VA 0x11fb8234), `-ranked`
+    (sets a bool at launch-config +0x7e), `-sessionuid` (LIT VA 0x11fb81e4).
+  - `-client` mode REQUIRES `-login` AND `-ip` — error string "Missing -login or -ip for -client." So the
+    engine can launch as a **network client pointed straight at an arbitrary host IP**.
+  - `-offline` (LIT VA 0x11f37244 RVA 0x1f37244) read by `FUN_10fa07b0` (RVA 0xfa07b0): skips an online-only
+    session-localization op, and with `-donotloadfrontendworld` skips loading the online FRONTEND world.
+- **Architecture now clear**: FC3 imports the full Winsock set (43 funcs; `WSASocketA` @ 0x10abeb9b,
+  `WSASendTo` @ 0x10abed37, `WSARecvFrom` @ 0x10abef04 = the netcode UDP socket layer). Game data plane =
+  FC3's own UDP; `storm::echo` = LAN/loopback UDP with broadcast discovery + dedicated host + host
+  migration (`ObjectMigrationMode.SessionHostOnly`); `uplay_r14.dll` (Orbit) = ONLY the online
+  matchmaking / rendezvous / auth front-end (named-pipe `connectToNamedPipe`). The party layer FC3 uses
+  for in-game co-op is its own `CParty*` (Rv), not the Uplay Orbit party API.
+- **Rv GameSession param singletons** (names in `party106/strs.txt`; the real builders are the callers,
+  script `scripts/decompile_session_callers_106.py`): `CJoinGameSessionParam` `FUN_10207af0` (caller
+  `FUN_1188ca20`), `CCreateGameSessionParam` `FUN_10208000` (caller `FUN_11956990`),
+  `CDeleteGameSessionParam` `FUN_10207b90`. These assemble the create/join params and hand them to the Rv
+  GameSession service — the hook points to make a host/join without the service.
+- **Revised offline-2-4 plan (much lighter than a netcode re-host)**: the working solo262/1.05 mod already
+  boots FC3 into a co-op-ruleset session offline (loads the 9 scubrah missions). The remaining delta is
+  making a SECOND instance discover and connect to the first over the engine's OWN loopback LAN path:
+  set `LanMatchmakingDiscoveryOnLoopbackEnable=1`, `LanMatchmakingReuseAddress=1`,
+  `LanHostBroadcastPort`/`LanClientBroadcastPort`, and either use `-coop` / `-client -ip 127.0.0.1` or
+  detour the Rv GameSession create/join callers so they carry a loopback endpoint. This is a
+  **session-establishment shim** (matches PLAN Transport B), not a protocol rewrite.
+- **Two open blockers** (decide the shim shape):
+  1. Does `storm::echo` join enforce a service-minted `storm::echo::SessionTicket`
+     (`SessionTicketRequestAttachment`, `inEvent::RequestJoinSessionRefId`)? If the data plane accepts a
+     peer that never got a ticket, the shim only needs to fake discovery + roster; if it validates the
+     ticket, the shim must forge or stub the ticket path.
+  2. Is the `WSASendTo`/`WSARecvFrom` payload encrypted/signed (RC4/AES/HMAC/seed)? The `FC3_105` Ghidra
+     build (`build_105.bat`) is generating for a string/xref pass on the send site.

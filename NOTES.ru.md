@@ -2806,3 +2806,58 @@ supermemory `ry8sddUUPksVT5PKJv4FZs`):
   достоверного массива участников провайдера). Настоящему второму человеку нужен внешний транспорт
   (транспорт B в PLAN): свой слой, заново реализующий рукопожатие Rv `GameSession` /
   `CParty*NetMessage` — это перезапуск сети, а не патч. (Также подтверждает «LAN: нет» от автора solo262.)
+
+
+## Сессия 23 (2026-11-10): LAN/loopback-обиск коопы FC3 + запуск сессии из командной строки = найден офлайн-путь
+
+Цель (m03668 / m04365): остров с друзьями И офлайн 2-4 живых человека. Реверс FC3.dll 1.06 только на
+чтение, офлайн-проект Ghidra `FC3_106`. Это отменяет вердикт сессии 22 «офлайн недостижим транспортом
+движка»: тот вердикт смотрел только `uplay_r14.dll` (фронтенд Orbit), а не собственный сетевой код движка
+`storm::echo`. Артефакты `H:\FarCryCoop\scratch\ghidra\out\coopnet\{cli_args.txt,lan_cfg.txt,
+session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `cLjJUL76bobvfWw9AWxBPF`,
+`gpEXomdVhKJWD1TGf5ujJC`, `gX9Fyx5PTBWHhHjBfcGjZn`.
+
+- **Сетевой код самого движка — `storm::echo` (RendezVous), и в нём есть слой LAN + loopback-матчмейкинга.**
+  Строки: `storm::echo::lan::BroadcastLanDiscovery2`, `storm::echo::lan::DiscoverSession`.
+- LAN-переменные конфигурации регистрируются (большая инициализация `FUN_111f6650` RVA 0x111f6650 через
+  `FUN_11ab6ed0(name,ptr,off,0x12)`): `LanMatchmakingReuseAddress` (имя VA 0x11fb7210),
+  `LanMatchmakingDiscoveryOnLoopbackEnable` (имя VA 0x11fb72e4; описание «включите, чтобы находить сессии
+  только на этой машине»), `LanHostBroadcastPort` (имя VA 0x11f1b2ac), `LanClientBroadcastPort`
+  (имя VA 0x11f1b2c4).
+- **Запуск сессии из командной строки — штатный**, разбирается в `InitDuniaEngine` @ 0x117a5750
+  (RVA 0x17a5750):
+  - `-dedicated` (лит. VA 0x11f0e7dc) + переменная `dedicatedConfig` (`FUN_116feea0`; регистрация
+    `FUN_11ab6750("dedicatedConfig",0xc,0,3)`) = режим головless-выделенного хоста.
+  - лаунчер коопы/быстрого матча `FUN_11a8c440` (RVA 0x1a8c440) + `FUN_11a8c8b0` (RVA 0x1a8c8b0) читают
+    через strstr строку команд: `-coop` (VA 0x11fb81fc), `-online` (VA 0x11fb8234), `-ranked` (ставит bool
+    в +0x7e конфигурации запуска), `-sessionuid` (VA 0x11fb81e4).
+  - режим `-client` ТРЕБУЕТ `-login` И `-ip` — строка ошибки «Missing -login or -ip for -client.». То есть
+    движок умеет запускаться **сетевым клиентом прямо на указанный IP хоста**.
+  - `-offline` (лит. VA 0x11f37244 RVA 0x1f37244) читает `FUN_10fa07b0` (RVA 0xfa07b0): пропускает
+    онлайн-только операцию локализации сессии, а вместе с `-donotloadfrontendworld` — загрузку онлайн
+    FRONTEND-мира.
+- **Архитектура теперь ясна**: FC3 импортирует весь набор Winsock (43 функции; `WSASocketA` @ 0x10abeb9b,
+  `WSASendTo` @ 0x10abed37, `WSARecvFrom` @ 0x10abef04 = сокетный слой неткода). Плоскость данных игры =
+  собственный UDP движка; `storm::echo` = LAN/loopback UDP с broadcast-обиском + выделенный хост +
+  миграция хоста (`ObjectMigrationMode.SessionHostOnly`); `uplay_r14.dll` (Orbit) = ТОЛЬКО онлайн-
+  матчмейкинг / rendezvous / авторизация (именованный канал `connectToNamedPipe`). Партийный слой, который
+  FC3 использует для игровой коопы, — это его собственный `CParty*` (Rv), а не Uplay Orbit party API.
+- **Синглтоны параметров Rv GameSession** (имена в `party106/strs.txt`; настоящие сборщики — вызывающие,
+  скрипт `scripts/decompile_session_callers_106.py`): `CJoinGameSessionParam` `FUN_10207af0` (вызывающий
+  `FUN_1188ca20`), `CCreateGameSessionParam` `FUN_10208000` (вызывающий `FUN_11956990`),
+  `CDeleteGameSessionParam` `FUN_10207b90`. Они собирают параметры создания/входа и отдают службе Rv
+  GameSession — это точки перехвата, чтобы создать хост/вход без службы.
+- **Пересмотренный план офлайн-2-4 (намного легче, чем перезапуск неткода)**: рабочий билд solo262/1.05
+  уже загружает FC3 в сессию с правилами коопы офлайн (9 миссий scubrah). Остаток — заставить ВТОРОЙ
+  экземпляр найти и подключиться к первому через собственный loopback-LAN-путь движка: выставить
+  `LanMatchmakingDiscoveryOnLoopbackEnable=1`, `LanMatchmakingReuseAddress=1`,
+  `LanHostBroadcastPort`/`LanClientBroadcastPort`, и либо использовать `-coop` / `-client -ip 127.0.0.1`,
+  либо перехватить вызывающих create/join Rv GameSession, чтобы они несли loopback-адрес. Это
+  **шим установления сессии** (совпадает с транспортом B в PLAN), а не переписывание протокола.
+- **Два открытых блокера** (определяют форму шима):
+  1. Проверяет ли вход `storm::echo` сервисный `storm::echo::SessionTicket`
+     (`SessionTicketRequestAttachment`, `inEvent::RequestJoinSessionRefId`)? Если плоскость данных принимает
+     пира без тикета, шиму нужно подделать только обиск + ростер; если тикет проверяется — шим должен
+     подделать или заглушить путь тикета.
+  2. Зашифрован/подписан ли полезный груз `WSASendTo`/`WSARecvFrom` (RC4/AES/HMAC/seed)? Сборка Ghidra
+     `FC3_105` (`build_105.bat`) генерируется ради прохода строк/ссылок по месту отправки.
