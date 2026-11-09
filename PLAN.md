@@ -227,15 +227,18 @@ Confirmed offline-relevant primitives (FC3_106, RVA = VA - 0x10000000; map to 1.
   frontend world + online-only session localization.
 - Winsock fully imported (43 funcs): `WSASocketA` 0x10abeb9b, `WSASendTo` 0x10abed37, `WSARecvFrom`
   0x10abef04 = FC3's own UDP data plane. Orbit named-pipe is only matchmaking/rendezvous/auth.
-- Rv GameSession param builders (hook points): `CJoinGameSessionParam` getter `FUN_10207af0` (caller
-  `FUN_1188ca20`), `CCreateGameSessionParam` getter `FUN_10208000` (caller `FUN_11956990`).
+- Rv GameSession param **singletons** (verified): `CJoinGameSessionParam` getter `FUN_10207af0`,
+  `CCreateGameSessionParam` getter `FUN_10208000`, `CDeleteGameSessionParam` getter `FUN_10207b90`. Their
+  caller/builder bodies are NOT yet decompiled, so the concrete host/join hook points are still TBD (a
+  Java/REA pass over FC3_106 + FC3s105 will pin them; the earlier draft's `FUN_1188ca20` was erroneous).
 
 Revised path (replaces TB1-TB4 severity):
 - S1 — Live loopback probe: with the working solo262/1.05 mod (already boots a co-op-ruleset session
   offline), set `LanMatchmakingDiscoveryOnLoopbackEnable=1` + `LanMatchmakingReuseAddress=1` +
   `LanHostBroadcastPort`/`LanClientBroadcastPort`, and see whether a second instance discovers/joins the
   first offline. Cheap, decisive, no code yet.
-- S2 — If discovery works but join is gated: detour `FUN_1188ca20` (join-param builder) so the session
+- S2 — If discovery works but join is gated: detour the join-param builder (address TBD via a Java/REA
+  pass over FC3_106/FC3s105; an earlier draft's `FUN_1188ca20` was erroneous — 0 occurrences) so the session
   endpoint is `127.0.0.1` instead of the service relay. If join needs a `SessionTicket`, stub the ticket
   check (`SessionTicketRequestAttachment` path).
 - S3 — Drive a co-op campaign mission across two instances; fix desyncs with hub sync tools.

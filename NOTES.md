@@ -3124,11 +3124,17 @@ session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `
   migration (`ObjectMigrationMode.SessionHostOnly`); `uplay_r14.dll` (Orbit) = ONLY the online
   matchmaking / rendezvous / auth front-end (named-pipe `connectToNamedPipe`). The party layer FC3 uses
   for in-game co-op is its own `CParty*` (Rv), not the Uplay Orbit party API.
-- **Rv GameSession param singletons** (names in `party106/strs.txt`; the real builders are the callers,
-  script `scripts/decompile_session_callers_106.py`): `CJoinGameSessionParam` `FUN_10207af0` (caller
-  `FUN_1188ca20`), `CCreateGameSessionParam` `FUN_10208000` (caller `FUN_11956990`),
-  `CDeleteGameSessionParam` `FUN_10207b90`. These assemble the create/join params and hand them to the Rv
-  GameSession service — the hook points to make a host/join without the service.
+- **Rv GameSession param singletons** (verified in `party106/final3.txt` + `party106/strs.txt`, FC3_106):
+  `CJoinGameSessionParam` singleton getter `FUN_10207af0` (returns `&DAT_12859564`, init-flag
+  `DAT_12859560`), `CCreateGameSessionParam` `FUN_10208000` (→ `&DAT_12859464`/`DAT_12859460`; a caller is
+  `FUN_11956990` site 119569a3), `CDeleteGameSessionParam` `FUN_10207b90` (caller `FUN_11955f30`). These
+  singletons return a param object assembled into the Rv GameSession service. The **caller bodies of the
+  join/create param getters are NOT yet decompiled** (the headless `decompile_session_callers_106.py` runs
+  all failed: wrong project dir + PyGhidra; no `callers.txt` was produced). So the concrete host/join hook
+  points are still unverified. Correct approach for next pass: a Java Ghidra script under `-noanalysis`
+  (Jython/PyGhidra `currentProgram` does not bind in 12.1.4) or the REA MCP over the FC3_106 / FC3s105
+  projects. (Correction 2026-11-10: an earlier draft here named join-caller `FUN_1188ca20`; that address
+  has 0 occurrences in any real artifact and was erroneous.)
 - **Revised offline-2-4 plan (much lighter than a netcode re-host)**: the working solo262/1.05 mod already
   boots FC3 into a co-op-ruleset session offline (loads the 9 scubrah missions). The remaining delta is
   making a SECOND instance discover and connect to the first over the engine's OWN loopback LAN path:
@@ -3141,5 +3147,7 @@ session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `
      (`SessionTicketRequestAttachment`, `inEvent::RequestJoinSessionRefId`)? If the data plane accepts a
      peer that never got a ticket, the shim only needs to fake discovery + roster; if it validates the
      ticket, the shim must forge or stub the ticket path.
-  2. Is the `WSASendTo`/`WSARecvFrom` payload encrypted/signed (RC4/AES/HMAC/seed)? The `FC3_105` Ghidra
-     build (`build_105.bat`) is generating for a string/xref pass on the send site.
+  2. Is the `WSASendTo`/`WSARecvFrom` payload encrypted/signed (RC4/AES/HMAC/seed)? The 1.06 send site is
+     in FC3_106 (already analyzed); a string/xref pass on the send region + on the 1.05 `FC3s105` project
+     is the next probe. (No separate `FC3_105` headless build exists — that earlier note was erroneous;
+     the real 1.05 Ghidra project is `H:\FarCryCoop\ghidra_owcoop\FC3s105`.)
