@@ -95,3 +95,36 @@ Each phase ends with a check in game on one PC, two windows, written into NOTES.
 shoot each other. Phase 4: the first three story missions together. Phase 5: the Vaas intro
 cutscene on all players. Phase 7: a relic taken by a joined player counts and disappears for the
 host. Phase 8: 4 windows, one full mission. Phase 9: join through a Steam invite.
+
+---
+
+## Critical path v2 (agent, updated 2026-11-09)
+
+Agent addendum per the owner's standing instruction to keep PLAN current; the numbered plan above
+is unchanged. Authoritative evidence: `NOTES.md`.
+
+**What the read-only reverse engineering established (no code shipped):**
+
+1. The offline co-op host is the game's own Uplay / RendezVous session path. The solo-262
+   `FC3.dll` is byte-identical to stock; it unlocks offline co-op with loader shims
+   (`uplay_r1_loader.dll`, `ubiorbitapi_r2_loader.dll`, `upc_r1_loader.dll`) plus a data patch.
+2. Offline co-op is already selectable on 1.05 and 1.06. No session-gate or version blocker is left.
+3. Loading the island as a co-op map is a DATA problem (patch.dat world-asset expansion plus the
+   mod's small one-shot content-spawn hooks), not a hosting hook. The mod's `FC3.dll` code is a
+   content spawner (`FUN_108c4b09`) plus count bumps; it does not create a host session.
+4. The one hard problem left for 2-4 players OFFLINE is the native HOST path: FC3's party
+   controller (≈ `0x10620400`-`0x10623500`) drives `UPLAY_PARTY_*` (`SetGameSession` declares the
+   host, `GetFullMemberList` enumerates peers, `IsPartyLeader` gates the host, `SetGuest` marks
+   remotes). The data plane is the RendezVous stack inside `uplay_r14.dll`.
+
+**New critical path (offline-host prototype), pending the owner's go for writing code:**
+
+- A. Map offline, in Ghidra FC3_106, the exact Rv / party call flow a second peer must satisfy.
+- B. Prototype a shim that reports a synthesized second party member
+  (`UPLAY_PARTY_GetFullMemberList` thunk `0x10CFD84C`, `UPLAY_PARTY_IsPartyLeader` thunk `0x10CFD85E`)
+  so the engine believes it hosts a two-player session.
+- C. Only if the RendezVous data plane will carry a second OFFLINE instance with no Ubisoft relay,
+  run two game windows (host + joined) on one loopback / LAN.
+
+Until B/C, stay read-only: the engine's co-op session transport is online-only by the mod author's
+own report (LAN = no), so offline multiplayer needs the host path, not more online joining.
