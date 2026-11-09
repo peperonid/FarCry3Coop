@@ -175,3 +175,35 @@ service-bound only — zero LAN/loopback/listen/socket/p2p primitives, single `c
 achievable**. Reachable offline: single-instance multi-slot (`local/scratch/multislot_design.md`). True
 2-4 humans requires external netcode (transport B: reimplement the Rv GameSession + `CParty*NetMessage`
 handshake in a custom layer) — a re-hosting project, decide scope with the owner.
+
+## 7. Transport B architecture — 2-4 human campaign co-op (session 23, REVISED the feasibility)
+
+**Key finding that reopens the path:** FC3.dll imports the **full Winsock API directly** (ws2_32 +
+wsock32, 43 funcs: socket/bind/connect/listen/accept/send/recv/sendto/recvfrom/WSASendTo/WSARecvFrom/
+select/getaddrinfo/inet_addr/...). So the co-op **gameplay DATA runs over FC3's own raw sockets**
+(expected UDP). Only **session establishment / roster** is service-bound (`uplay_r14.dll`,
+`connectToNamedPipe`). Classic split: matchmaking over the service, gameplay P2P over the game's UDP.
+
+Therefore offline 2-4 humans is NOT a full netcode rehost. It reduces to **Transport B = a
+session-establishment shim**: make each instance believe it is in the same session with peers at
+given LAN addresses, then let the game's own socket netcode carry the actual co-op sync. This is a
+MUCH smaller surface than reimplementing Rv/Orbit messaging.
+
+Staged (each stage is a gate; do not proceed if a gate fails):
+- TB1 — Map the game socket (in progress, delegate del_mw9o18i4_l0dn): socket type (UDP?), the
+  send/recv pump, the bind port, and above all **where the peer endpoint (IP+port) comes from**
+  (member struct? getaddrinfo of an Rv hostname string? a config/launch IP? LAN broadcast?), and
+  whether the wire is **encrypted/authenticated** with a service-minted key. The whole plan hinges on
+  these two answers.
+- TB2 — If the endpoint is data we can supply and the wire is not service-keyed: a shim (detour the
+  Orbit CGameSessionAPI vtable + the peer-address source) that reports a 2/4-member roster whose
+  addresses point at the real LAN peers; raise MaxPartySize (cfg 0xa88). Verify two offline instances
+  see each other and one joins.
+- TB3 — Drive a co-op campaign mission across the two instances; measure what needs a connected peer
+  vs. a listed member; fix desyncs with the hub sync tools (chaos/ownership/animcheck).
+- TB4 — Robustness: NAT is out of scope (LAN/loopback first); add reconnect, host migration only if
+  the engine already has a path for it.
+
+Blockers that would downgrade this: TB1 shows the game socket is keyed by a service-minted secret,
+or the peer endpoint is opaque service data we cannot synthesize. Both would push us back toward a
+deeper Orbit/Rv protocol reimplementation. Decide after TB1.
