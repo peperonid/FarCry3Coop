@@ -126,6 +126,16 @@ prints every registered mode entry (`id@+0x20`, `name@+0xC`), to check offline w
 (reuses the analyzed `FC3_106` project, no re-analysis).
 Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
 
+## Co-op world / patching (offline)
+
+- `h7a_coopmap_patch.py` — offline co-op map selector patch for the 1.05 `FC3.dll`. Rewrites the
+  co-op startup world string `mpdlc1_aegir` -> `fc3_main` at file offset `0x15345D0` (12 bytes,
+  byte-minimal) so a co-op session loads the single-player campaign world instead of the stock co-op
+  island; the same single change as the community mod OpenWorld220 (verified at the same offset).
+  Subcommands `status` / `apply` / `restore`; `apply` first writes an in-place backup `FC3.dll.bak_h7a`
+  and `restore` reverts. Targets only `H:\FarCryCoop\TestFC3_105`. Vanilla 1.05 md5 `5ff04533…` ->
+  patched `e4516487…`. The other co-op string `mpdlc1_idun` (at `0x15A2568`) is left untouched.
+
 ## Caches and ignored files
 
 `*_dis_cache.json` (disassembly cache), `__pycache__/`, `../Temp/` (agent scratch) and
