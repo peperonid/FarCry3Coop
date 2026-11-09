@@ -3151,3 +3151,44 @@ session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `
      in FC3_106 (already analyzed); a string/xref pass on the send region + on the 1.05 `FC3s105` project
      is the next probe. (No separate `FC3_105` headless build exists — that earlier note was erroneous;
      the real 1.05 Ghidra project is `H:\FarCryCoop\ghidra_owcoop\FC3s105`.)
+
+
+### Session 24 — storm::echo ticket + LAN join handshake DECOMPILED (grounded, FC3_106 Java headless)
+
+Real output of the Java headless pass `CoopOfflineV2.java` (delegate `del_mw9rdojr_zz1x`, completed;
+artifacts `H:\FarCryCoop\scratch\ghidra\out\coop_offline_v1\{dumps.txt,dumps2.txt,rvjobs.txt}` and
+strings `out\coopnet\*`). This replaces the earlier unverified join-caller claims and answers blocker #1.
+
+- **S5 — the session ticket/join flow is a storm::echo in-process EVENT REGISTRY, all LAN-scoped** (each
+  handler registered via `FUN_1008c600("<event name>", id)`; the 36-byte `FUN_1070a910`-family funcs each
+  register one event):
+  - `storm::echo::session::inEvent::RequestTicketSessionRefId`
+  - `storm::echo::session::inEvent::AcceptTicketRequest`
+  - `storm::echo::session::inEvent::DistributeTicket`
+  - `storm::echo::session::inEvent::RefuseTicketRequest`
+  - `storm::echo::session::internal::inEvent::ReceiveTicketRequest`
+  - `storm::echo::session::internal::inEvent::ReceiveAcceptTicketRequest`
+  - `storm::echo::SessionTicketRequestAttachment`, `storm::echo::SessionTicket`
+  - `storm::echo::player::inEvent::RequestJoinSessionRefId`
+  - `storm::echo::lan::inEvent::DiscoverSession`
+  - `storm::echo::lan::inEvent::internal::BroadcastLanDiscovery2`
+- **Read of blocker #1 (SessionTicket): STRONG evidence the ticket is HOST-issued, not service-minted.**
+  The flow is a peer→host handshake carried on the LAN event channel: `DiscoverSession` →
+  `RequestJoinSessionRefId` → `RequestTicket` → host side `ReceiveTicketRequest` → `AcceptTicketRequest` →
+  `DistributeTicket`. There is no service/Orbit symbol in this path — the trust root is the host in
+  storm::echo, so the ticket path does **not** by itself require Ubisoft. (One confirmation pass pending:
+  read the `DistributeTicket`/`ReceiveTicketRequest` handler bodies to prove the host, not the relay, is
+  the trust root before calling it settled.)
+- **PRUDP confirmed** as the wire protocol: the socket pump `FUN_10ac3340` (size 865) drives send via
+  `FUN_10abec30` and receive via `FUN_10abedb0` (both take a socket-handle struct), and the transport is
+  tagged by the literal `prudp:/` (`FUN_10ad7190("prudp:/")`). PRUDP = Ubisoft's UDP reliability layer over
+  the raw Winsock layer (FC3sock), i.e. the data plane is PRUDP-over-UDP, not raw custom UDP.
+- **S4 result-handler vtables**: `createResultHandlerTable @ 0x11f57c14`, `joinResultHandlerTable @
+  0x11f56dac` — the per-result callback tables the GameSession service dispatches create/join outcomes
+  through; these are concrete detour surfaces for a session shim (better candidates than the singleton
+  getters).
+- **Netcode crypto (from the same run's `crypto_probe.py` over raw FC3.dll bytes)**: NO AES/SHA1/MD5/
+  SHA256/Blowfish/CRC32c signatures; only CRC32 tables (×10), xxhash32 primes (×27), TEA delta (×2).
+  Consistent with PRUDP (which uses XOR + Adler CRC integrity, not bulk cipher) → the payload is **not
+  bulk-encrypted**, but PRUDP still needs its connection handshake replicated. This reframes blocker #2:
+  the question is now "implement/be inside PRUDP", not "defeat AES".

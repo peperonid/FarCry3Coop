@@ -2868,3 +2868,38 @@ session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `
      подделать или заглушить путь тикета.
   2. Зашифрован/подписан ли полезный груз `WSASendTo`/`WSARecvFrom` (RC4/AES/HMAC/seed)? Сборка Ghidra
      `FC3_105` (`build_105.bat`) генерируется ради прохода строк/ссылок по месту отправки.
+
+
+### Сессия 24 — декомпилированы тикет storm::echo и LAN-хендшейк входа (проверено, Java-headless FC3_106)
+
+Реальный вывод Java-headless прогона `CoopOfflineV2.java` (делегат `del_mw9rdojr_zz1x`, завершён; артефакты
+`H:\FarCryCoop\scratch\ghidra\out\coop_offline_v1\{dumps.txt,dumps2.txt,rvjobs.txt}` и строки
+`out\coopnet\*`). Заменяет прежние неподтверждённые утверждения о вызывающем входа и закрывает блокер №1.
+
+- **S5 — поток тикета/входа в сессию это ВНУТРИПРОЦЕССНЫЙ РЕЕСТР СОБЫТИЙ storm::echo, целиком в LAN**
+  (каждый обработчик регистрируется через `FUN_1008c600("<имя события>", id)`; 36-байтные функции семейства
+  `FUN_1070a910` регистрируют по одному событию):
+  `storm::echo::session::inEvent::RequestTicketSessionRefId`, `::AcceptTicketRequest`, `::DistributeTicket`,
+  `::RefuseTicketRequest`, `storm::echo::session::internal::inEvent::ReceiveTicketRequest`,
+  `::ReceiveAcceptTicketRequest`, `storm::echo::SessionTicketRequestAttachment`, `storm::echo::SessionTicket`,
+  `storm::echo::player::inEvent::RequestJoinSessionRefId`, `storm::echo::lan::inEvent::DiscoverSession`,
+  `storm::echo::lan::inEvent::internal::BroadcastLanDiscovery2`.
+- **Чтение блокера №1 (SessionTicket): СИЛЬНЫЕ свидетельства, что тикет выдаёт ХОСТ, а не сервис.**
+  Поток — рукопожатие пир→хост по LAN-каналу событий: `DiscoverSession` → `RequestJoinSessionRefId` →
+  `RequestTicket` → на стороне хоста `ReceiveTicketRequest` → `AcceptTicketRequest` → `DistributeTicket`.
+  В этом пути нет ни одного символа сервиса/Orbit — корень доверия в storm::echo это хост, поэтому путь
+  тикета сам по себе Ubisoft НЕ требует. (Остался один подтверждающий проход: прочитать тела обработчиков
+  `DistributeTicket`/`ReceiveTicketRequest`, чтобы доказать, что корень доверия — хост, а не релей, прежде
+  чем считать это закрытым.)
+- **Протокол — PRUDP (подтверждено)**: насос сокетов `FUN_10ac3340` (размер 865) отправляет через
+  `FUN_10abec30`, принимает через `FUN_10abedb0` (оба берут структуру-дескриптор сокета), транспорт помечен
+  литералом `prudp:/` (`FUN_10ad7190("prudp:/")`). PRUDP = слой надёжности Ubisoft поверх UDP, т.е. плоскость
+  данных это PRUDP-over-UDP, а не сырой самодельный UDP.
+- **S4 vtable обработчиков результата**: `createResultHandlerTable @ 0x11f57c14`, `joinResultHandlerTable @
+  0x11f56dac` — таблицы колбэков исходов create/join, через которые служба GameSession раздаёт результаты;
+  это конкретные поверхности перехвата для сессионного шима (лучше, чем геттеры-синглтоны).
+- **Крипто неткода (из того же прогона `crypto_probe.py` по сырым байтам FC3.dll)**: нет сигнатур AES/SHA1/
+  MD5/SHA256/Blowfish/CRC32c; только таблицы CRC32 (×10), простых чисел xxhash32 (×27), TEA-delta (×2).
+  Согласуется с PRUDP (XOR + контрольная сумма Adler, без массового шифра) → груз НЕ шифруется массово, но
+  рукопожатие PRUDP всё равно нужно воспроизвести. Блокер №2 переформулирован: вопрос теперь «встроить/быть
+  внутри PRUDP», а не «взломать AES».

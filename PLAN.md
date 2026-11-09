@@ -237,12 +237,17 @@ Revised path (replaces TB1-TB4 severity):
   offline), set `LanMatchmakingDiscoveryOnLoopbackEnable=1` + `LanMatchmakingReuseAddress=1` +
   `LanHostBroadcastPort`/`LanClientBroadcastPort`, and see whether a second instance discovers/joins the
   first offline. Cheap, decisive, no code yet.
-- S2 — If discovery works but join is gated: detour the join-param builder (address TBD via a Java/REA
-  pass over FC3_106/FC3s105; an earlier draft's `FUN_1188ca20` was erroneous — 0 occurrences) so the session
-  endpoint is `127.0.0.1` instead of the service relay. If join needs a `SessionTicket`, stub the ticket
-  check (`SessionTicketRequestAttachment` path).
+- S2 — If discovery works but join is gated: the concrete detour surfaces are now the GameSession result
+  handler tables `joinResultHandlerTable @ 0x11f56dac` / `createResultHandlerTable @ 0x11f57c14` (verified,
+  PLAN Session-24), NOT the singleton getters. The join handshake is a LAN storm::echo event flow
+  (`DiscoverSession` → `RequestJoinSessionRefId` → `RequestTicket` → host `ReceiveTicketRequest` →
+  `AcceptTicketRequest` → `DistributeTicket`) over **PRUDP** (`prudp:/`, pump `FUN_10ac3340` → send
+  `FUN_10abec30` / recv `FUN_10abedb0`).
 - S3 — Drive a co-op campaign mission across two instances; fix desyncs with hub sync tools.
 
-Blockers still to settle (they shape S2, they no longer gate feasibility):
-1. Does `storm::echo` join validate a service-minted `SessionTicket`? (stub-able if yes)
-2. Is the UDP payload encrypted/signed? (affects whether a raw shim or a detour-inside-FC3 is needed)
+Blockers (updated by Session-24 evidence):
+1. RESOLVED toward feasible: `SessionTicket` is **host-issued** on the LAN event channel
+   (`DistributeTicket`/`ReceiveTicketRequest`), no Orbit/service symbol in the path → not Ubisoft-gated.
+   Remaining: confirm by reading those two handler bodies (one pass).
+2. REFRAMED: payload is **not bulk-encrypted** (no AES/SHA/MD5/Blowfish sigs; PRUDP = XOR+Adler CRC). The
+   work is to **be inside/be adjacent to PRUDP** (replicate its connect handshake), not to defeat a cipher.
