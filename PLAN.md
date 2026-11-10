@@ -251,3 +251,41 @@ Blockers (updated by Session-24 evidence):
    Remaining: confirm by reading those two handler bodies (one pass).
 2. REFRAMED: payload is **not bulk-encrypted** (no AES/SHA/MD5/Blowfish sigs; PRUDP = XOR+Adler CRC). The
    work is to **be inside/be adjacent to PRUDP** (replicate its connect handshake), not to defeat a cipher.
+
+
+## Transport phase 2 — over-the-internet relay (HXCoop / Steam Spacewar AppID 480) — agent, 2026-11-11
+
+Scope: let 2-4 friends play together over the internet with **no port forwarding / no NAT config**. This is
+*phase 2 only* and is **not** the current critical path. Phase 1 (offline + LAN, via the engine's own
+`storm::echo` LAN/loopback) is unaffected by, and independent of, this.
+
+**Prerequisite (hard blocker first).** The relay bridges an already-running session's UDP; it does not create
+a session. It only becomes usable once phase 1 has FC3 opening a real co-op session with a 2-4 roster over
+loopback/LAN (the session-glue work, Sessions 27-28). Until then there is nothing to relay. So the transport
+decision is: **phase 1 transport = native `storm::echo` LAN/loopback; this relay is layered on top for
+phase 2.** The Spacewar relay is NOT a way around the session/party blocker - it sits one layer below it.
+
+**Pattern (hub `playbook/networking-steam-spacewar.md`, "A relay instead of engine code" / HXCoop):**
+
+- **Host machine:** one local UDP socket per remote player, `connect()`ed to the game's port on `127.0.0.1`
+  (the `storm::echo` data ports 9000-9003 / `LanHostBroadcastPort` 9004 in `defaultnetworkconfig.xml`).
+  A friend's Steam messages are written out of that player's socket, and whatever the game answers on it goes
+  back to that player. The game sees every friend as a separate `127.0.0.1` client.
+- **Client machine:** the helper binds a free `127.0.0.1` port, the game's `storm::echo` client connects to it,
+  and the helper forwards everything to the host's SteamID.
+- **Transport:** `ISteamNetworkingMessages` under **AppID 480 (Spacewar)** - a standalone helper exe next to the
+  game loads `steam_api.dll` (FC3 is 32-bit, so `Windows-x86/steam_api.dll`) with `steam_appid.txt` = `480`.
+  FC3 itself is never made a Steam game and ships unmodified. Send game packets **unreliable with NoNagle**
+  (`storm::echo`/PRUDP has its own reliability); keep-alive and goodbye on channel 1 as reliable messages.
+- **Authorization gate:** only lobby members get through - before forwarding a new peer's traffic into the local
+  game port, check their SteamID against the lobby (`GetNumLobbyMembers` / `GetLobbyMemberByIndex`).
+- **One-PC testing:** use the hub's mock `steam_api.dll` (~400 lines, `steamlink/mock`) so two helper instances
+  + two game instances can be exercised without two real Steam accounts.
+
+**Known trade-offs (accepted for a friend-shared mod):** both players show as "playing Spacewar"; AppID-480
+lobbies are visible worldwide unless filtered by lobby data; cannot ship through the Steam store this way.
+
+**Effort / order:** a standalone helper exe (~300 lines C) + the mock; fully independent of FC3's code once
+phase-1 loopback co-op works on one PC. Sequence: (1) prove 2-4 humans on one PC via `storm::echo` loopback
+(`LanMatchmakingDiscoveryOnLoopbackEnable=1`), (2) put the helper pair between them and test through the mock,
+(3) two real Steam accounts over Spacewar.

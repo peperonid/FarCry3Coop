@@ -3427,3 +3427,22 @@ Artifacts: `src/uplay_proxy/{uplay_proxy.cpp,uplay_proxy.def}` (regenerated), `s
   FC3 is not a Steam app at runtime (`no steam_api.dll`, runs via the Ubisoft Connect loader), and the relay
   only bridges a session the game must first open - which is this session-glue problem, one layer below. The
   HXCoop relay stays a documented phase-2 (over-the-internet) option.
+
+
+### Session 28b (same day) — runtime addendum: fake mechanism PROVEN; live menu-nav needs the owner's run
+
+- **Fake path verified at runtime** (proxytest, `FC3COOP_FAKE_PARTY=1`): `UPLAY_USER_IsConnected` logs
+  `[FAKE] ret=1 (0x1)` (the gate short-circuits) while `UPLAY_Init` forwards normally (`ret=0`, no `[FAKE]`).
+  So `g_fakeval` + `g_fake` + the `[FAKE]` log marker all work; the earlier proxytest "hang" was only the real
+  loader's orbit/service worker threads outliving `main` after the fake returned, not a fake-path failure.
+- **A direct game launch with `fake=1` reaches the loader but not a menu.** Launching `bin\farcry3.exe` with
+  the env set: the stub re-execs to `farcry3_d3d11.exe`, the proxy attaches `fake=1`, and the boot trace is the
+  usual `UPLAY_Init` + `UPLAY_PARTY_Init` only - but no window is created (the direct-launch path does not
+  complete the DRM/Uplay handshake without the `upc Play` + junction flow of Session 13b), so there is no menu
+  to drive and the gate functions (which fire on co-op-menu navigation) are never reached. The process was then
+  reaped; no orphan left.
+- **What this leaves for the owner (the actual hypothesis test).** Run the working interactive boot
+  (`upc Play` via the junction on `TestFC3_105`) with `FC3COOP_FAKE_PARTY=1` set for the game process, then
+  open the co-op submenu and try host/join. Watch `bin\uplay_api.log`: the gates should now log `[FAKE] ret=1`,
+  and the open question is whether the previously-dead co-op entries (`ВМЕСТЕ ВЕ СЕТИ`) become responsive. If
+  they do, the next fake to add is the member list + a `SetGameSession` success (needs the struct layout).
