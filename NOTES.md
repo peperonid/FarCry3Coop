@@ -3497,3 +3497,31 @@ probe `scripts/probe_rv_party.py`). These are 1.06 addresses (the 1.05 `FC3.dll`
 
 Next (design): build the roster detour at `FUN_11218480` + the `0x10070590` member-object getter, and verify the
 member-object field layout by reading what `FUN_11273650`'s downstream consumes, before writing any fake.
+
+
+### Session 28e (same day) - roster data structure cracked: a std::map keyed by 64-bit member id; join-gate is virtual
+
+Follow-up to 28d (`scripts/probe_rv_detour.py`, xref + aligned disasm over the 1.06 `FC3.dll` md5 `5742de2a`).
+
+- **The trusted roster is a `std::map` keyed by a 64-bit member id.** The getter `0x10070590` walks a
+  red-black tree: node child links at `[node+0x00]`/`[node+0x04]`, the key's low dword at `[node+0x10]` and high
+  at `[node+0x14]`; on miss it returns `edi` (the map end/`this`). So populating the roster for a fake 2-4 party
+  means inserting map nodes keyed by member id, not writing a flat array. `FUN_11273650` then reads each member
+  object's fields via vtable slot `[+0x2c]`, tests flag `byte[+0xec]&8` and `[+0x64]`.
+- **The join gate `FUN_11218480` is a virtual method** (0 direct `call` xrefs; it ends `ret 0x14`). Hook it via
+  its vtable slot, or hook its consumers instead.
+- **The co-op roster/join controller block is `~0x11218480..0x112185xx`.** `FUN_11273650` (trusted list) has
+  exactly 2 callers - `0x11218506` (this block) and `0x1127422a` (deeper in the controller); `FUN_103660e0`
+  (member query) has 1 caller - `0x112184dc` (same block). That block is where host/join resolves the party.
+- **The member query `FUN_103660e0` is anchored on a service singleton** at globals `0x12854784` (object) and
+  `0x1285478c` (compare value); it calls the object's vtable `[+0x4]`, checks `[+0x4]==1` and `[+0x8]==0x1285478c`.
+  That singleton is a strong detour anchor: forcing/observing it may be simpler than patching the map directly.
+- **`FUN_1006f990` is NOT the host test in this build** - it is a 1-byte `ret` stub with 495 callers (a trivial
+  default method). The Session 22 "host test == session+0x120" address is mis-mapped against md5 `5742de2a`; the
+  real leader/host test is elsewhere (the `add edi,0x120; call 0x10070590; cmp eax,edi` inside `FUN_11273650` is
+  the actual host comparison). Re-derive `FUN_1006f990` before any use.
+
+Detour design (next): either (a) populate the roster `std::map` (getter `0x10070590`, key = member id) + make the
+`0x12854784` singleton report membership, or (b) detour the controller block `0x11218480..0x112185xx` to inject a
+synthetic 2-4 roster and force the join-gate pass. (b) is the smaller surface; both need the member-object field
+layout (vtable `+0x2c` / `[+0x64]` / `[+0xec]`) read from what `FUN_11273650` consumes downstream.

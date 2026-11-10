@@ -159,6 +159,8 @@ The in-process orbit-API observation shim lives in `../src/uplay_proxy` (source 
   RVAs), to xref the party/session consumers (Session 28c).
 - `probe_rv_party.py` — read-only: disassemble the Rv party/session controller hooks (`FUN_11273650`,
   `FUN_11218480`, …) from the 1.06 `FC3.dll` to design the 2-4 roster detour (Session 28d).
+- `probe_rv_detour.py` — read-only: caller xref + aligned disasm of the roster/join controller (`FUN_11218480`,
+  `FUN_11273650`, member getter `0x10070590`) on the 1.06 `FC3.dll` (Session 28e).
 
 `ghidra/decompile_session_callers_106.py` is a Jython Ghidra script (open analyzed `FC3_106`, decompile
 the Rv `GameSession` create/join param builders + callers). Kept as the intended offline-join hook-point
