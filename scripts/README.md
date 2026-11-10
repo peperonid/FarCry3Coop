@@ -136,6 +136,29 @@ Requires Ghidra 12.1.4 (`C:\tools\ghidra_12.1.4_PUBLIC`) + Temurin JDK 21.
   and `restore` reverts. Targets only `H:\FarCryCoop\TestFC3_105`. Vanilla 1.05 md5 `5ff04533…` ->
   patched `e4516487…`. The other co-op string `mpdlc1_idun` (at `0x15A2568`) is left untouched.
 
+## LAN / netcode probes (Session 23)
+
+- `fc3_lan_probe.py` — read-only probe: locate LAN-matchmaking / hosting anchor strings in `FC3.dll`
+  (`storm::echo::lan::*`, `LanHostBroadcastPort`, `-dedicated`/`-client` switches, …) and the code that
+  references them; prints RVAs (`VA - imageBase`). `python -I scripts/fc3_lan_probe.py [strings|xrefs]
+  [extra substr ...]`. No writes.
+
+## Orbit-API loader proxy (Session 27)
+
+The in-process orbit-API observation shim lives in `../src/uplay_proxy` (source tracked; the built
+`uplay_r1_loader.dll` is gitignored). These scripts drive it:
+
+- `gen_uplay_proxy.py` — generate `src/uplay_proxy/uplay_proxy.cpp` + `.def`: the 58 `UPLAY_*` cdecl
+  exports as stack-forwarding logging thunks (reads `local/scratch/loader_exports.json`).
+- `build_uplay_proxy.py` — build the 32-bit proxy without shell `.bat` quirks (pulls the MSVC x86 env
+  from `vcvars32` via `cmd /c`).
+- `build_proxytest.py` — build `src/uplay_proxy/proxytest.c`, the forwarding-transparency test harness.
+
+`ghidra/decompile_session_callers_106.py` is a Jython Ghidra script (open analyzed `FC3_106`, decompile
+the Rv `GameSession` create/join param builders + callers). Kept as the intended offline-join hook-point
+probe; under Ghidra 12.1.4 the PyGhidra `currentProgram` binding failed, so the pass must be run as a
+Java `-noanalysis` script instead (see Session 23/24 notes).
+
 ## Caches and ignored files
 
 `*_dis_cache.json` (disassembly cache), `__pycache__/`, `../Temp/` (agent scratch) and

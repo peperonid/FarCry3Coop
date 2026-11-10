@@ -96,6 +96,29 @@ scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--ran
 `*_dis_cache.json` (кэш дизассемлирования), `__pycache__/`, `../Temp/` (черновики агента) и
 `../local/` в git не попадают.
 
+## Зонды LAN / неткода (Сессия 23)
+
+- `fc3_lan_probe.py` — зонд только на чтение: находит в `FC3.dll` опорные строки LAN-матчмейкинга /
+  хостинга (`storm::echo::lan::*`, `LanHostBroadcastPort`, ключи `-dedicated`/`-client`, …) и код,
+  который на них ссылается; печатает RVA (`VA - imageBase`). `python -I scripts/fc3_lan_probe.py
+  [strings|xrefs] [extra substr ...]`. Не пишет.
+
+## Прокси лодера orbit-API (Сессия 27)
+
+Наблюдаемая надстройка orbit-API в процессе живёт в `../src/uplay_proxy` (исходники в git; собранный
+`uplay_r1_loader.dll` в gitignore). Эти скрипты им управляют:
+
+- `gen_uplay_proxy.py` — генерирует `src/uplay_proxy/uplay_proxy.cpp` + `.def`: 58 cdecl-экспортов
+  `UPLAY_*` как thunk-пробрасыватели стека с логом (читает `local/scratch/loader_exports.json`).
+- `build_uplay_proxy.py` — собирает 32-битный прокси без причуд `.bat` (берёт окружение MSVC x86 из
+  `vcvars32` через `cmd /c`).
+- `build_proxytest.py` — собирает `src/uplay_proxy/proxytest.c`, стенд проверки прозрачности проброса.
+
+`ghidra/decompile_session_callers_106.py` — Jython-скрипт Ghidra (открыть проанализированный `FC3_106`,
+декомпилировать сборщики параметров create/join Rv `GameSession` и вызывающих). Хранится как задуманный
+зонд офлайн-входа в сессию; в Ghidra 12.1.4 привязка `currentProgram` через PyGhidra не сработала, поэтому
+прогон надо делать Java-скриптом с `-noanalysis` (см. заметки сессий 23/24).
+
 ## Перенесённые пути
 
 Скопированные с ПК владельца (октябрь 2026) скрипты содержали пути старой раскладки: `DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`, `DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`. Диска `E:` на этом ПК нет. Такие скрипты сохранены как запись и НЕ перенацеливаются молча: перенацелить скрипт, который пишет в папку игры (patch / build / unpack), — решение владельца. На этом ПК установка только для чтения — `H:\Uplay\Far Cry 3\`, тестовая копия 1.06 — `H:\FarCryCoop\TestFC3\`; скрипты только для анализа здесь уже читают проверенные пути.
