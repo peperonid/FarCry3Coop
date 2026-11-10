@@ -18,3 +18,10 @@ __pycache__/
 mod/fc3coop_probe/build/
 mod/fc3coop_probe/build_log.txt
 mod/fc3coop_probe/*.log
+
+# uplay_r1_loader proxy build artifacts (sources uplay_proxy.cpp/.def/.c + bats are tracked)
+src/uplay_proxy/obj/
+src/uplay_proxy/*.dll
+src/uplay_proxy/*.lib
+src/uplay_proxy/*.exp
+src/uplay_proxy/*.log

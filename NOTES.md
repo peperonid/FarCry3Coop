@@ -3346,3 +3346,43 @@ Folder `TestFC3_105` after this session: solo262 data (patch 157f2d76) + vistas 
 FC3.dll = vanilla 1.05 5ff04533 + FC3_d3d11 = solo262 46bcc097. The hybrid FC3.dll is saved at
 `H:\FarCryCoop\scratch\swap_105_datatest\solo262_state\FC3_hybrid.dll`; OW state =
 `Downloads\OW15\game` (see `swap_105_datatest\ow_state\README.txt`).
+
+
+## Session 27 (2026-11-10): uplay_r1_loader orbit-API proxy built + forwarding verified; build made reproducible
+
+Follows the Session 26c conclusion that the single blocker is the Ubisoft party/session service glue in the
+`uplay_r14`/`uplay_r1_loader` orbit API. First engineering step: a pass-through logging proxy that wraps the
+real loader and records every orbit call FC3 makes, so the host/join surface can be observed before faking it.
+Source `src/uplay_proxy/{uplay_proxy.cpp,uplay_proxy.def,proxytest.c,build.bat,build_x86.bat}`; generator
+`scripts/gen_uplay_proxy.py` (emits the 58-export thunk table + the `.def`). Artifacts under `local/scratch/`.
+
+- **Design.** `uplay_r1_loader.dll` (x86) exports the 58 `UPLAY_*` cdecl functions as naked stack-forwarding
+  thunks (`th_0..th_57`). At `DllMain` it loads the genuine loader from `<bindir>\real\uplay_r1_loader.dll`
+  (`LOAD_WITH_ALTERED_SEARCH_PATH`), resolves its exports by name, and wires each thunk to forward + log
+  (seq, timestamp, 8 stack args, caller `module!+RVA`, return). FC3 is bound to the loader, so this DLL is a
+  transparent, observable shim. Installed at `H:\FarCryCoop\TestFC3_105\bin\uplay_r1_loader.dll`; the real one
+  sits at `...\bin\real\uplay_r1_loader.dll` (294400 B).
+- **Forwarding verified in situ.** Offline solo262 boot: `uplay_api.log` shows `real=<base> exports=58
+  missing=0`, and the game calls exactly two orbit functions before the menu — `UPLAY_Init`
+  (`FC3_d3d11.dll+0x420a2d`, ret=1) and `UPLAY_PARTY_Init` (`FC3_d3d11.dll+0x77d52f`, ret=1). Both returned
+  through the proxy with real's own value ⇒ the forward path is transparent in the live game.
+- **Forwarding verified in isolation.** `proxytest.c` (x86 console) loads the proxy directly and calls
+  `UPLAY_USER_IsConnected / UPLAY_Init / UPLAY_Poll / UPLAY_PARTY_*`; the proxy logs `real=<base> exports=58
+  missing=0` and forwards each call to the real loader. (The real loader, loaded *without* the proxy, spawns
+  orbit/service worker threads that outlive `main`, so a bare real-loader probe hangs and must be run detached.)
+- **Build made reproducible.** `build.bat` / `build_x86.bat` called `vcvars64.bat` (and `build_x86.bat` even
+  passed `-arch_host=x64 -arch=x86`, which VS18's `vcvars64` ignores → env not set). Both now use `vcvars32.bat`
+  (correct 32-bit toolchain for the `/MACHINE:X86 /DWIN32` target). A fresh `build.bat` run reproduces the
+  deployed proxy **byte-for-byte** (SHA-1 `153e016e…`, `machine 0x14c`, 58 exports), confirming the tree is the
+  real source of the running shim.
+- **Callers tagged.** The logger annotates known reverse-engineered sites: RVCreateGameSession
+  (`FC3.dll+0x00cf6790`), RVJoinGameSession (`FC3.dll+0x00cf6690`), a party-glue region
+  (`FC3.dll` RVA range `0x10620400..0x10623500`), and loader `FUN_113409d0`. These fire only once the game
+  actually attempts a host/join.
+- **Reading + next step.** The two-orbit-call boot trace confirms the 26c blocker in a third way: the offline
+  flow never reaches a hostable/joinable co-op session, so no `UPLAY_PARTY_GetFullMemberList`,
+  `UPLAY_PARTY_IsPartyLeader`, `UPLAY_SetGameSession` or RVCreate/RVJoinGameSession ever appear. The proxy is
+  now a solid observation harness; the next move is to make the game reach the host/join path (drive the co-op
+  UI, or detour the FC3 session callers) and then start faking, in this same proxy, a 2-4 slot party member
+  list, `UPLAY_PARTY_IsPartyLeader=true` and a GameSession create/join success over the local session type-3
+  path.
