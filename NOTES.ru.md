@@ -2940,3 +2940,44 @@ LanTrace.java по проанализированному FC3_106 (артефа�
 - Буквальный живой тест (запустить, открыть LAN-браузер,захостить, второй экземпляр заходит через loopback)
   **сейчас заблокирован**: в офлайн-потоке нет LAN-браузера, через который можно хостить/заходить, пока не
   будет получена хостируемая офлайн-сессия кооператива. Одних ключей loopback/reuse для этого мало.
+
+
+## Сессия 26 (2026-11-10): полный разбор патчей OpenWorldCoop 1.5 (ревизия по coop-revive, шаги 1-2)
+
+Цель (владелец, m04981): рабочий кооп в **основном мире** **онлайн**. OpenWorldCoop 1.5 — единственная
+сборка, которая это умела; по скиллу хаба `coop-revive` проводим ревизию по подсистемам. Артефакты:
+`H:\FarCryCoop\scratch\ow_diff\owdiff_{d3d9,d3d11}.json`, `patchdiff.json`; скрипт
+`local/scratch/ow_diff.py`; распакованные деревья `H:\FarCryCoop\scratch\ow_extract` (3316 файлов) и
+`H:\FarCryCoop\scratch\van_extract` (427, эталонный 1.06 patch.dat md5 5a788dd5f7befada6e6919ec1799c172).
+
+**Нативная часть крошечная (184 байта в FC3.dll; 134 в FC3_d3d11.dll; кода НОЛЬ):**
+- 2 хука стриминга: штатные 5-NOP площадки 0x8C306B и 0x8C4036 (в файле 0x8C406B/0x8C5036) заменены
+  `E8 rel32` CALL на одну и ту же существующую штатную функцию **RVA 0x8C2F09** (d3d11: 0xA1D1E2/0xA1E1AD
+  -> 0xA1D080). Идёт Ghidra-анализ FC3_105_OW (фон, `H:\FarCryCoop\scratch\ghidra\owan.log`) — имя
+  функции и контексты площадок.
+- строка карты: 0x15341D0 `mpdlc1_aegir` -> `fc3_main` (строка H7a уже в моде).
+- тюнинг стриминга/дальностей x4: 256->512, 1536->5120, 2048->5120, 1280->5120, 128->512, 1.29e5->5.13e5,
+  0.7708->0.6625, 4.75->5.625; u24 0x49BB80->0x4A9C40 @0x1535959.
+- 14 однобайтовых переименований ключей конфигов 'F'/'C'->'X' (0x2799DA.., 0x151BBFF.., 0x15D6220..,
+  семейство FOVTime) = выключение штатных поведений отсутствующим ключом.
+- 6 однобайтовых увеличений (8->9, 6->7, 7->8) @0x2799DA/9FB/27AA27/48 + 0x59237A/9B.
+
+**Data-часть (patch.dat):** 427 -> 3316 записей; +2859 пересобранных `.fcb`-чанков острова (остров
+пересобран под стриминг коопа; depload.dat 1.35МБ->2.92МБ), +53 конфигов/скриптов, 7 ИЗМЕНЁННЫХ lua
+аутпостов `lib_defend` (волны), 13 `__unknown/scripts/*.lua` = ещё варианты lib_defend (nowave/hard/med/
+easy+dog). Ключевые добавленные файлы: `engine/gamemodes/gamemodesconfig.xml` (FCXCoop @строка 325,
+Mask=128; список сервисов; строки fc3_main НЕТ -> выбор карты не здесь),
+`engine/settings/defaultnetworkconfig.xml` (**MaximumPeerCount=25**, порты 9000-9005, MainSocketEncrypted=1,
+SecureSocketEnabled=1, EmulatorEnabled=1, 20 Мбит), `engine/settings/pc/defaultengineconfig.xml`,
+`defaultrenderconfig.xml`, `domino/system/worldloadpause.lua` (спойнер синхронизации SP-эффектов в коопе:
+шторм/ветер/регenetnavmesh/зенodiac), `domino/system/coop/allplayers/enableinitialspawn.lua`,
+`coop/misc/strayplayerzone_v2.lua`, `system/ai/spawnreinforcement_v4.lua`,
+`library/coop/zz_devhelpers._playerloop.lua`, `engine/scripts/game/newbrains/*.ai.rml` (мозги животных),
+2 gosm-статемашины игрока, `spbarkmanager.xml`, `inputactionmapcommon.xml`, oasisstrings. Удалено: немного
+графики лодок, 2 катсцены, fc3coopintro.bik (триггинг размера, не функция). + fc3_main_vistas.dat 3.06ГБ
+(129 894 записей).
+
+**Вывод:** мод = (a) два NOP-площадки в вызов существующей штатной функции стриминга, (b) строка карты
+коопа -> fc3_main, (c) константы стриминга x4, (d) пересобранный мир острова (.fcb+vistas) + доделанные
+под кооп SP-конфиги/скрипты, (e) лимит пиров 25. Больше ничего. Возрождение = воспроизвести/проверить
+(a)-(d), затем починить ОНЛАЙН-д_join (состояние серверов 2026 — вопрос, см. веб-разыскания ранее).

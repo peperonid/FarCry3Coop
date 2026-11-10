@@ -3229,3 +3229,44 @@ runner `H:\FarCryCoop\scratch\ghidra\run_lantrace2.bat`). Read the working copy'
 - The literal live test (launch, open LAN browser, host, second instance joins over loopback) is **currently
   blocked**: there is no LAN browser in the offline flow to host/join through until a hostable offline co-op
   session is produced. Enabling loopback/reuse knobs alone cannot surface it.
+
+
+## Session 26 (2026-11-10): OpenWorldCoop 1.5 full patch inventory (coop-revive audit, steps 1-2)
+
+Goal now (owner, m04981): make FC3 co-op in the **main world** workable **online** — OpenWorldCoop is the
+only build that ever did it, so per the hub skill `coop-revive` we audit it by subsystem. All artifacts:
+`H:\FarCryCoop\scratch\ow_diff\owdiff_{d3d9,d3d11}.json`, `patchdiff.json`; scripts
+`local/scratch/ow_diff.py`; extracted trees `H:\FarCryCoop\scratch\ow_extract` (3316 files) vs
+`H:\FarCryCoop\scratch\van_extract` (427, pristine 1.06 patch.dat md5 5a788dd5f7befada6e6919ec1799c172).
+
+**Native side is TINY (184 bytes total in FC3.dll; 134 in FC3_d3d11.dll; zero new code):**
+- 2 streaming hooks: stock 5x NOP sites 0x8C306B and 0x8C4036 (file 0x8C406B/0x8C5036) replaced by
+  `E8 rel32` CALLs to the SAME existing stock function **RVA 0x8C2F09** (d3d11: sites 0xA1D1E2/0xA1E1AD
+  -> 0xA1D080). Ghidra FC3_105_OW analysis running (bg, `H:\FarCryCoop\scratch\ghidra\owan.log`)
+  to name that function + call-site contexts.
+- map string: 0x15341D0 `mpdlc1_aegir` -> `fc3_main` (the H7a string, ships in OW).
+- streaming/range tunings x4-ish: 256->512, 1536->5120, 2048->5120, 1280->5120, 128->512, 1.29e5->5.13e5,
+  0.7708->0.6625, 4.75->5.625; u24 0x49BB80->0x4A9C40 @0x1535959.
+- 14 single-byte config-key renames 'F'/'C'->'X' (0x2799DA.., 0x151BBFF.., 0x15D6220.., e.g. FOVTime key
+  family) = disable vanilla behaviours via missing config keys.
+- 6 single-byte value bumps (8->9, 6->7, 7->8) @0x2799DA/9FB/27AA27/48 + 0x59237A/9B.
+
+**Data side (patch.dat):** 427 -> 3316 entries; +2859 repacked island `.fcb` chunks (the island rebuilt
+for co-op streaming; depload.dat 1.35MB->2.92MB), +53 config/script, 7 CHANGED `lib_defend` outpost loras
+(wave logic), 13 `__unknown/scripts/*.lua` = MORE lib_defend outpost variants (nowave/hard/med/easy+dog).
+Key added files: `engine/gamemodes/gamemodesconfig.xml` (FCXCoop desc @line325, Mask=128; service list;
+NO fc3_main string -> map choice is NOT here), `engine/settings/defaultnetworkconfig.xml`
+(**MaximumPeerCount=25**, ports 9000-9005, MainSocketEncrypted=1, SecureSocketEnabled=1, EmulatorEnabled=1,
+20 Mbit upload), `engine/settings/pc/defaultengineconfig.xml`, `defaultrenderconfig.xml`,
+`domino/system/worldloadpause.lua` (SP->coop sync shim: storms/wind/navmesh-regen/zodiac gunner),
+`domino/system/coop/allplayers/enableinitialspawn.lua`, `coop/misc/strayplayerzone_v2.lua`,
+`system/ai/spawnreinforcement_v4.lua`, `library/coop/zz_devhelpers._playerloop.lua`,
+`engine/scripts/game/newbrains/*.ai.rml` (animal brains), 2 gosm pawn statemachines,
+`spbarkmanager.xml`, `inputactionmapcommon.xml`, oasisstrings bin. Removed: some boat props graphics,
+2 cutscene cseqs, fc3coopintro.bik (trim, not function). + fc3_main_vistas.dat 3.06GB (129 894 entries).
+
+**Reading:** the mod is (a) retarget 2 NOP sites to an existing stock streaming fn, (b) point the co-op
+map string at fc3_main, (c) x4 streaming constants, (d) ship a rebuilt island world (.fcb+vistas) +
+coop-completed SP configs/scripts, (e) peer cap 25. Nothing else. Revive = reproduce/verify (a)-(d), then
+make ONLINE join work (server state 2026: see prior web research; reddit 2026-09 "Co-Op not available" =
+open question).
