@@ -3470,3 +3470,30 @@ trampolines at `0x10e5b044..0x10e5b0b6`: `Init` `0x10e5b044`, `IsConnected` `0x1
   `GetFullMemberList` in the proxy would not feed a roster into gameplay.
 - Net: the three loader gate-fakes (Sessions 27-28) are correctly shaped and are the right first probe; the next
   real work item (a 2-4 roster) is a detour of the Rv party controller, matching the session-22/24 hook points.
+
+
+### Session 28d (same day) - Rv party-controller probe: roster is a service object graph; join-gate is the detour point
+
+Offline disasm of the Rv party/session controller hooks named in Sessions 22/24 over the 1.06 `FC3.dll`
+(`H:\Uplay\Far Cry 3\bin\FC3.dll`, md5 `5742de2a`, machine 0x14c, base `0x10000000`, `.text` to `0x11bcac61`;
+probe `scripts/probe_rv_party.py`). These are 1.06 addresses (the 1.05 `FC3.dll` md5 `5ff04533` `.text` ends at
+`0x1149d215`, so `FUN_11273650` is 1.06-only).
+
+- **`FUN_11273650` (trusted member list) walks a service object graph, not a flat array.** Body:
+  `mov edi,[edx+4]; add edi,0x120; call 0x10070590; cmp eax,edi` (the `+0x120` matches the Session 22
+  "host == session+0x120" note), then a getter chain `[[eax+0x18]+0x20] -> [ecx] -> vtable[+0x2c] -> call eax`
+  yielding a member object; it then tests `[ecx+0x64]`, `test byte[edx+0xec],8`, and does a refcount
+  `dec dword[ecx+4]`. Conclusion: the trusted roster is a live object graph reached through getter `0x10070590`
+  and vtable slots, so a roster fake must populate/detour that controller, consistent with Session 28c
+  (not the loader). 
+- **`FUN_11218480` (join gate) decodes cleanly and is the best detour candidate.** It reads `[esi+0x30]`,
+  writes `mov dword[edx],1` (an out-param true), builds a tagged string object (vftable `0x11fabf24`) and
+  returns `al=1` via `ret 0x14`. It is a validator/acceptor with a single boolean outcome -> hooking it to
+  return pass + a synthetic member is the concrete join-shim hook point (PLAN S2).
+- **`FUN_1006f990` (host test) and `FUN_103660e0` did not decode at these addresses** on this build
+  (`0x1006f990` starts with a lone `ret`; `0x103660e0` misaligns) -> do NOT trust these two addresses as-is;
+  re-derive them from the `FC3_106` Ghidra project (their Session 22 semantics may sit at shifted addresses
+  between the Ghidra snapshot and md5 `5742de2a`).
+
+Next (design): build the roster detour at `FUN_11218480` + the `0x10070590` member-object getter, and verify the
+member-object field layout by reading what `FUN_11273650`'s downstream consumes, before writing any fake.

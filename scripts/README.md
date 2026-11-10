@@ -157,6 +157,8 @@ The in-process orbit-API observation shim lives in `../src/uplay_proxy` (source 
   loader to confirm the `int(void)` cdecl convention before faking them (Session 28).
 - `probe_memberlist_imports.py` — read-only: dump which `UPLAY_*` `FC3_d3d11.dll` imports (and their IAT slot
   RVAs), to xref the party/session consumers (Session 28c).
+- `probe_rv_party.py` — read-only: disassemble the Rv party/session controller hooks (`FUN_11273650`,
+  `FUN_11218480`, …) from the 1.06 `FC3.dll` to design the 2-4 roster detour (Session 28d).
 
 `ghidra/decompile_session_callers_106.py` is a Jython Ghidra script (open analyzed `FC3_106`, decompile
 the Rv `GameSession` create/join param builders + callers). Kept as the intended offline-join hook-point
