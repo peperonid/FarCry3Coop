@@ -3446,3 +3446,27 @@ Artifacts: `src/uplay_proxy/{uplay_proxy.cpp,uplay_proxy.def}` (regenerated), `s
   open the co-op submenu and try host/join. Watch `bin\uplay_api.log`: the gates should now log `[FAKE] ret=1`,
   and the open question is whether the previously-dead co-op entries (`ВМЕСТЕ ВЕ СЕТИ`) become responsive. If
   they do, the next fake to add is the member list + a `SetGameSession` success (needs the struct layout).
+
+
+### Session 28c (same day) - orbit-API consumers disassembled: gate-fakes validated, roster fake belongs at the Rv layer
+
+Static RE of the `uplay_r1_loader.dll` consumers in `FC3_d3d11.dll` (machine 0x14c, base `0x10000000`; probes
+`scripts/probe_memberlist_imports.py` + a raw-byte `call/jmp [IAT]` scan). FC3 imports the orbit API from
+`uplay_r1_loader.dll` (IAT block `0x114aca64..0x114acac8`) and calls it through a run of `jmp [IAT]` import
+trampolines at `0x10e5b044..0x10e5b0b6`: `Init` `0x10e5b044`, `IsConnected` `0x10e5b07a`, `SetGameSession`
+`0x10e5b08c`, `PARTY_Init` `0x10e5b092`, `GetFullMemberList` `0x10e5b0a4`, `IsPartyLeader` `0x10e5b0b6`.
+
+- **`IsPartyLeader` is consumed as a plain bool** - the gate-fakes already shipped are the right shape.
+  Callers: `0x1077ddea` -> `mov byte ptr [esi], al` (stores the leader flag straight into a byte), and
+  `0x1077e9e7` -> `test al,al; je ...; mov byte ptr [ebp-1],1` feeding UI/permission state (then tests
+  `[edi+0x14] & 2` and reads `[ebx+0x248]`). So forcing the loader to return 1 makes FC3 store `leader=true`
+  with no struct involved - the ABI is validated at the consumer, not just assumed.
+- **`GetFullMemberList` is only null-checked, never field-read, in FC3.** Its sole trampoline caller
+  `0x1077d6b1` is `test eax,eax; jne <ok>; push 0x11e67ed8 (assert str); call 0x10e5b080` - it treats the getter
+  as "is there a member-list pointer" and never iterates member entries. Therefore the trusted 2-4 roster the
+  co-op logic uses is the internal Rv party controller (Session 22: `provider+0x38/+0x3c`, `FUN_11273650`),
+  not the Uplay getter. **Consequence for the plan: the "member list + SetGameSession" fake must target the Rv
+  party controller (the PLAN's S2 join-param detour / trusted-member-list hook), not the orbit loader.** Faking
+  `GetFullMemberList` in the proxy would not feed a roster into gameplay.
+- Net: the three loader gate-fakes (Sessions 27-28) are correctly shaped and are the right first probe; the next
+  real work item (a 2-4 roster) is a detour of the Rv party controller, matching the session-22/24 hook points.

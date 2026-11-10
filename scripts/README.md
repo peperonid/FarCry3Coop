@@ -155,6 +155,8 @@ The in-process orbit-API observation shim lives in `../src/uplay_proxy` (source 
 - `build_proxytest.py` — build `src/uplay_proxy/proxytest.c`, the forwarding-transparency test harness.
 - `probe_orbit_gates.py` — read-only: disassemble the prologues of the orbit-API gate exports in the real
   loader to confirm the `int(void)` cdecl convention before faking them (Session 28).
+- `probe_memberlist_imports.py` — read-only: dump which `UPLAY_*` `FC3_d3d11.dll` imports (and their IAT slot
+  RVAs), to xref the party/session consumers (Session 28c).
 
 `ghidra/decompile_session_callers_106.py` is a Jython Ghidra script (open analyzed `FC3_106`, decompile
 the Rv `GameSession` create/join param builders + callers). Kept as the intended offline-join hook-point

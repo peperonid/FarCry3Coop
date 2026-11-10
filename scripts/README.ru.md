@@ -115,6 +115,8 @@ scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--ran
 - `build_proxytest.py` — собирает `src/uplay_proxy/proxytest.c`, стенд проверки прозрачности проброса.
 - `probe_orbit_gates.py` — только на чтение: дизассемблирует прологи экспортов-гейтов orbit-API в
   настоящем лодере, чтобы подтвердить соглашение `int(void)` cdecl перед их подделкой (Сессия 28).
+- `probe_memberlist_imports.py` — только на чтение: печатает, какие `UPLAY_*` импортирует
+  `FC3_d3d11.dll` (и RVA их IAT-слотов), чтобы затем найти xref-потребителей пати/сессий (Сессия 28c).
 
 `ghidra/decompile_session_callers_106.py` — Jython-скрипт Ghidra (открыть проанализированный `FC3_106`,
 декомпилировать сборщики параметров create/join Rv `GameSession` и вызывающих). Хранится как задуманный
