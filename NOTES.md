@@ -3579,3 +3579,32 @@ the scratch scripts dir has stale non-compiling scripts that poison the Java bun
 `FUN_11218480` gate conditions and make the manager's member table (`mgr+0x38` count, `mgr+0x3c + i + 0x14`
 ids) yield 2-4 entries so `FUN_11273650` emits a non-empty vector. The least-invasive observation point is the
 `DAT_12805180+4` singleton (the manager). All addresses 1.06 md5 `5742de2a`. Still needs the live game to verify.
+
+
+### Session 28h (same day) - gate sub-conditions decompiled: two singletons + a session state machine (`scripts/ghidra/DecompileGate.java`)
+
+Decompiled the four `FUN_11218480` gate sub-conditions + solo helper. Closes the static-analysis line: every
+downstream condition depends on runtime netcode state, so the loader-fake↔gate link can only be settled live.
+
+- **`FUN_102000d0(mgr, mgr+0x118, mgr+0x11c)` (the positive "connected" condition):** requires
+  `((mgr+0x118) & (mgr+0x11c)) != 0xffffffff` (a valid party id present), then calls the RB-tree lower_bound
+  `FUN_1006f990()` to find the **local player node in the manager's member tree at `[mgr + 0x120]`**; on a hit it
+  walks a vtable `+0x2c` and resolves the member against a **lobby array at `[mgr+0x1ec] / [mgr+0x1f0]`** and the
+  member's `+0x98`. => This condition is only satisfiable when the manager's member tree AND a lobby exist - i.e.
+  it is netcode-fed, the real offline blocker.
+- **The three negative blockers all read the session/mode singleton `DAT_12804acc`** (`+0x6c` = has-session byte,
+  `+0x68` = session object):
+  - `FUN_112166f0()` returns `[session + 0x9b8] == -7`;
+  - `FUN_11216690()` returns `[session + 0x9b8] == -6`;
+  - `FUN_11216750()` is a session state handler (dispatches on the same `DAT_12804acc` session state).
+  The gate needs all three false => the session status code must be neither -6 nor -7 and the session object must
+  be in a normal (non-error) state.
+- **Two governing singletons:** `DAT_12805180 + 4` (network/party manager: member tree `[+0x120]`, member table
+  `[+0x38]/[+0x3c]`, lobby `[+0x1ec]/[+0x1f0]`, id fields `[+0x118]/[+0x11c]`) and `DAT_12804acc` (mode/session
+  controller: has-session `[+0x6c]`, session `[+0x68]`, status `[session+0x9b8]`).
+- **Conclusion (static terminus):** the party gate is a runtime session state machine. Faking the Orbit SDK calls
+  at the loader (the `uplay_proxy` gate-fakes) only helps if Ubisoft Connect's loader actually drives these two
+  singletons into a valid-party state. That cannot be observed statically; the decisive next action is the live
+  `upc Play` run on TestFC3_105 with `FC3COOP_FAKE_PARTY=1`, inspecting whether the co-op submenu path in
+  `FUN_11218480` is taken (add breakpoints / log at `DAT_12805180+4` and `DAT_12804acc+0x6c` when building the
+  test mod). All addresses 1.06 md5 `5742de2a`.
