@@ -3549,3 +3549,33 @@ Extends 28e (disasm of the FUN_11273650 tail and the deeper caller FUN_1127422a 
 - Caution: all offsets are for the 1.06 build md5 `5742de2a`; and none of this is verifiable without the live
   game reaching a host/join (owner `upc Play` run with `FC3COOP_FAKE_PARTY=1`), so the next actionable move is
   that live run, not more static RE.
+
+
+### Session 28g (same day) - authoritative decompile of the party gate; corrects 28e/28f (`scripts/ghidra/DecompileParty.java`)
+
+Ran Ghidra's real decompiler over the analyzed `FC3_106` project (must run in an isolated `-scriptPath`:
+the scratch scripts dir has stale non-compiling scripts that poison the Java bundle compile). Output
+`decomp_party.txt`. This replaces several 28e/28f capstone guesses with ground truth.
+
+- **Join gate `FUN_11218480` (thiscall, this = param_1; body 0x11218480-0x11218775).** It resolves the party
+  manager from a **global singleton `DAT_12805180` -> `+4`** (`iVar3`). The gate passes only when ALL hold:
+  1. `FUN_102000d0(mgr, mgr+0x118, mgr+0x11c) != 0` (online/connected check on the manager),
+  2. `FUN_11216750() == 0` AND `FUN_112166f0() == 0` AND `FUN_11216690() == 0` (three negative blockers),
+  3. `FUN_103660e0() != 0` - and this returns the party-service object (so it is a **getter**, not a query).
+- **`FUN_103660e0` = party service getter** (uses singleton `0x12854784`; the gate then reads the returned
+  manager's `+0x74` and passes it to the roster builder).
+- **The roster the gate consumes is a vector of 0x20-byte member entries**, built by
+  `FUN_11273650(mgr, &out)` (out = {data, end, capacity}); the gate iterates `for p in out step 0x20`.
+  Member id/name strings come from `[mgr + 0x3c + i + 0x14]`; a member's vtables are `PTR_FUN_11f57660`
+  and `PTR_FUN_1201fa24`; per-entry `local_28 = (*[DAT_12805180+4] + 0x274) != 0` is the **is-local-player** flag.
+  Empty roster (`count == 0`) diverts to the solo path (`FUN_112734a0` + `FUN_112163b0` + `FUN_10366240`).
+- **Corrections to 28e/28f:** `0x10070590` is NOT a standalone map getter - it lies inside `FUN_10070470`
+  (a container grow/realloc). `FUN_1006f990` is NOT a stub - it is the RB-tree `lower_bound` on `[this+8]`
+  (the manager's internal id->member index). The "std::map to populate" framing was wrong at the gate level:
+  the gate reads the **0x20-byte vector from `FUN_11273650`**, which is derived from `[mgr+0x38]/+0x3c` (the
+  netcode-fed member table), not from the map directly.
+
+**Detour target restated (authoritative):** to make host/join present a 2-4 party offline, satisfy the four
+`FUN_11218480` gate conditions and make the manager's member table (`mgr+0x38` count, `mgr+0x3c + i + 0x14`
+ids) yield 2-4 entries so `FUN_11273650` emits a non-empty vector. The least-invasive observation point is the
+`DAT_12805180+4` singleton (the manager). All addresses 1.06 md5 `5742de2a`. Still needs the live game to verify.
