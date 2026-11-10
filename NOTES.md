@@ -3293,3 +3293,56 @@ Consequences:
   in this folder with the same data minus no version barrier: engine-data compatibility proven.
 - Next: offline regression (hybrid + solo262 patch.dat + vistas -> local co-op island), then
   install the OW stack for the ONLINE main-world co-op attempt via real upc.
+
+> **Correction (same session, later).** The 26b test actually ran on the **1.05** `patch.dat`
+> (192,307,217 B; hash 5a788dd5 = vanilla 1.05 at `Downloads\OW15\game\data_win32\patch.dat`),
+> NOT a 1.06 patch as first claimed. The world archive `worlds\fc3_main\fc3_main.dat` **is** the
+> 1.06 one (fea2e5a1, 3,496,061,837 B, verified vs the Uplay install) and the vista pair was the
+> OpenWorld 2020 pair (cb5da2c2, 3.0 GB). So the keystone still holds in its essential form:
+> **1.05 engine + the 1.06 fc3_main world archive + OW vistas = the island loads and renders.**
+> (Which FC3.dll was in `bin` at that launch, vanilla 5ff04533 or hybrid 341888251150, was not
+> logged; the d3d11 DLL loaded by `farcry3_d3d11.exe` was solo262's patched 46bcc097.)
+
+### Session 26c (2026-11-10, agent) — OpenWorld stack is online-only; live boot matrix
+
+File identity facts (all verified by md5 this session):
+- `data_win32\patch.dat` sizes/roles: vanilla **1.05 = 192,307,217 B** (5a788dd5), solo262 mod262
+  patch = 212,002,032 B (157f2d76), **OpenWorld Patch 1.5 patch = 90482fbe** (192,307,217 B, same
+  size as vanilla 1.05, different content), vanilla **1.06 = 202,132,751 B** (`_backup_106_before_solo262`).
+- OpenWorld `FC3.dll` (927a1a30, 29,994,856 B) differs from vanilla 1.05 (5ff04533) by only
+  **~100 bytes**: cosmetic string renames (`FOV`->`XOV`, `CoopNameplates`->`XoopNameplates` -
+  likely to dodge some name filters), float blobs, and ONE functional string swap:
+  `mpdlc1_aegir` -> `fc3_main` at file offset `0x15345d0`. **The OW binary patch contains no
+  service/offline bypass at all** - online Ubisoft party services are a hard dependency.
+- OpenWorld `FC3_d3d11.dll` = 07abaf66. Full OW stack lives at `H:\FarCryCoop\Downloads\OW15\game`
+  (patch.dat 90482fbe + vistas cb5da2c2 3.0 GB).
+
+Live boot matrix (folder `TestFC3_105`, launched directly via `bin\farcry3.exe`, no launcher):
+- solo262 data (157f2d76) + hybrid FC3.dll 341888251150 + 1.06 fc3_main + 1.06 vistas 87151f18:
+  boots to main menu (service dialog dismissable), the coop submenu shows three entries
+  (ИГРА ОНЛАЙН / ВМЕСТЕ ВЕ СЕТИ [green highlight = the offline coop entry] / ВСТУПИТЕЛЬНЫЙ РОЛИК)
+  but **none responds to Enter or mouse click** in this data state (the FC3.log for the session
+  could not be found on C:, profile likely on another drive/moved).
+- solo262 data + vanilla 1.05 FC3.dll 5ff04533 + solo262 FC3_d3d11.dll 46bcc097: boots to menu fine.
+- OW stack (927a1a30/07abaf66 + 90482fbe): **fatal dialog "Служба Far Cry 3 недоступна. Перезапустите
+  игру."** (needs service connection at boot). Also fatal via `uplay://launch/46/0` while Ubisoft
+  Connect was freshly restarted and **online** - i.e. the FC3 game service (Rv/party) really is
+  shut down server-side; upc-online is not enough. (The 2025-09 steam "still works" thread is about
+  other people's machines/versions, not this service.)
+- 1.05 host command line `-host fc3_main -login tester -coop` (direct launch, solo262 data):
+  **fatal service dialog** - the `-host` branch needs the service provider even though session
+  type 3 (local) is what it creates; the same game without the flags boots to the menu normally.
+  So the CLI host path is service-gated too, offline coop remains menu-entry-only.
+
+Converged conclusion (third independent confirmation): **the single blocker for both the offline
+coop entry and any online flow is the Ubisoft party/session service glue in the `uplay_r14` orbit
+API.** The next engineering step is the in-process orbit-API responder (uplay_r14 is loaded
+in-process; FC3 binds it via `GetProcAddress("OrbitApi_InterfaceRequest")` - we control that
+loader), faking: party member list (2-4 slots), `IsPartyLeader=true`, and a GameSession create/join
+success over the local session type 3 path. Assets: session-24 `CoopOfflineV2.java` artifacts +
+`local/scratch/multislot_design.md` (offline multi-slot) + the 100-byte diff proof above.
+
+Folder `TestFC3_105` after this session: solo262 data (patch 157f2d76) + vistas OW cb5da2c2 +
+FC3.dll = vanilla 1.05 5ff04533 + FC3_d3d11 = solo262 46bcc097. The hybrid FC3.dll is saved at
+`H:\FarCryCoop\scratch\swap_105_datatest\solo262_state\FC3_hybrid.dll`; OW state =
+`Downloads\OW15\game` (see `swap_105_datatest\ow_state\README.txt`).
