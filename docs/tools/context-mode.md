@@ -13,11 +13,11 @@ Russian version: [context-mode.ru.md](context-mode.ru.md)
 
 | Component | State on this PC |
 |---|---|
-| context-mode | 2.1.1 (`2652fe2`), npm dependency of `pi-extensions` at `C:\Users\USER\.pi\agent\npm\node_modules\context-mode` |
+| context-mode | 2.1.1 (`2652fe2`), npm dependency of `pi-extensions` at `%USERPROFILE%\.pi\agent\npm\node_modules\context-mode` |
 | pi install mode | `in-process` (adapter `pi`, hook channel `pi/index.js`); not a git-checkout install |
-| pi host config | `C:\Users\USER\.pi\agent\settings.json`, `packages: ["npm:context-mode", "npm:billion-context", "npm:@keenable/pi-search"]` |
-| Context-mode data | `C:\Users\USER\.context-mode\` (`plugins/`, `projects/`, `reports/`, `hook-errors.log`) |
-| `context-mode` CLI | **not on PATH** — run via `node C:\Users\USER\.pi\agent\npm\node_modules\context-mode\cli.mjs …` |
+| pi host config | `%USERPROFILE%\.pi\agent\settings.json`, `packages: ["npm:context-mode", "npm:billion-context", "npm:@keenable/pi-search"]` |
+| Context-mode data | `%USERPROFILE%\.context-mode\` (`plugins/`, `projects/`, `reports/`, `hook-errors.log`) |
+| `context-mode` CLI | **not on PATH** — run via `node %USERPROFILE%\.pi\agent\npm\node_modules\context-mode\cli.mjs …` |
 | Latest upstream release | v2.1.1 (published 2026-11-05); only git branch is `main` (no `release` branch); tags `v*` up to v2.1.1 |
 
 `ctx_doctor` (2026-11-05): D1–D11 mostly PASS. Two failures are explained below (D3, D7).
@@ -58,7 +58,7 @@ nothing newer to install anyway — but the clone fails first.
 
 ### Symptom 2 — D3 host-config "FAIL" is cosmetic, and the "fix" is dangerous
 
-`ctx_doctor` reports **D3 FAIL: wrong entry in `C:\Users\USER\.pi\agent\settings.json`**. This is a
+`ctx_doctor` reports **D3 FAIL: wrong entry in `%USERPROFILE%\.pi\agent\settings.json`**. This is a
 versioning mismatch, not a functional break: the doctor wants the *modern* git spec in `packages`, but we use
 the working *v1* npm spec.
 
@@ -71,8 +71,8 @@ with `git:github.com/mksglu/context-mode@release` (keeping `npm:billion-context`
 Why that would break the next pi start:
 - `@release` in the git spec is a git ref (branch/tag) that no longer exists.
 - pi loads a git package by cloning and resetting to that ref; on failure it falls back to a cached copy.
-- There is **no** git-package cache for context-mode here (`C:\Users\USER\.pi\agent\tmp\extensions\` is
-  empty; the working copy is the npm install at `C:\Users\USER\.pi\agent\npm\node_modules\context-mode`).
+- There is **no** git-package cache for context-mode here (`%USERPROFILE%\.pi\agent\tmp\extensions\` is
+  empty; the working copy is the npm install at `%USERPROFILE%\.pi\agent\npm\node_modules\context-mode`).
 - Result: pi tries to clone `…@release` → ref not found → no cache → **context-mode not loaded → all
   `ctx_*` tools gone.**
 

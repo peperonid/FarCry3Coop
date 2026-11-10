@@ -28,7 +28,7 @@ English version: [workspace.md](workspace.md)
 | Установка только для чтения (Ubisoft Connect) | `H:\Uplay\Far Cry 3\` |
 | Черновики и личные данные | `<репозиторий>\local\`, `<репозиторий>\local\scratch\` (вне git) |
 | Временные файлы агентской программы | `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` |
-| Связка REA / Ghidra / JDK | `C:\tools\`, `C:\Program Files\nodejs\`, глобальный префикс npm `C:\Users\USER\AppData\Roaming\npm` (см. ниже и `docs/tools/rea.ru.md`) |
+| Связка REA / Ghidra / JDK | `C:\tools\`, `C:\Program Files\nodejs\`, глобальный префикс npm `%USERPROFILE%\AppData\Roaming\npm` (см. ниже и `docs/tools/rea.ru.md`) |
 
 Все пути `E:\FarCryCoop\` в этом документе и в NOTES.ru.md — историческая запись с прежнего ПК
 владельца (октябрь 2026). Диск `E:` на этом ПК существует как игровой диск, но папки `FarCryCoop` на
@@ -38,7 +38,7 @@ English version: [workspace.md](workspace.md)
 
 | Инструмент | Версия | Путь | Источник |
 |---|---|---|---|
-| REA (`rea-agents`) | 6.8.0 (`rea --version`) | `C:\Users\USER\AppData\Roaming\npm\node_modules\rea-agents` | глобальная установка npm; зарегистрирован для pi командой `rea setup --client pi --yes` |
+| REA (`rea-agents`) | 6.8.0 (`rea --version`) | `%USERPROFILE%\AppData\Roaming\npm\node_modules\rea-agents` | глобальная установка npm; зарегистрирован для pi командой `rea setup --client pi --yes` |
 | Ghidra | 12.1.4 | `C:\tools\ghidra_12.1.4_PUBLIC` | https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build |
 | Eclipse Adoptium Temurin JDK | 21.0.13+9 (`JAVA_RUNTIME_VERSION 21.0.13+9-LTS`) | `C:\tools\jdk-21.0.13+9` | Temurin 21 (Adoptium) |
 | Node.js | v22.23.4 | `C:\Program Files\nodejs\node.exe` | системная установка (удовлетворяет «Node 22.23.4+» от REA); npm 10.9.9 |
@@ -88,7 +88,7 @@ SHA-256 `ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db` — �
 
 - Windows, PowerShell и системный `git.exe` (`C:\Program Files\Git`) находятся на C:. Они используются
   как установлены; наши инструменты туда ничего нового не пишут. Claude Code на этом ПК не установлен
-  (`where claude` не находит; нет `C:\Users\USER\.claude`, нет `C:\Users\USER\.claude.json`).
+  (`where claude` не находит; нет `%USERPROFILE%\.claude`, нет `%USERPROFILE%\.claude.json`).
 - Регистрация REA пишет в `C:\Users\<user>\.pi\agent\mcp.json` на C: (сделано 2026-11-03 командой
   `rea setup --client pi --yes`; REA оставил рядом резервные копии `mcp.json.rea.backup` и
   `mcp.json.rea.backup.fbd170df1fed8f45e9e0d4080d072c68a433d38797d2ba5294b89069866f8b2e.recovery`, а

@@ -16,14 +16,14 @@ REA 6.8.0 установлен глобально через npm и зареги
 
 | Компонент | Состояние на этом ПК |
 |---|---|
-| REA | 6.8.0 (`rea --version`), глобальный пакет npm `rea-agents` в `C:\Users\USER\AppData\Roaming\npm\node_modules\rea-agents` (запускающий скрипт `scripts\rea.mjs`) |
-| Навык REA | `reverse-engineer-anything` v49 в `C:\Users\USER\.agents\skills\reverse-engineer-anything` (cli_commands 175, mcp_tools 229, mcp_prompts 6) |
+| REA | 6.8.0 (`rea --version`), глобальный пакет npm `rea-agents` в `%USERPROFILE%\AppData\Roaming\npm\node_modules\rea-agents` (запускающий скрипт `scripts\rea.mjs`) |
+| Навык REA | `reverse-engineer-anything` v49 в `%USERPROFILE%\.agents\skills\reverse-engineer-anything` (cli_commands 175, mcp_tools 229, mcp_prompts 6) |
 | Ghidra | 12.1.4 в `C:\tools\ghidra_12.1.4_PUBLIC` (`application.version=12.1.4`, `application.java.min=21`) |
 | JDK | Eclipse Adoptium Temurin 21.0.13+9 (`JAVA_RUNTIME_VERSION 21.0.13+9-LTS`) в `C:\tools\jdk-21.0.13+9` |
 | Node.js | v22.23.4 в `C:\Program Files\nodejs\node.exe` (системная установка, удовлетворяет «Node 22.23.4+» от REA), npm 10.9.9 |
 
 Регистрация выполнена командой `rea setup --client pi --yes`. Запись `rea` в
-`C:\Users\USER\.pi\agent\mcp.json` — stdio:
+`%USERPROFILE%\.pi\agent\mcp.json` — stdio:
 
 ```json
 "rea": {
@@ -83,7 +83,7 @@ REA создал рядом свои резервные копии: `mcp.json.re
 `--scope project`, который пишет `.mcp.json` в репозиторий, откуда его можно закоммитить или скопировать.
 На этом ПК запись лежит в пользовательской конфигурации агента `C:\Users\<user>\.pi\agent\mcp.json`
 (см. раздел выше); локальная область Claude Code здесь недоступна, так как Claude Code отсутствует
-(`where claude` не находит, нет `C:\Users\USER\.claude`, нет `C:\Users\USER\.claude.json`). Анализ в любом
+(`where claude` не находит, нет `%USERPROFILE%\.claude`, нет `%USERPROFILE%\.claude.json`). Анализ в любом
 случае только на чтение.
 
 ## История прежнего ПК (октябрь 2026, диск E:)

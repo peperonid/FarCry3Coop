@@ -27,7 +27,7 @@ tools and repos lived:
 | Read-only install (Ubisoft Connect) | `H:\Uplay\Far Cry 3\` |
 | Scratch and private state | `<repo>\local\`, `<repo>\local\scratch\` (gitignored) |
 | Agent harness temp | `C:\Users\<user>\AppData\Roaming\pi-desktop\tmp` |
-| REA / Ghidra / JDK toolchain | `C:\tools\`, `C:\Program Files\nodejs\`, npm global prefix `C:\Users\USER\AppData\Roaming\npm` (see below and `docs/tools/rea.md`) |
+| REA / Ghidra / JDK toolchain | `C:\tools\`, `C:\Program Files\nodejs\`, npm global prefix `%USERPROFILE%\AppData\Roaming\npm` (see below and `docs/tools/rea.md`) |
 
 Every `E:\FarCryCoop\` path kept in this document and in NOTES.md is a historical record from the
 owner's previous PC (October 2026). Drive `E:` does exist on this PC as a game drive, but it has no
@@ -37,7 +37,7 @@ owner's previous PC (October 2026). Drive `E:` does exist on this PC as a game d
 
 | Tool | Version | Path | Source |
 |---|---|---|---|
-| REA (`rea-agents`) | 6.8.0 (`rea --version`) | `C:\Users\USER\AppData\Roaming\npm\node_modules\rea-agents` | npm global install; registered for pi by `rea setup --client pi --yes` |
+| REA (`rea-agents`) | 6.8.0 (`rea --version`) | `%USERPROFILE%\AppData\Roaming\npm\node_modules\rea-agents` | npm global install; registered for pi by `rea setup --client pi --yes` |
 | Ghidra | 12.1.4 | `C:\tools\ghidra_12.1.4_PUBLIC` | https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build |
 | Eclipse Adoptium Temurin JDK | 21.0.13+9 (`JAVA_RUNTIME_VERSION 21.0.13+9-LTS`) | `C:\tools\jdk-21.0.13+9` | Temurin 21 (Adoptium) |
 | Node.js | v22.23.4 | `C:\Program Files\nodejs\node.exe` | system install (satisfies REA "Node 22.23.4+"); npm 10.9.9 |
@@ -86,7 +86,7 @@ previous PC with drive `E:`. Node v24.22.0 (portable) and Temurin 21.0.12.1+1 li
 
 - Windows, PowerShell and the system `git.exe` (`C:\Program Files\Git`) live on C:. They are used as
   installed; nothing new is written there by our tools. Claude Code is not installed on this PC
-  (`where claude` fails; no `C:\Users\USER\.claude`, no `C:\Users\USER\.claude.json`).
+  (`where claude` fails; no `%USERPROFILE%\.claude`, no `%USERPROFILE%\.claude.json`).
 - REA's registration writes to `C:\Users\<user>\.pi\agent\mcp.json` on C: (done on 2026-11-03 by
   `rea setup --client pi --yes`; REA left the backups `mcp.json.rea.backup` and
   `mcp.json.rea.backup.fbd170df1fed8f45e9e0d4080d072c68a433d38797d2ba5294b89069866f8b2e.recovery`, and

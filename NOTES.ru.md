@@ -277,7 +277,7 @@ English version: [NOTES.md](NOTES.md)
 (FC3_d3d11.dll 40869416 байт на диске, PE compile time 2022-05-04, версия файла 1.06.0.90512,
 product 1089053420; MD5 FC3_d3d11 `916c6d4b876d8be5f0ad68f50719a838`, FC3
 `5742de2aaa76935d46947bf89e2e2eb7`, farcry3_d3d11.exe `47d4c992b0e82b7d52cc48e8d1bd9119`).
-Сборки 1.05 на дисках нет нигде (C:/Users/USER/Downloads, Desktop, D:/, E:/, H:/).
+Сборки 1.05 на дисках нет нигде (%USERPROFILE%/Downloads, Desktop, D:/, E:/, H:/).
 
 - **exe — DRM-загрузчик.** `bin/farcry3_d3d11.exe` (60992 байта) стартует и заново запускает exe
   **из канонической установки**, путь к которой берётся из реестра

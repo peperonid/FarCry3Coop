@@ -16,14 +16,14 @@ are present; Claude Code is not installed here.
 
 | Component | State on this PC |
 |---|---|
-| REA | 6.8.0 (`rea --version`), npm global package `rea-agents` at `C:\Users\USER\AppData\Roaming\npm\node_modules\rea-agents` (entry script `scripts\rea.mjs`) |
-| REA skill | `reverse-engineer-anything` v49 at `C:\Users\USER\.agents\skills\reverse-engineer-anything` (cli_commands 175, mcp_tools 229, mcp_prompts 6) |
+| REA | 6.8.0 (`rea --version`), npm global package `rea-agents` at `%USERPROFILE%\AppData\Roaming\npm\node_modules\rea-agents` (entry script `scripts\rea.mjs`) |
+| REA skill | `reverse-engineer-anything` v49 at `%USERPROFILE%\.agents\skills\reverse-engineer-anything` (cli_commands 175, mcp_tools 229, mcp_prompts 6) |
 | Ghidra | 12.1.4 at `C:\tools\ghidra_12.1.4_PUBLIC` (`application.version=12.1.4`, `application.java.min=21`) |
 | JDK | Eclipse Adoptium Temurin 21.0.13+9 (`JAVA_RUNTIME_VERSION 21.0.13+9-LTS`) at `C:\tools\jdk-21.0.13+9` |
 | Node.js | v22.23.4 at `C:\Program Files\nodejs\node.exe` (system install, satisfies REA "Node 22.23.4+"), npm 10.9.9 |
 
 Registration was made by `rea setup --client pi --yes`. The `rea` entry in
-`C:\Users\USER\.pi\agent\mcp.json` is stdio:
+`%USERPROFILE%\.pi\agent\mcp.json` is stdio:
 
 ```json
 "rea": {
@@ -83,7 +83,7 @@ REA's own docs (`docs/installation.md`, "One project") say: avoid `--scope proje
 `.mcp.json` into the repository where it can be committed or copied. On this PC the entry lives in the
 agent's user-level config `C:\Users\<user>\.pi\agent\mcp.json` (see the section above); Claude Code's
 local scope is not an option here because Claude Code is absent (`where claude` fails, no
-`C:\Users\USER\.claude`, no `C:\Users\USER\.claude.json`). Analysis is read-only either way.
+`%USERPROFILE%\.claude`, no `%USERPROFILE%\.claude.json`). Analysis is read-only either way.
 
 ## History of the previous PC (October 2026, drive E:)
 

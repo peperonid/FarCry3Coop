@@ -252,7 +252,7 @@ version resource** (`VS_VERSION_INFO` is absent; the only `FileVersion` hit is t
 list may belong to a different (1.05) build; the sha256 values in the table above are what this
 machine has. Bantila's recorded 1.05 `FC3.dll` SHA-256
 `493031278308793D841F7419C83A447678651860312F56506A0A18B2A70D19E5` matches nothing here.
-No 1.05 build exists anywhere on the disks (C:/Users/USER/Downloads, Desktop, D:/, E:/, H:/).
+No 1.05 build exists anywhere on the disks (%USERPROFILE%/Downloads, Desktop, D:/, E:/, H:/).
 
 - **The exe is a DRM stub.** `bin/farcry3_d3d11.exe` (203816 bytes; PE32, EP `0x000012de`,
   base `0x00400000`, `.text` 2138 B, `.rsrc` 187880 B, imports: `FC3_d3d11.dll` **1 function**,

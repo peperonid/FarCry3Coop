@@ -13,11 +13,11 @@
 
 | Компонент | Состояние на этом ПК |
 |---|---|
-| context-mode | 2.1.1 (`2652fe2`), npm-зависимость `pi-extensions` в `C:\Users\USER\.pi\agent\npm\node_modules\context-mode` |
+| context-mode | 2.1.1 (`2652fe2`), npm-зависимость `pi-extensions` в `%USERPROFILE%\.pi\agent\npm\node_modules\context-mode` |
 | Режим установки pi | `in-process` (адаптер `pi`, канал хука `pi/index.js`); не git-выгрузка |
-| Конфиг хоста pi | `C:\Users\USER\.pi\agent\settings.json`, `packages: ["npm:context-mode", "npm:billion-context", "npm:@keenable/pi-search"]` |
-| Данные context-mode | `C:\Users\USER\.context-mode\` (`plugins/`, `projects/`, `reports/`, `hook-errors.log`) |
-| CLI `context-mode` | **нет в PATH** — запускать через `node C:\Users\USER\.pi\agent\npm\node_modules\context-mode\cli.mjs …` |
+| Конфиг хоста pi | `%USERPROFILE%\.pi\agent\settings.json`, `packages: ["npm:context-mode", "npm:billion-context", "npm:@keenable/pi-search"]` |
+| Данные context-mode | `%USERPROFILE%\.context-mode\` (`plugins/`, `projects/`, `reports/`, `hook-errors.log`) |
+| CLI `context-mode` | **нет в PATH** — запускать через `node %USERPROFILE%\.pi\agent\npm\node_modules\context-mode\cli.mjs …` |
 | Самый свежий релиз upstream | v2.1.1 (опубликован 2026-11-05); единственная git-ветка `main` (ветки `release` нет); теги `v*` до v2.1.1 |
 
 `ctx_doctor` (2026-11-05): D1–D11 в основном PASS. Два сбоя разобраны ниже (D3, D7).
@@ -58,7 +58,7 @@ fatal: Remote branch release not found in upstream origin.
 
 ### Симптом 2 — D3 «FAIL» в хост-конфиге: косметический, а «исправление» опасно
 
-`ctx_doctor` сообщает **D3 FAIL: wrong entry in `C:\Users\USER\.pi\agent\settings.json`**. Это расхождение
+`ctx_doctor` сообщает **D3 FAIL: wrong entry in `%USERPROFILE%\.pi\agent\settings.json`**. Это расхождение
 версионирования, а не функциональный сбой: doctor ожидает *современную* git-спецификацию в `packages`, а мы
 используем рабочую *v1* npm-спецификацию.
 
@@ -70,8 +70,8 @@ v1-спецификация: `V1_PI_PACKAGE = "npm:context-mode"` (L28731); кл
 Почему это сломает следующий старт pi:
 - `@release` в git-спецификации — это git-ref (ветка/тег), которого больше нет.
 - pi грузит git-пакет клонированием и сбросом на этот ref; при неудаче — с кэшированной копии.
-- Кэша git-пакета для context-mode здесь **нет** (`C:\Users\USER\.pi\agent\tmp\extensions\` пуст; рабочая
-  копия — npm-установка в `C:\Users\USER\.pi\agent\npm\node_modules\context-mode`).
+- Кэша git-пакета для context-mode здесь **нет** (`%USERPROFILE%\.pi\agent\tmp\extensions\` пуст; рабочая
+  копия — npm-установка в `%USERPROFILE%\.pi\agent\npm\node_modules\context-mode`).
 - Итог: pi попытается клонировать `…@release` → ref не найден → нет кэша → **context-mode не загружен → все
   инструменты `ctx_*` исчезают.**
 
