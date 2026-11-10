@@ -2903,3 +2903,40 @@ session_msgs.txt,party_api.txt}`, `...\fc3sock\`, `...\party106\`; supermemory `
   Согласуется с PRUDP (XOR + контрольная сумма Adler, без массового шифра) → груз НЕ шифруется массово, но
   рукопожатие PRUDP всё равно нужно воспроизвести. Блокер №2 переформулирован: вопрос теперь «встроить/быть
   внутри PRUDP», а не «взломать AES».
+
+
+### Сессия 25 — модуль LAN-матчмейкинга движка СУЩЕСТВУЕТ и настраивается под loopback, но офлайн-поток его не запускает (решение по пути транспорта)
+
+LanTrace.java по проанализированному FC3_106 (артефакт `H:\FarCryCoop\scratch\ghidra\out\lantrace\report.txt`;
+запуск `H:\FarCryCoop\scratch\ghidra\run_lantrace2.bat`). Прочитан рабочий
+`scratch/exp_lan_config/engine/settings/defaultnetworkconfig.xml` (тот самый нетконфиг, что парсит движок):
+
+- Конфиг неткода несёт целый блок **LAN-матчмейкинга**: `OnlineEnginePort=9000`, `OnlineServicePort=9001`,
+  `FileTransferHostPort=9002/ClientPort=9003`, `LanHostBroadcastPort=9004`, `LanClientBroadcastPort=9005`,
+  `ScanPortStart=9000 ScanPortRange=1000`, `EnableNatTraversal=1`, `SecureSocketEnabled=1`,
+  `MainSocketEncrypted=1`, `MaximumPeerCount=25`. Плюс строковые ключи `LanMatchmakingReuseAddress`,
+  `LanMatchmakingDiscoveryOnLoopbackEnable` (есть в FC3.dll, но нет в XML по умолчанию → читаются как
+  отсутствуют→дефолт).
+- `FUN_11733e50` = **регистратор настроек сетевого движка**: регистрирует каждый атрибут
+  defaultnetworkconfig.xml (`TimeOutEnabled`, `SecureSocketEnabled`=«Enable network socket security (applied
+  when network engine is restarted)», `LanHostBroadcastPort`, `MainSocketEncrypted`, …) через
+  `FUN_11ab6ed0(name, offset, descriptor, 0x13)`. `FUN_111f6650` = регистратор **соединений / LAN-матчмейкинга**
+  storm::echo (`Connection*TimeoutInMs` + ключи `LanMatchmakingReuseAddress` /
+  `LanMatchmakingDiscoveryOnLoopbackEnable`). ⇒ эти LAN-ключи настоящие, парсятся и применяются при старте движка.
+- В storm::echo есть LAN-подсистема: строки `lanmanager`, `BroadcastLanDiscovery`,
+  `storm::echo::lan::inEvent::DiscoverSession`, `...lan::inEvent::internal::BroadcastLanDiscovery2`.
+
+**Решение — жив ли путь через транспорт движка?** ДА в принципе, и работа — НЕ переписывание транспорта:
+- Игра уже поставляет первоклассный модуль LAN-матчмейкинга с поддержкой loopback (порты 9004/9005, ключи
+  reuse + loopback-discovery, события LAN-обнаружения). Офлайн он достижим *на уровне неткода*.
+- Блокер — это **слой сессии/лобби**, а не транспорт: офлайн-подделка solo262 `uplay_r14` бросает игру в
+  «соло»-сессию кооператива только для себя и **без браузера сессий** (собственная заметка владельца
+  m03754/m03905). Поэтому `lanmanager` есть, но **не вызывается** — игра не зовёт host-LAN / discover, т.к.
+  офлайн-поток вообще не попадает в состояние «хостируемая/входимая» сессия кооператива.
+- Значит «2 живых человека офлайн» = задача **запуска сессии / UI** (заставить офлайн-сборку открывать
+  хостируемую сессию кооператива + путь обнаружения/входа вместо жёстко заданной сессии «только я»), а НЕ
+  задача заново реализовать PRUDP. `SecureSocketEnabled=1` означает, что любой вход идёт через слой защиты
+  сокета (нюанс блокера №2) — нужно его рукопожатие, но без массового AES.
+- Буквальный живой тест (запустить, открыть LAN-браузер,захостить, второй экземпляр заходит через loopback)
+  **сейчас заблокирован**: в офлайн-потоке нет LAN-браузера, через который можно хостить/заходить, пока не
+  будет получена хостируемая офлайн-сессия кооператива. Одних ключей loopback/reuse для этого мало.

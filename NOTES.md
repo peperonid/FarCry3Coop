@@ -3192,3 +3192,40 @@ strings `out\coopnet\*`). This replaces the earlier unverified join-caller claim
   Consistent with PRUDP (which uses XOR + Adler CRC integrity, not bulk cipher) → the payload is **not
   bulk-encrypted**, but PRUDP still needs its connection handshake replicated. This reframes blocker #2:
   the question is now "implement/be inside PRUDP", not "defeat AES".
+
+
+### Session 25 — engine LAN-matchmaking module EXISTS and is loopback-configurable, but the offline flow never drives it (decision on the transport path)
+
+LanTrace.java over the analysed FC3_106 (artifacts `H:\FarCryCoop\scratch\ghidra\out\lantrace\report.txt`;
+runner `H:\FarCryCoop\scratch\ghidra\run_lantrace2.bat`). Read the working copy's
+`scratch/exp_lan_config/engine/settings/defaultnetworkconfig.xml` (the live netconfig the engine parses):
+
+- The netcode config the engine reads carries a full **LAN matchmaking** block:
+  `OnlineEnginePort=9000`, `OnlineServicePort=9001`, `FileTransferHostPort=9002/ClientPort=9003`,
+  `LanHostBroadcastPort=9004`, `LanClientBroadcastPort=9005`, `ScanPortStart=9000 ScanPortRange=1000`,
+  `EnableNatTraversal=1`, `SecureSocketEnabled=1`, `MainSocketEncrypted=1`, `MaximumPeerCount=25`.
+  Plus string-only knobs `LanMatchmakingReuseAddress`, `LanMatchmakingDiscoveryOnLoopbackEnable` (present in
+  FC3.dll but absent from the default XML → read as missing→default).
+- `FUN_11733e50` = the **network-engine settings registrar**: registers every defaultnetworkconfig.xml
+  attribute (`TimeOutEnabled`, `SecureSocketEnabled`="Enable network socket security (applied when network
+  engine is restarted)", `LanHostBroadcastPort`, `MainSocketEncrypted`, …) via
+  `FUN_11ab6ed0(name, offset, descriptor, 0x13)`. `FUN_111f6650` = the storm::echo **connection / LAN-matchmaking
+  settings registrar** (`Connection*TimeoutInMs` + the `LanMatchmakingReuseAddress` /
+  `LanMatchmakingDiscoveryOnLoopbackEnable` keys). ⇒ these LAN knobs are real, parsed and applied at engine start.
+- storm::echo carries a LAN subsystem: strings `lanmanager`, `BroadcastLanDiscovery`,
+  `storm::echo::lan::inEvent::DiscoverSession`, `...lan::inEvent::internal::BroadcastLanDiscovery2`.
+
+**Decision — does the engine-transport path live?** YES in principle, and the work is NOT a transport rewrite:
+- The game already ships a first-class, loopback-capable LAN matchmaking module (ports 9004/9005, reuse +
+  loopback-discovery toggles, LAN discovery events). Offline it is reachable *at the netcode level*.
+- The blocker is the **session/lobby layer**, not the transport: the offline solo262 `uplay_r14` fake drops
+  the game into a self-only solo co-op session with **no session browser** (owner's own blocker note
+  m03754/m03905). So `lanmanager` is present but **never driven** — the game never calls host-LAN /
+  discover because the offline flow never reaches a hostable/joinable co-op session state.
+- Therefore "2 live people offline" = a **session-bootstrap / UI** problem (make the offline build open a
+  hostable co-op session + a discover/join path instead of the hardcoded self-only session), NOT a
+  reimplement-PRUDP problem. `SecureSocketEnabled=1` means any join runs through the socket-security layer
+  (blocker #2 nuance) — needs its handshake, but no bulk AES.
+- The literal live test (launch, open LAN browser, host, second instance joins over loopback) is **currently
+  blocked**: there is no LAN browser in the offline flow to host/join through until a hostable offline co-op
+  session is produced. Enabling loopback/reuse knobs alone cannot surface it.
