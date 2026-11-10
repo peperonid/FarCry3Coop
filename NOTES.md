@@ -3270,3 +3270,26 @@ map string at fc3_main, (c) x4 streaming constants, (d) ship a rebuilt island wo
 coop-completed SP configs/scripts, (e) peer cap 25. Nothing else. Revive = reproduce/verify (a)-(d), then
 make ONLINE join work (server state 2026: see prior web research; reddit 2026-09 "Co-Op not available" =
 open question).
+
+
+### Session 26b (2026-11-10, agent) — KEYSTONE VERIFIED: the 1.05 engine runs on 1.06 data
+
+Test in `H:\FarCryCoop\TestFC3_105` (owner rule: all tests run from this folder — upc launches
+whatever folder is configured for the game there). Swapped in genuine vanilla 1.05 bin
+(`FC3.dll` 5ff04533, `farcry3.exe` 203816->202088) + pristine 1.06 `patch.dat` (5a788dd5), set the OW
+vistas pair aside, then launched `bin\farcry3.exe` directly (offline, uplay_r14 + solo262 loaders kept):
+- Game boots to main menu; a dismissable dialog "Служба Far Cry 3 недоступна" appears (service
+  warning, not fatal - menu works behind it).
+- With `FC3.dll` = hybrid (md5 341888251150, scratch\FC3_hybrid.dll) the menu fully loads
+  (ИГРА / СОВМЕСТНАЯ ИГРА / КОЛЛЕКТИВНАЯ ИГРА visible; coop browser reachable).
+- Keyboard nav (arrows+Enter) -> slot "new game" -> "ВНИМАНИЕ: slot has save, load?" -> НЕТ ->
+  **the island world LOADED and rendered** (opening scene, night jungle, flare). fc3_main.dat 1.06
+  (fea2e5a1) + 1.05 engine = fully playable boot. 
+- Swap state saved aside: `H:\FarCryCoop\scratch\swap_105_datatest\` (patch_solo262.dat/fat,
+  fc3_main_vistas pair). Revert = move those back.
+
+Consequences:
+- The OpenWorldCoop full stack (OW FC3.dll = 1.05 + 184-byte patch, OW patch.dat, OW vistas) can run
+  in this folder with the same data minus no version barrier: engine-data compatibility proven.
+- Next: offline regression (hybrid + solo262 patch.dat + vistas -> local co-op island), then
+  install the OW stack for the ONLINE main-world co-op attempt via real upc.
