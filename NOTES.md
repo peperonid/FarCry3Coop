@@ -3525,3 +3525,27 @@ Detour design (next): either (a) populate the roster `std::map` (getter `0x10070
 `0x12854784` singleton report membership, or (b) detour the controller block `0x11218480..0x112185xx` to inject a
 synthetic 2-4 roster and force the join-gate pass. (b) is the smaller surface; both need the member-object field
 layout (vtable `+0x2c` / `[+0x64]` / `[+0xec]`) read from what `FUN_11273650` consumes downstream.
+
+
+### Session 28f (same day) - party-controller field map: two member-slot groups + presence mask; roster detour spec
+
+Extends 28e (disasm of the FUN_11273650 tail and the deeper caller FUN_1127422a on the 1.06 `FC3.dll`).
+
+- **Party controller (`this` = `ebx`) field map** (from FUN_11273650's teardown path):
+  - two parallel member-slot groups: group A at `+0x30`(ptr) / `+0x34`(byte flag, set to 1) / `+0x38`(container),
+    group B at `+0x54`(ptr) / `+0x58`(byte flag) / `+0x5c`(container); each container is released via `0x10116890`;
+    guards `+0x44`, `+0x68` (non-zero -> release path).
+  - presence bitmask: `[+0x24] & [+0x28]`, compared to `-1` (0xFFFFFFFF = "no member").
+  - the roster container the emptiness predicate uses is at **`+0x5c`** (caller FUN_1127422a does
+    `cmp ecx,[esi+0x5c]; jb ...`), so the trusted party is `+0x5c`, mirrored by `+0x38`.
+- **Member object state**: inner object via `[member+0x64]`, state flag `byte[inner+0xec] & 8` (a boolean gate
+  the join path tests before accepting the member).
+- **Implementation-ready roster detour (spec for the next step):** populate the `+0x5c` roster container
+  (`std::map` by 64-bit member id, node key lo/hi `+0x10/+0x14`) with 2-4 member entries, set `+0x58`/`+0x54`
+  (group B) and the presence mask `[+0x24]&[+0x28]` to a non-(-1) value, and make each member's inner
+  `byte[+0xec]&8` pass. The smaller-surface alternative remains a detour of the controller block
+  `0x11218480..0x112185xx` (join gate is virtual there). The service singleton `0x12854784`
+  (from 28e) is the least-invasive observation point.
+- Caution: all offsets are for the 1.06 build md5 `5742de2a`; and none of this is verifiable without the live
+  game reaching a host/join (owner `upc Play` run with `FC3COOP_FAKE_PARTY=1`), so the next actionable move is
+  that live run, not more static RE.
