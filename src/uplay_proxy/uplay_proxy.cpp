@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static const char BSB[2] = {92, 0};
 static CRITICAL_SECTION g_cs;
@@ -72,6 +73,8 @@ static const char* g_names[NEXP] = {
 "UPLAY_USER_SetGameSession",
 "UPLAY_Update",
 };
+static int g_fakeval[NEXP] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0};
+static int g_fake = 0;
 
 static void logOpen(void) {
     if (g_log) return;
@@ -112,15 +115,17 @@ int __cdecl apiThunk(int slot, void** argp, DWORD caller) {
     DWORD a[8] = {0,0,0,0,0,0,0,0};
     __try { for (int i = 0; i < 8; i++) a[i] = (DWORD)argp[i]; } __except (EXCEPTION_EXECUTE_HANDLER) {}
     const char* nm = (slot >= 0 && slot < NEXP) ? g_names[slot] : "?";
-    int r;
+    int r; int fk = (g_fake && slot >= 0 && slot < NEXP) ? g_fakeval[slot] : 0;
     void* real = (slot >= 0 && slot < NEXP) ? g_realp[slot] : NULL;
-    if (real) {
+    if (fk) r = fk;
+    else if (real) {
         __try {
             typedef int (__cdecl*fn)(DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD);
             r = ((fn)real)(a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7]);
         } __except (EXCEPTION_EXECUTE_HANDLER) { r = 0x7F000001; }
     } else r = 0x7F000002;
     char d[170]; describe(caller, d, sizeof(d));
+    if (fk) { strcat(d, " [FAKE]"); }
     if (g_log) {
         EnterCriticalSection(&g_cs);
         SYSTEMTIME st; GetLocalTime(&st);
@@ -682,6 +687,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(h);
         logOpen();
+        g_fake = (getenv("FC3COOP_FAKE_PARTY") != NULL) ? 1 : 0;
         char exe[MAX_PATH]; GetModuleFileNameA(NULL, exe, MAX_PATH);
         char* b = strrchr(exe, 92); if (b) strcpy(g_exe, b + 1);
         char self[MAX_PATH]; GetModuleFileNameA(h, self, MAX_PATH);
@@ -693,7 +699,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         EnterCriticalSection(&g_cs);
         if (g_log) {
             int miss = 0; for (int i = 0; i < NEXP; i++) if (!g_realp[i]) miss++;
-            fprintf(g_log, "proxy up: real=%p exports=%d missing=%d%c", g_real, NEXP, miss, 10); fflush(g_log);
+            fprintf(g_log, "proxy up: real=%p exports=%d missing=%d fake=%d%c", g_real, NEXP, miss, g_fake, 10); fflush(g_log);
         }
         LeaveCriticalSection(&g_cs);
     }

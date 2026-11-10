@@ -3386,3 +3386,44 @@ Source `src/uplay_proxy/{uplay_proxy.cpp,uplay_proxy.def,proxytest.c,build.bat,b
   UI, or detour the FC3 session callers) and then start faking, in this same proxy, a 2-4 slot party member
   list, `UPLAY_PARTY_IsPartyLeader=true` and a GameSession create/join success over the local session type-3
   path.
+
+
+## Session 28 (2026-11-11): orbit-API proxy gains env-gated party-gate fakes; generator regressions fixed
+
+Continues Session 27. Goal: take the orbit-API proxy from pure observation to the first safe *fake*, to test
+the 26c hypothesis (the co-op menu is dead because the party/online gates read the dead Ubisoft service).
+Artifacts: `src/uplay_proxy/{uplay_proxy.cpp,uplay_proxy.def}` (regenerated), `scripts/probe_orbit_gates.py`,
+`scripts/gen_uplay_proxy.py`.
+
+- **ABI check first (`probe_orbit_gates.py`).** In the real `bin\real\uplay_r1_loader.dll` the gate exports
+  (`UPLAY_USER_IsConnected`, `UPLAY_PARTY_IsInParty`, `UPLAY_PARTY_IsPartyLeader`, the member-list getters,
+  `UPLAY_PARTY_Init`) are all 5-byte `jmp` thunks in a two-level stub table (the loader itself forwards to the
+  orbit/service impl over a named pipe). So the bool gates are `int(void)` cdecl returning the service value;
+  with the service dead they return FALSE, which is exactly what gates the co-op menu off.
+- **Fake added, ABI-safe and gated.** `gen_uplay_proxy.py` now emits a per-export `g_fakeval[NEXP]` table and a
+  runtime `g_fake` flag from `getenv("FC3COOP_FAKE_PARTY")`. In `apiThunk`, a fake slot short-circuits
+  (`if (fk) r = fk; else if (real) {forward}`) and logs the line with a ` [FAKE]` suffix. Only the three
+  zero-arg bool gates are forced to 1 (`IsConnected`, `IsPartyLeader`, `IsInParty`); the member-list /
+  `SetGameSession` calls stay **forwarded** (faking them needs the member-list struct layout - crash risk,
+  deferred). Default (no env) = byte-for-byte the pure-forwarding behavior of Session 27.
+- **Three latent generator regressions fixed (important).** The committed `gen_uplay_proxy.py` no longer
+  reproduced the committed `uplay_proxy.cpp`: it built the three `fprintf` format strings and the four caller
+  tag strings with `qh(chr(34)+FMT)[:-1]`, which drops the last format char and emits a broken `\"...%` (no
+  closing quote), and it emitted `strcpy(s+1, "real" BSB "uplay_r1_loader.dll")` where `BSB` is a `char[]`
+  variable, not a literal (does not compile). Regenerating now corrupted those lines. Fixed to
+  `chr(34)+FMT+chr(34)` and back to `sprintf(s+1,"real%suplay_r1_loader.dll",BSB)`. With the fakes removed the
+  regenerated cpp is again identical to HEAD, so the fake build is trustworthy; `build.bat`/`build_x86.bat`
+  use `vcvars32` (fixed in Session 27) and `cl` exits 0 (only C4996 deprecation warnings).
+- **Built + deployed.** Fresh x86 proxy `machine 0x14c`, 58 exports, `sha1 2de99a7e…`, installed at
+  `H:\FarCryCoop\TestFC3_105\bin\uplay_r1_loader.dll` (fake OFF by default; the real loader stays at
+  `bin\real\`). The `proxy up:` log line now reports `fake=%d`.
+- **Open (runtime verify).** Whether the offline game actually calls the gate functions (and whether forcing
+  them to 1 revives the co-op host/join menu) needs a live run with `FC3COOP_FAKE_PARTY=1`. The `proxytest.c`
+  harness cannot prove it standalone: loading the real loader spawns orbit/service worker threads that
+  outlive `main`, so the harness hangs and must be run detached with a kill-timeout. Live boot only calls
+  `UPLAY_Init`+`UPLAY_PARTY_Init`; the gates fire on co-op-menu navigation. Deferred to the next step.
+- **Transport decision recorded.** For FC3 the transport is the engine's own `storm::echo` LAN/loopback
+  (the coop-networking skill's "the engine's own netcode" option), NOT the Steam Spacewar (AppID 480) relay:
+  FC3 is not a Steam app at runtime (`no steam_api.dll`, runs via the Ubisoft Connect loader), and the relay
+  only bridges a session the game must first open - which is this session-glue problem, one layer below. The
+  HXCoop relay stays a documented phase-2 (over-the-internet) option.
