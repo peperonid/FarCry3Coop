@@ -3800,3 +3800,33 @@ Ghidra-проходы `DecompileInputs`/`Decompile3`/`Decompile4` по `FC3d3d11
    совпадает с "offline flow никогда его не задействует"), весь этот конвейер тикета просто пропускается -> входу в кооп тикет не
    нужен вовсе, и патч (B) сводится к вождению `NetEngineType=LAN` + `CFCXJoinSessionOperation`. Если LAN-вход ВСЁ ЖЕ соединяется
    с RV, то (B) должен также имитировать `FUN_11237670` и подавать набор. Эксперимент `fc3_lan_coop_launch.bat` решает, что из этого.
+
+
+### Сессия 28ab - цепь провайдеров InitiateLogin; идентичность передаётся ПРОЗРАЧНО из контекста JobBackEndServicesLogin (для имён нужен игровой писатель)
+
+Ghidra-проходы `Decompile5`/`Decompile6` по `FC3d3d11_live`. Поднялся на 3 уровня над конструктором, чтобы найти, кто поставляет идентичность тикета:
+
+- **Цепь (вся за RV-гейтом `FUN_11237670`):** `JobBackEndServicesLogin::ProcessAuthenticationResult` `FUN_11252710`
+  (строка `.../RendezVous/Core/src/Client/JobBackEndServicesLogin.cpp`) -> фасад TicketManager `FUN_1124f7f0`
+  (строка `.../Authentication/TicketManager.cpp`) -> конструктор InitiateLogin `FUN_1124f5e0` -> поля джобы.
+- `FUN_11252710` делает вызов, читая свой **контекст-объект логина** `param_1` (джоба `JobBackEndServicesLogin`), напр.
+  `FUN_1124f7f0( param_1+0xd8, param_1+0x150, param_1+0x6c, *(param_1+0x70), <ptr+0x20>, param_1+0x1cc,
+  *(param_1+0x27c), *(param_1+0x280) )`. Значит набор идентичности живёт в полях контекста логина
+  **`{+0x6c ptr, +0x70 val, +0x150 ptr, +0x1cc ptr, +0x27c val, +0x280 val}`** (плюс `+0x17c`->sub->`+0x20` и `+0x128/+0x12c/+0x290/+0x294`
+  для проверки), и **без изменений** форвардится через две обёртки TicketManager в поля джобы InitiateLogin
+  `{+0x68,+0x6c,+0xF0(копия str),+0xF4,+0xF8,+0xFC,+0x100,+0x194}`.
+- **Эти RV-core-функции - прозрачные форвардеры** - они не интерпретируют значения, поэтому на этом слое нет кода, который бы
+  говорил «это session id / пароль / playlist id / account id». Имена назначает ИГРОВОЙ производитель, который ЗАПОЛНЯЕТ поля
+  контекста `JobBackEndServicesLogin` (граница `CSessionLoginOperationProvider_RdV` / `CFCX*JoinSessionOperation`), а он - над
+  RV-ядром и пишет в кучевую структуру (как именованное поле напрямую через xref не берётся).
+
+**Лучшее умозаключение (ПОМЕТЧЕНО, не подтверждено местом именования):** `+0xF0`/`+0x150` - единственная копируемая **строка** ->
+идентичность / строка тикета (account или user ticket); числовые `{+0x6c,+0x70,+0x27c,+0x280}` - это int'ы RV-логина, вероятнее всего
+**account id / game id / playlist id / флаг варианта логина** (именованные поля сессии `SessionId`/`PlaylistId`/`AccountType`/
+`SessionType` из схемы опов `FUN_1061e581` - кандидаты). MD5 derive/validate используют `idx = job+0xF0` по `**job+0xF4`, значит
+`+0xF4` - буфер, хешируемый вместе с id.
+
+**Чтобы превратить умозаключение в факт (следующая конкретная трассировка):** найти места записи в смещения контекста
+`JobBackEndServicesLogin` `+0x150 / +0x1cc / +0x27c / +0x280` (то есть код, собирающий `JobBackEndServicesLogin` из join-параметров
+CSession/CFCX). Этот производитель привязывает каждое именованное поле сессии ко входу тикета, и именно там живёт семантика
+«пароль / playlist id / account id». Это и есть настоящая последняя миля; само RV-ядро их лишь передаёт.

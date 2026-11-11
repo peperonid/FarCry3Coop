@@ -4100,3 +4100,33 @@ Ghidra `DecompileInputs`/`Decompile3`/`Decompile4` on `FC3d3d11_live` (46bcc097)
    "offline flow never drives it"), this whole ticket pipeline is simply skipped -> co-op join needs no ticket at all, and
    patch (B) reduces to driving `NetEngineType=LAN` + `CFCXJoinSessionOperation`. If LAN join DOES connect RV, then (B) must
    also fake `FUN_11237670` and supply the bundle. The `fc3_lan_coop_launch.bat` experiment settles which.
+
+
+### Session 28ab - InitiateLogin provider chain; identity is carried OPAQUELY from JobBackEndServicesLogin context (naming needs the game-side writer)
+
+Ghidra `Decompile5`/`Decompile6` on `FC3d3d11_live`. Went 3 levels above the ctor to find who supplies the ticket identity:
+
+- **Chain (all RV-gated by `FUN_11237670`):** `JobBackEndServicesLogin::ProcessAuthenticationResult` `FUN_11252710`
+  (string `.../RendezVous/Core/src/Client/JobBackEndServicesLogin.cpp`) -> TicketManager facade `FUN_1124f7f0`
+  (string `.../Authentication/TicketManager.cpp`) -> InitiateLogin ctor `FUN_1124f5e0` -> job fields.
+- `FUN_11252710` issues the call reading its **login-context object** `param_1` (the `JobBackEndServicesLogin` job), e.g.
+  `FUN_1124f7f0( param_1+0xd8, param_1+0x150, param_1+0x6c, *(param_1+0x70), <ptr+0x20>, param_1+0x1cc,
+  *(param_1+0x27c), *(param_1+0x280) )`. So the identity bundle lives in the login-context fields
+  **`{+0x6c ptr, +0x70 val, +0x150 ptr, +0x1cc ptr, +0x27c val, +0x280 val}`** (plus `+0x17c`->sub->`+0x20` and `+0x128/+0x12c/+0x290/+0x294`
+  read for the guard), and is forwarded **unchanged** through the two TicketManager wrappers into the InitiateLogin job fields
+  `{+0x68,+0x6c,+0xF0(str copy),+0xF4,+0xF8,+0xFC,+0x100,+0x194}`.
+- **These RV-core functions are transparent forwarders** - they do not interpret the values, so at this layer there is no code
+  that says "this is the session id / password / playlist id / account id". The names are assigned by the GAME-side producer
+  that FILLS the `JobBackEndServicesLogin` context fields (the `CSessionLoginOperationProvider_RdV` / `CFCX*JoinSessionOperation`
+  boundary), which is above the RV core and writes to a heap struct (not directly xref-able as a named field).
+
+**Best inference (FLAGGED, not confirmed by a naming site):** `+0xF0`/`+0x150` is the only copied **string** -> the identity /
+ticket string (account or user ticket); the numerics `{+0x6c,+0x70,+0x27c,+0x280}` map to the RV login ints - most plausibly
+**account id / game id / playlist id / a login-variant flag** (the named session fields `SessionId`/`PlaylistId`/`AccountType`/
+`SessionType` from the op schema `FUN_1061e581` are the candidates). The MD5 derive/validate use `idx = job+0xF0` over
+`**job+0xF4`, so `+0xF4` is the buffer hashed together with the id.
+
+**To convert inference into fact (next concrete trace):** find the write sites into the `JobBackEndServicesLogin` context
+offsets `+0x150 / +0x1cc / +0x27c / +0x280` (i.e. the code that builds a `JobBackEndServicesLogin` from the CSession/CFCX join
+parameters). That producer binds each named session field to a ticket input, and it is where the "password / playlist id /
+account id" semantics actually live. This is the true remaining mile; the RV core itself only passes them through.
