@@ -41,28 +41,38 @@ def main():
     if not local:
         print("no local frida device"); return 2
     sessions = [p for p in local.enumerate_processes() if p.name.lower() == PROC.lower()]
-    if not sessions:
-        print("process %s not running. Launch FC3 via Ubisoft Connect, reach main menu, then rerun this." % PROC)
-        return 3
-    pid = sessions[0].pid
-    print("attaching to %s pid=%d ; writing %s" % (PROC, pid, OUT))
-    wf("ATTACH-TRY pid=%d" % pid)
+
+    def find_pid():
+        for p in local.enumerate_processes():
+            if p.name.lower() == PROC.lower():
+                return p.pid
+        return None
+
+    wf("START watching for %s -> %s" % (PROC, OUT))
+    print("watching for %s; launch it via Ubisoft Connect and reach the main menu. Ctrl+C to stop." % PROC, flush=True)
     session = None
     last = None
-    for attempt in range(1, 9):
+    for attempt in range(1, 40):
+        pid = find_pid()
+        if pid is None:
+            if attempt == 1:
+                print("(%s not running yet) waiting..." % PROC, flush=True)
+            time.sleep(3)
+            continue
         try:
+            print("attaching to %s pid=%d (attempt %d)..." % (PROC, pid, attempt), flush=True)
             session = frida.attach(pid)
+            wf("ATTACHED pid=%d" % pid)
             break
         except Exception as e:
             last = e
-            print("attach attempt %d failed: %s (retry in 2.5s; make sure the game is idle at the main menu)" % (attempt, e), flush=True)
-            wf("ATTACH-FAIL %d %s" % (attempt, e))
-            time.sleep(2.5)
+            print("attach to pid=%d failed: %s (re-resolving in 3s)" % (pid, e), flush=True)
+            wf("ATTACH-FAIL %d pid=%d %s" % (attempt, pid, e))
+            time.sleep(3)
     if session is None:
-        print("could not attach after retries: %s\nFully quit the game (and any leftover python/frida), relaunch, get to the main menu, and rerun." % last)
+        print("could not attach: %s\nMake sure the game is at the main menu and idle, then rerun." % last)
         wf("ATTACH-ABORT %s" % last)
         return 4
-    session = session  # attached above
     script = session.create_script(open(JS, encoding="utf-8").read())
     script.on("message", on_message)
     try:
