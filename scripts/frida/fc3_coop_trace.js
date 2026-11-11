@@ -24,8 +24,8 @@ function sockaddrInfo(p){
   var m = Process.findModuleByName(mod); if(!m) return;
   var ghn = m.findExportByName('gethostbyname');
   if (ghn) Interceptor.attach(ghn, { onEnter:function(args){ this.n = args[0].readCString(); },
-    onLeave:function(r){ var hosts = r.isNull()?'-':''; if(!r.isNull()){ try{ var hn=r.add(0).readPointer(); hosts = r.add(0).readPointer().readCString(); }catch(e){} }
-      log('[DNS] gethostbyname("' + this.n + '") -> ' + (r.isNull()?'NULL(fail)':('hostent '+r+' name='+hosts))); } });
+    onLeave:function(r){ if(!this.n || this.n.indexOf('.')<0) return; var hosts=''; if(!r.isNull()){ try{ hosts=r.readPointer().readCString(); }catch(e){} }
+      log('[DNS] gethostbyname("' + this.n + '") -> ' + (r.isNull()?'NULL(fail)':('hostent name='+hosts))); } });
   var gai = m.findExportByName('getaddrinfo');
   if (gai) Interceptor.attach(gai, { onEnter:function(args){ this.node = args[0].isNull()?'null':args[0].readCString(); this.svc = args[1].isNull()?'null':args[1].readCString(); },
     onLeave:function(r){ log('[DNS] getaddrinfo(node="'+this.node+'", svc="'+this.svc+'") -> ret='+r); } });
@@ -40,6 +40,12 @@ function sockaddrInfo(p){
     onLeave:function(r){ var n=r.toInt32(); if(n>0) log('[NET] recvfrom(fd, n='+n+', src='+this.src+') data='+hex(this.buf, Math.min(n,64))); } });
   var bnd = m.findExportByName('bind');
   if (bnd) Interceptor.attach(bnd, { onEnter:function(args){ log('[NET] bind(fd, '+sockaddrInfo(args[1]).s+')'); } });
+  var snd = m.findExportByName('send');
+  if (snd) Interceptor.attach(snd, { onEnter:function(a){ this.fd=a[0]; this.buf=a[1]; this.len=a[2].toInt32(); },
+    onLeave:function(r){ if(this.len>0 && r.toInt32()>0) log('[NET] send(fd='+this.fd+', n='+r.toInt32()+') data='+hex(this.buf, Math.min(this.len,64))); } });
+  var rcv = m.findExportByName('recv');
+  if (rcv) Interceptor.attach(rcv, { onEnter:function(a){ this.buf=a[1]; },
+    onLeave:function(r){ if(r.toInt32()>0) log('[NET] recv(n='+r.toInt32()+') data='+hex(this.buf, Math.min(r.toInt32(),64))); } });
   log('winsock hooks installed on '+mod);
 });
 
