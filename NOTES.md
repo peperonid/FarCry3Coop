@@ -3951,3 +3951,33 @@ driven through the Storm-session/CLI entry (which exists but "offline flow never
 
 **Alignment going forward:** work the shim on the 1.05 leading route (upstream), with FC3_106 addresses cross-mapped
 via `fc3_addrmap.py`; the RDV provider replacement (A1) and storm::echo LAN discovery are the concrete levers.
+
+
+### Session 28w - storm::echo LAN + SessionTicket classes confirmed present in the running module (DecompileLAN pass)
+
+Fast Ghidra pass (`DecompileLAN.java`) over the analyzed `FC3d3d11_live` (running module md5 46bcc097): scanned
+engine strings and decompiled their referrers. All target classes are **compiled-in and registered** (not stripped):
+
+- **storm::echo LAN discovery events** (serialized message types): `lan::inEvent::DiscoverSession`
+  (registrar `FUN_10e5eff0`), `lan::inEvent::SetDiscoveryHandler` (`FUN_10e5efc0`), base `lan::inEvent::Event`
+  (`FUN_10e5ef90`), `lan::inEvent::internal*` (`FUN_10e75fa0`). LAN discovery is live in this build.
+- **SessionTicket family** (the open blocker): `storm::echo::SessionTicket` (`FUN_10e755c0`, `FUN_10edf950`),
+  `SessionTicketRequest` (`FUN_10e72b50`, `FUN_10edf880`), `SessionTicketAttach(ment)` (`FUN_10e72bb0`, `FUN_10edf7b0`)
+  - all registered via `FactoryEntry` for network message (de)serialization. So the ticket is an exchange message; the
+  mint/validate logic is in those classes' (de)serialize/attach methods (next place to look), not in the factory stub.
+- **Join/create parameter schema** `FUN_1061e581` registers session op fields as data: `SearchIdAddress`, `JoinGame`,
+  `JoinSessionId`, `SessionRefId`, `SessionType`, **`NetEngineType` (id 0x3c)**, `MatchMakingEnabled`, `PlaylistId`,
+  `AccountType`, `SearchSlots`, ... => LAN vs Online (`NetEngineType`) and the peer `SearchIdAddress` are **settable session
+  parameters**, i.e. the shim lever is data, not code-poking.
+- **echo tunable registry** `FUN_107a227d` registers `LanMatchmakingDiscoveryOnLoopbackEnable`, `LanMatchmakingReuseAddress`,
+  `SessionTicketTimeoutInMs`, connection timeouts, etc. => LAN/loopback is **config-gated** (answers upstream's open question:
+  yes, LanMatchmaking* are writable runtime tunables).
+- **CFCX session ops** are registered factories: `CFCXCreateSessionOperation` (`FUN_107de8fa`), `CFCXJoinSessionOperation`
+  (`FUN_1092e764`), `CFCXCreateSessionOpCtn` (`FUN_107de926`); `CSessionSearchIPOperation` referrer `FUN_10425918`.
+- **A1 note:** the verbatim symbol `CSessionLoginOperationProvider_RdV` was NOT found by this scan in 46bcc097
+  (upstream's provider vtable/methods are for a different module). In this build the RdV path is reached via the gate
+  `FUN_11279ba0` chain (28t); the cleaner lever here is the join-param `NetEngineType` + storm::echo LAN events, not patching
+  upstream's provider vtable.
+
+**Verdict:** storm::echo LAN / join-param shim (route B/A1) is viable in the running module at the map level. Remaining
+unknown to drill next: which handler mints/fills `SessionTicket` (the service-key vs host-key question upstream flagged).

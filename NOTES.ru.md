@@ -3649,3 +3649,33 @@ RV-гейт `FUN_11279ba0` -> RV `BackEndServices` сессия (`FUN_112536a0`)
 
 **Синхронизация дальше:** работать шим на ведущем 1.05-пути (upstream), адреса FC3_106 кросс-картировать через `fc3_addrmap.py`;
 конкретные рычаги - замена RDV-провайдера (A1) и storm::echo LAN discovery.
+
+
+### Сессия 28w - классы storm::echo LAN + SessionTicket подтверждены в рабочем модуле (проход DecompileLAN)
+
+Быстрый проход Ghidra (`DecompileLAN.java`) по проанализированному `FC3d3d11_live` (рабочий модуль md5 46bcc097): поиск
+строк движка + декомпиляция их ссылающихся. Все целевые классы **вкомпилированы и зарегистрированы** (не вырезаны):
+
+- **События обнаружения storm::echo LAN** (сериализуемые типы сообщений): `lan::inEvent::DiscoverSession`
+  (регистратор `FUN_10e5eff0`), `lan::inEvent::SetDiscoveryHandler` (`FUN_10e5efc0`), базовый `lan::inEvent::Event`
+  (`FUN_10e5ef90`), `lan::inEvent::internal*` (`FUN_10e75fa0`). LAN-обнаружение в этой сборке живо.
+- **Семейство SessionTicket** (открытый блокер): `storm::echo::SessionTicket` (`FUN_10e755c0`, `FUN_10edf950`),
+  `SessionTicketRequest` (`FUN_10e72b50`, `FUN_10edf880`), `SessionTicketAttach(ment)` (`FUN_10e72bb0`, `FUN_10edf7b0`)
+  - все зарегистрированы через `FactoryEntry` для (де)сериализации сетевых сообщений. Значит тикет - это сообщение обмена;
+  логика выпуска/проверки - в методах (де)сериализации/attach этих классов (следующее место поиска), а не в стабе фабрики.
+- **Схема параметров create/join** `FUN_1061e581` регистрирует поля оп-сессий как данные: `SearchIdAddress`, `JoinGame`,
+  `JoinSessionId`, `SessionRefId`, `SessionType`, **`NetEngineType` (id 0x3c)**, `MatchMakingEnabled`, `PlaylistId`,
+  `AccountType`, `SearchSlots`, ... => LAN vs Online (`NetEngineType`) и адрес пира `SearchIdAddress` - это **задаваемые
+  параметры сессии**, т.е. рычаг шима - данные, а не тыканье по коду.
+- **Реестр echo-тунables** `FUN_107a227d` регистрирует `LanMatchmakingDiscoveryOnLoopbackEnable`, `LanMatchmakingReuseAddress`,
+  `SessionTicketTimeoutInMs`, таймауты соединений и т.д. => LAN/loopback **конфиг-гейтится** (ответ на открытый вопрос upstream:
+  да, LanMatchmaking* - записываемые рантайм-тунables).
+- **CFCX-опсы сессий** - зарегистрированные фабрики: `CFCXCreateSessionOperation` (`FUN_107de8fa`), `CFCXJoinSessionOperation`
+  (`FUN_1092e764`), `CFCXCreateSessionOpCtn` (`FUN_107de926`); ссылающийся на `CSessionSearchIPOperation` - `FUN_10425918`.
+- **Заметка A1:** дословный символ `CSessionLoginOperationProvider_RdV` этим сканом в 46bcc097 НЕ найден
+  (vtable/методы провайдера из upstream - для другого модуля). В этой сборке путь RdV достижим через цепь гейта
+  `FUN_11279ba0` (28t); более чистый рычаг здесь - `NetEngineType` из join-параметров + события storm::echo LAN, а не патч
+  vtable провайдера из upstream.
+
+**Вердикт:** шим storm::echo LAN / join-параметров (путь B/A1) на уровне карты траскируем в рабочем модуле. Следующий
+неизвестный для копки: какой обработчик выпускает/заполняет `SessionTicket` (флаг upstream-вопроса ключ-сервис vs ключ-хост).
