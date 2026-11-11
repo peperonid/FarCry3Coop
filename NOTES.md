@@ -4069,3 +4069,34 @@ Ghidra `DecompileBackend`/`Decompile2` on `FC3d3d11_live` (46bcc097). The backen
   peer validates the same MD5 - **no RendezVous service, no key to break.** Route B is confirmed the cheap, viable offline
   co-op path (contingent on the LAN-ticket question from the `fc3_lan_coop_launch.bat` experiment; if LAN join bypasses
   tickets entirely, even step 2 may be unnecessary).
+
+
+### Session 28aa - ticket input provenance traced to JobTicketManagerLogin::InitiateLogin; whole pipeline is RV-connection gated
+
+Ghidra `DecompileInputs`/`Decompile3`/`Decompile4` on `FC3d3d11_live` (46bcc097). Provenance of the deterministic ticket inputs:
+
+- **Producer = InitiateLogin job builder `FUN_1124f5e0`** (the function holding the "JobTicketManagerLogin::InitiateLogin"
+  string). It takes `this` + identity args `param_2..param_10` and stores them into the login job (`param_1` is a DWORD*,
+  byte offsets): `+0x68`<-p2, `+0x6c`<-p3, **`+0xF0`<-a COPY of the string p6**, `+0xF4`<-p7, `+0xF8`<-p9, `+0xFC`<-p8,
+  `+0x100`<-p10 (variant selector), `+0x194`<-p4. This bundle IS the per-login deterministic input set (the account / game /
+  session / playlist / password identity the RV login provider hands in at join/create).
+- **Driver = ProcessLoginResult `FUN_1124f000`**: passes `+0x194, +0xec, +0xf4, +0x180, +0xfc, +0xf8` (and selects the
+  `+0x100==0` variant) into the message builder `FUN_1125a200` / `FUN_1125a3b0`.
+- **Builder `FUN_1125a200`** serializes the request length-prefixed: `FUN_112232e0(len)`, a 4-byte id from `this+0x40`,
+  literal `1`, `FUN_1125def0(str)` for the string field, then `FUN_1122b2c0` five times for the numeric fields; sends via
+  `FUN_11258f20`. Then the MD5 backend runs: derive `FUN_11254ae0` / validate `FUN_11254be0` over
+  `idx = param_3 % obj[8] + obj[4]` (obj = job+0x78 sub-backend; `obj[4]/obj[8]` = a baked checksum table), with the buffer
+  from `**job+0xF4` and index `job+0xF0`.
+- **CRITICAL GATE:** the entire ticket pipeline sits behind **`FUN_11237670` = RendezVous-connected**: `AcquireTicket`
+  `FUN_1124e7b0` returns 0 unless it is set, and the builder `FUN_1125a200` also returns 0 unless it is set. So with NO RV
+  connection the ticket path NEVER executes.
+
+**Consequences for the two open questions:**
+1. Deterministic shared key: both peers get the same `GameSessionKey` iff they feed the same InitiateLogin bundle
+   (job offsets `+0x68,+0x6c,+0xF0(str),+0xF4,+0xF8,+0xFC,+0x100,+0x194`). Those args originate from the shared join
+   parameters, so a deterministic local derive is achievable from data the lobby already shares. The last mile to NAME each
+   field (session id vs password vs playlist vs account) = decompile the caller of `FUN_1124f5e0` (the RdV login provider job) - not yet done.
+2. The RV gate `FUN_11237670` is the real fork: if the LAN/loopback join never opens an RV connection (likely, matching
+   "offline flow never drives it"), this whole ticket pipeline is simply skipped -> co-op join needs no ticket at all, and
+   patch (B) reduces to driving `NetEngineType=LAN` + `CFCXJoinSessionOperation`. If LAN join DOES connect RV, then (B) must
+   also fake `FUN_11237670` and supply the bundle. The `fc3_lan_coop_launch.bat` experiment settles which.
