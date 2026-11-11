@@ -15,6 +15,13 @@ OUTDIR = os.path.join(REPO, "local", "scratch")
 os.makedirs(OUTDIR, exist_ok=True)
 OUT = os.path.join(OUTDIR, "frida_coop_%s.log" % time.strftime("%Y%m%d_%H%M%S"))
 
+def wf(line):
+    try:
+        with open(OUT, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print("[write-error] %s" % e, flush=True)
+
 def on_message(message, data):
     if message.get("type") == "send":
         line = str(message.get("payload"))
@@ -22,12 +29,11 @@ def on_message(message, data):
         line = "[frida-error] " + message.get("description", str(message))
     else:
         line = str(message)
-    print(line, flush=True)
-    try:
-        with open(OUT, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception as e:
-        print("[write-error] %s" % e, flush=True)
+    print(line, flush=True); wf(line)
+
+def on_log(level, text):
+    line = "[js-log %s] %s" % (level, text)
+    print(line, flush=True); wf(line)
 
 def main():
     devs = frida.enumerate_devices()
@@ -43,6 +49,11 @@ def main():
     session = frida.attach(pid)
     script = session.create_script(open(JS, encoding="utf-8").read())
     script.on("message", on_message)
+    try:
+        script.on("log", on_log)
+    except Exception:
+        pass
+    wf("ATTACHED pid=%d %s" % (pid, PROC))
     script.load()
     print("hooked. In-game: main menu -> co-op -> connect. Ctrl+C to stop.")
     try:

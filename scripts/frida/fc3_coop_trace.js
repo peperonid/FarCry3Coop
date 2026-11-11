@@ -3,7 +3,8 @@
 // Core = winsock hooks (module-independent): reveal the co-op service host:port + connect/DNS failures.
 // Best-effort = FC3.dll gate offsets (may not resolve if the running build differs).
 'use strict';
-var log = function(){ var a=Array.prototype.slice.call(arguments).join(' '); console.log(a); };
+// Use send() (guaranteed delivered to the python host via on_message 'send'); console.log is not captured there.
+var log = function(){ var a=Array.prototype.slice.call(arguments).join(' '); try { send(a); } catch(e) { console.log(a); } };
 
 // ---------- winsock ----------
 function sockaddrInfo(p){
