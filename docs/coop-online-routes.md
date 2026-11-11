@@ -54,3 +54,13 @@ Validate slot `+4` = `FUN_11254be0`, derive slot `+8` = `FUN_11254ae0` - both MD
 mode `FUN_112378a0(...,2)`. **No asymmetric key and no baked Ubisoft secret.** Neutralize the MD5 compare in `FUN_11254be0`, or
 repoint `PTR_PTR_117531f4` to a deterministic local backend (derive +8 / validate +4). A patched host derives the ticket and every
 patched peer validates the same MD5 -> no RV service, no key to break. See NOTES 28z for the full slot map.
+
+
+## Update (28ac): co-op session layer is uniformly RV-gated; add route C (overlay) with caveat
+Both co-op join flavors call the gate `FUN_11279ba0` unconditionally (= online-flag `FUN_11245090` AND RV `FUN_112492a0`/SandboxUrl);
+the net-engine LAN/Online/Offline mode (`FUN_1092d256`) is transport-only and cannot bypass it. So:
+- **Route B is a session-establishment SHIM** (not just the ticket patch): short-circuit `FUN_11279ba0` to return success with a
+  locally-created `storm::echo` session (`NetEngineType=LAN` + `CFCXCreate/JoinSessionOperation`/`SearchIP`), then satisfy the MD5 ticket (28z).
+- **Route C (new): VPN overlay (Tailscale/ZeroTier) or HXCoop local-proxy+relay** for "friends without port forwarding" - zero-code,
+  but ONLY after Route B makes the game form LAN sessions; overlay alone does not work because the session gate blocks before any LAN session.
+- Order of work: prove/build the Route-B session shim first (it is the only real blocker); Route C rides on top of it.

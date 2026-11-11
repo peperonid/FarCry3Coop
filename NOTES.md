@@ -4130,3 +4130,41 @@ ticket string (account or user ticket); the numerics `{+0x6c,+0x70,+0x27c,+0x280
 offsets `+0x150 / +0x1cc / +0x27c / +0x280` (i.e. the code that builds a `JobBackEndServicesLogin` from the CSession/CFCX join
 parameters). That producer binds each named session field to a ticket input, and it is where the "password / playlist id /
 account id" semantics actually live. This is the true remaining mile; the RV core itself only passes them through.
+
+
+### Session 28ac - playbook networking review + DECISIVE: co-op session layer is uniformly RV-gated (no LAN bypass), route B = session-establishment shim
+
+Read the hub `playbook/networking.md`. Then a decisive static check on the co-op join path.
+
+**Playbook takeaways that apply to FC3 (recorded for reuse):**
+- §3: "Always keep the LAN/direct-IP path working; every other option reduces to it and it is the easiest to test." -> LAN-first (our route).
+- §3 VPN overlay (Tailscale/ZeroTier): "Works for every game with an IP field, no code." Attractive for the "online friends without
+  port forwarding" half - **but see the FC3 caveat below: it only works if the game can host/join a LAN session; FC3's co-op session
+  layer cannot, so the overlay alone is not enough.**
+- §4 "Wrapping a game's existing UDP netcode (local proxy)" (HXCoop pattern): client proxy binds `127.0.0.1:<free>`, the game is told
+  to join that address and believes it is a LAN server; host proxy opens one UDP socket per remote peer. This is the Transport-B /
+  relay recipe for the data plane - but it needs a game session that accepts remote clients (see caveat).
+
+**Decisive static result (`join_decompile.txt`, FC3_d3d11 46bcc097):** the co-op **session establishment** is uniformly RendezVous-bound,
+both flavors, no LAN branch:
+- Host path `FUN_11275f40`: **unconditionally** calls the gate `FUN_11279ba0`; if it returns 0 the join fails. On success -> `FUN_11275d90`
+  (SubAccount + RV session).
+- Online path `FUN_1127a300`: **same** `FUN_11279ba0` gate, then `FUN_1127a1d0` (UbiAuthentication).
+- The gate `FUN_11279ba0` = `FUN_11245090()` (global online-enable flag; 0 -> immediate fail) **AND** `FUN_112492a0` (RV net-op that
+  needs a resolved `SandboxUrl` address). Both are dead without Ubisoft, so neither flavor forms a session.
+- The net-engine LAN/Online/Offline mode (`FUN_1092d256`, `param[0xe]` 0=LAN/1=Online/2=Offline) is **transport init only** and does not
+  reach the RV gate - it cannot be used to bypass the session gate. The `storm::echo` LAN classes exist (28w) but nothing in the co-op
+  session path drives them.
+
+**Corrected plan / optimal route:**
+- The VPN-overlay "no-code" shortcut is NOT viable for FC3 out of the box, because the co-op session gate (`FUN_11279ba0`) blocks before
+  any LAN session. Overlay is only useful *after* the session layer can form a LAN session.
+- **Route B is therefore a session-establishment SHIM, not just the ticket patch:** replace/short-circuit `FUN_11279ba0` so it (a) does not
+  require the online flag or `SandboxUrl`, (b) returns success with a locally-created `storm::echo` session (via `NetEngineType=LAN` +
+  `CFCXCreateSessionOperation`/`CFCXJoinSessionOperation`/`CSessionSearchIPOperation`, `LanMatchmakingDiscoveryOnLoopbackEnable`), handing
+  the resulting handle to the out param so `FUN_11275d90`/`FUN_1127a1d0` proceed over echo. On top of that, the RV-gated ticket pipeline
+  (`FUN_11237670`/JobTicketManager, MD5-only, 28z) must be satisfied by the same-mod local derive.
+- Patch surface (localized, all in-module): gate `FUN_11279ba0` (+ its gate inputs `FUN_11245090`/`FUN_112492a0`), session ops
+  `CFCXCreate/JoinSessionOperation` + `NetEngineType`, and ticket `FUN_11254be0`/`ProcessResponse` (28z/28aa). No asymmetric crypto anywhere.
+- Deployment for "friends without port forwarding" (post-shim, once LAN sessions form): Tailscale/ZeroTier overlay (no code) or the HXCoop
+  local-proxy+relay (§4) over Steam relay. Overlay first because it is zero-code.
