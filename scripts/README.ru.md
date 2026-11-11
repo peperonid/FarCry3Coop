@@ -130,3 +130,12 @@ scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--ran
 ## Перенесённые пути
 
 Скопированные с ПК владельца (октябрь 2026) скрипты содержали пути старой раскладки: `DLL_106 = E:\SteamLibrary\steamapps\common\Far Cry 3\bin\FC3.dll`, `DLL_105 = E:\FarCryCoop\Downloads\fc3-1.05\bin\FC3.dll`. Диска `E:` на этом ПК нет. Такие скрипты сохранены как запись и НЕ перенацеливаются молча: перенацелить скрипт, который пишет в папку игры (patch / build / unpack), — решение владельца. На этом ПК установка только для чтения — `H:\Uplay\Far Cry 3\`, тестовая копия 1.06 — `H:\FarCryCoop\TestFC3\`; скрипты только для анализа здесь уже читают проверенные пути.
+
+
+## Живой Frida-трейс (`scripts/frida/`)
+
+- `fc3_coop_trace.py` + `fc3_coop_trace.js` - attach Frida к запущенному `farcry3_d3d11.exe` (через Ubisoft Connect)
+  и трассировать подключение кооп-сервиса. Ядро = хуки winsock (`gethostbyname`/`getaddrinfo`/`connect`/`sendto`/
+  `recvfrom`/`bind`) -> показать host:port кооп-сервиса и сбой DNS/connect; плюс best-effort хуки на смещения гейта
+  FC3.dll. Запускать дойдя до главного меню, затем идти в кооп. Вывод: `local/scratch/frida_coop_<ts>.log`.
+  Для разведки направления (B) rendez-vous (NOTES 28k-28n).

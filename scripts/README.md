@@ -180,3 +180,12 @@ kept as evidence and are NOT retargeted silently: re-pointing a script that writ
 install (patch / build / unpack) is an owner decision. On this PC the read-only install is
 `H:\Uplay\Far Cry 3\`, the 1.06 test copy is `H:\FarCryCoop\TestFC3\`; analysis-only scripts here
 already read those verified paths.
+
+
+## Live Frida tracing (`scripts/frida/`)
+
+- `fc3_coop_trace.py` + `fc3_coop_trace.js` - attach Frida to the running `farcry3_d3d11.exe` (launched via
+  Ubisoft Connect) and trace the co-op service connection. Core = winsock hooks (`gethostbyname`/`getaddrinfo`/
+  `connect`/`sendto`/`recvfrom`/`bind`) to reveal the co-op service host:port and the DNS/connect failure; plus
+  best-effort hooks on the FC3.dll gate offsets. Run after reaching the main menu, then navigate to co-op. Output:
+  `local/scratch/frida_coop_<ts>.log`. Used for the direction (B) rendez-vous recon (NOTES 28k-28n).
