@@ -3745,3 +3745,15 @@ Full decompile of the join gate and a backend probe (`scripts/probe_rv_backend.p
   RendezVous session object / the party-manager singleton `DAT_12805180+4` and capture the exact connect+fail call
   sequence; or (2) locate the Russian dialog string in the localization data -> its key -> the code referencing the
   key (= the raise site to neutralize). Both are a new phase; the offline orbit+proxy phase is complete and proven.
+
+
+### Session 28n (same day) - proxy log now suppresses the idle pump (FC3COOP_LOG_PUMP); localization is in packed .dat
+
+- The live run's `uplay_api.log` ballooned to ~95 MB because every idle `UPLAY_Update`/`UPLAY_GetNextEvent` (~1 Hz
+  each) was logged. `log_entry` now returns early for those two names unless `FC3COOP_LOG_PUMP` is set, so real
+  co-op/party calls stay readable. Rebuilt x86 clean (`BUILD_DONE 0`); deploy pending (the running game locks
+  `bin\uplay_r1_loader.dll`; close `farcry3_d3d11.exe` to redeploy `sha1 e045f054`-successor).
+- The "Служба недоступна" dialog text and all UI strings live in Ubisoft packed archives `data_win32\{common,patch,ige}.dat`
+  (+ `.fat`), so the localization-key -> raise-site trace (28m option 2) needs a `.dat/.fat` unpacker first - a new
+  sub-tool. Together with the virtual/config RendezVous backend, this closes the productive OFFLINE-only avenues for
+  direction (B). Next real step needs the live game instrumented (Frida) or the packed data unpacked.

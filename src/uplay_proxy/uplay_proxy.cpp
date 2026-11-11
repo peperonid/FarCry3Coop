@@ -75,6 +75,7 @@ static const char* g_names[NEXP] = {
 };
 static int g_fakeval[NEXP] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0};
 static int g_fake = 0;
+static int g_logpump = 0;
 
 static void logOpen(void) {
     if (g_log) return;
@@ -115,6 +116,7 @@ int __cdecl log_entry(int slot, void** argp, DWORD retaddr) {
     DWORD a[8] = {0,0,0,0,0,0,0,0};
     __try { for (int i = 0; i < 8; i++) a[i] = (DWORD)argp[i]; } __except (EXCEPTION_EXECUTE_HANDLER) {}
     const char* nm = (slot >= 0 && slot < NEXP) ? g_names[slot] : "?";
+    if (!g_logpump && (nm[0] && (_stricmp(nm, "UPLAY_Update") == 0 || _stricmp(nm, "UPLAY_GetNextEvent") == 0))) return 0;
     int fk = (g_fake && slot >= 0 && slot < NEXP) ? g_fakeval[slot] : 0;
     char d[170]; describe(retaddr, d, sizeof(d));
     if (fk) { strcat(d, " [FAKE]"); }
@@ -1144,6 +1146,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         DisableThreadLibraryCalls(h);
         logOpen();
         g_fake = (getenv("FC3COOP_FAKE_PARTY") != NULL) ? 1 : 0;
+        g_logpump = (getenv("FC3COOP_LOG_PUMP") != NULL) ? 1 : 0;
         char exe[MAX_PATH]; GetModuleFileNameA(NULL, exe, MAX_PATH);
         char* b = strrchr(exe, 92); if (b) strcpy(g_exe, b + 1);
         char self[MAX_PATH]; GetModuleFileNameA(h, self, MAX_PATH);
