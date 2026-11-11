@@ -10,7 +10,10 @@ import frida
 PROC = "farcry3_d3d11.exe"
 HERE = os.path.dirname(os.path.abspath(__file__))
 JS = os.path.join(HERE, "fc3_coop_trace.js")
-OUT = os.path.join(HERE, "..", "local", "scratch", "frida_coop_%s.log" % time.strftime("%Y%m%d_%H%M%S"))
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+OUTDIR = os.path.join(REPO, "local", "scratch")
+os.makedirs(OUTDIR, exist_ok=True)
+OUT = os.path.join(OUTDIR, "frida_coop_%s.log" % time.strftime("%Y%m%d_%H%M%S"))
 
 def on_message(message, data):
     if message.get("type") == "send":
@@ -20,8 +23,11 @@ def on_message(message, data):
     else:
         line = str(message)
     print(line, flush=True)
-    with open(OUT, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    try:
+        with open(OUT, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print("[write-error] %s" % e, flush=True)
 
 def main():
     devs = frida.enumerate_devices()
