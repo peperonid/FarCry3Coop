@@ -69,25 +69,21 @@ function sockaddrInfo(p){
   log('winsock hooks installed on '+mod);
 });
 
-// ---------- FC3.dll gate offsets (best-effort) ----------
+// ---------- running-module RV/echo chains (direction B), FC3_d3d11.dll copy md5 46bcc097 ----------
 function tryGate(){
-  var names = ['FC3.dll'];
+  var names = ['FC3_d3d11.dll','FC3.dll'];
   for (var i=0;i<names.length;i++){
     var m = Process.findModuleByName(names[i]); if(!m) continue;
     var base = m.base;
-    // RVA = VA - 0x10000000 (image base)
-    var offs = { 'FUN_11218480_joinapprove':0x1218480, 'FUN_102000d0_connected':0x02000d0,
-                 'FUN_103660e0_partysvc':0x03660e0, 'FUN_11273650_trustedlist':0x1273650 };
+    // RVA = addr - 0x10000000 (module base); chains named by live backtraces (Session 28q)
+    var offs = { 'rv_resolver_0x122f759':0x122f759, 'rv_0x122f96f':0x122f96f, 'rv_0x123311e':0x123311e,
+                 'rv_0x1279bc5':0x1279bc5, 'rv_0x127a320':0x127a320, 'rv_0x127a3d2':0x127a3d2,
+                 'echo_bind_0xe5be2c':0xe5be2c, 'echo_0x41a795':0x41a795, 'echo_pump_0x550d96':0x550d96 };
     Object.keys(offs).forEach(function(k){
-      try { Interceptor.attach(base.add(offs[k]), { onEnter:function(args){ this.a0=args[0]; },
-        onLeave:function(r){ log('[FC3] '+k+'(a0='+this.a0+') -> '+r); } }); }
-      catch(e){ log('[FC3] hook '+k+' failed: '+e.message); }
+      try { Interceptor.attach(base.add(offs[k]), { onEnter:function(args){ log('[RV] hit '+k+' (a0='+args[0]+')'); } }); }
+      catch(e){ log('[RV] hook '+k+' failed: '+e.message); }
     });
-    try {
-      var g = base.add(0x0285180).readPointer(); // DAT_12805180
-      log('[FC3] DAT_12805180 = '+g+'  (mgr would be '+(g.isNull()?'null':g.add(4).readPointer())+')');
-    } catch(e){}
-    log('FC3.dll gate hooks attempted, base='+base);
+    log('module RV/echo hooks attempted on '+names[i]+' base='+base);
   }
 }
 setTimeout(tryGate, 1500);
