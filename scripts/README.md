@@ -198,3 +198,10 @@ already read those verified paths.
   (`FUN_1044123b`), and with `FORCE=true` forces the RendezVous gate (`FUN_11245090`/`FUN_112492a0`/`FUN_11279ba0`)
   to success to see where it dead-ends (expected: UbiAuthentication). Offsets target the running `FC3_d3d11.dll`
   copy md5 46bcc097. Output: `local/scratch/frida_force_<ts>.log` (NOTES 28r).
+
+## Live co-op launch probes
+
+- `fc3_lan_coop_launch.bat` - experimental LAN/loopback co-op probe (NOTES 28x). Launches a `-coop` host and a
+  `-client -ip` instance and records whether the storm::echo LAN join works without the service-minted SessionTicket.
+  Set `GAME_DIR` to a game COPY and enable the echo tunable `LanMatchmakingDiscoveryOnLoopbackEnable=1` first. The
+  decision rule is printed at the end (join OK with no ticket error == the LAN path is ticket-exempt).

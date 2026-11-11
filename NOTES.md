@@ -3981,3 +3981,33 @@ engine strings and decompiled their referrers. All target classes are **compiled
 
 **Verdict:** storm::echo LAN / join-param shim (route B/A1) is viable in the running module at the map level. Remaining
 unknown to drill next: which handler mints/fills `SessionTicket` (the service-key vs host-key question upstream flagged).
+
+
+### Session 28x - DECISIVE: the SessionTicket is SERVICE-minted (RendezVous JobTicketManager), not host-minted
+
+Strings probe on the running module `FC3_d3d11.dll` (46bcc097). The SessionTicket lives entirely on the RendezVous auth side:
+
+- `D:/Perforce/FC3/fc3/main/external/technology-group/online/RendezVous/RendezVous/Core/src/Client/Authentication/JobTicket`,
+  `.../TicketManager`; jobs `JobTicketManagerLogin::{InitiateLogin,DeriveKey,ValidateKey,ProcessLoginResult}` (VA strings:
+  DeriveKey `0x116c1a1c`, ValidateKey `0x116c1acc`), `JobTicketManagerAcquireTicket::{PrepareCall `0x116c123c`,
+  ProcessResponse `0x116c17a8`}` (a request->response job to a service), plus `TicketGrantingProtocol` (`0x116c70f0`),
+  `TICKET_PENDING`, `UseTicketRequestAttachment` (`0x11561550`), `RequestTicket`, `Invalid ticket.` (`0x11665184`).
+- Game session keys come from RendezVous too: `E_SESSION_ERROR_RENDEZVOUS_GAMESESSION_INVALIDSESSIONKEY` (`0x116ecb7c`),
+  `GameSessionKey`/`gameSessionKey`/`m_sessionKey`, and account/gator errors `E_SESSION_ERROR_ACCOUNT_COULD_NOT_RETRIEVE_NP_TICKET`
+  (NP = NetPlay ticket), `E_SESSION_ERROR_TICKET_REQUEST_FAILED`, `E_SESSION_ERROR_GATOR_INVALID_SESSION_TICKET`.
+
+**Verdict (answers the open host-vs-service question): the SessionTicket / GameSessionKey is minted by the SERVICE (RendezVous
+JobTicketManager AcquireTicket + TicketGrantingProtocol, key via DeriveKey/ValidateKey). It is NOT host-minted.**
+
+Consequences for the plan:
+- Route "set NetEngineType=LAN and join by IP" is NOT sufficient **if the LAN/IP join still demands a valid SessionTicket**.
+  Then offline co-op needs either (A) a service answering `AcquireTicket`/login (full-ish emulation), OR
+  (B) a narrow CLIENT patch at the ticket path: make `JobTicketManagerAcquireTicket::ProcessResponse` /
+  `JobTicketManagerLogin::ValidateKey` accept a locally-supplied ticket and inject a `GameSessionKey`, so no RV service is
+  contacted. (B) is now the **cheapest viable lever** and its exact anchor points are the string VAs above (xref them in Ghidra).
+- Still open (needs the join-flow decompile or a dynamic run, Frida blocked): whether the `storm::echo` LAN/loopback join
+  (`lan::inEvent::DiscoverSession`) is EXEMPT from the RV JobTicket (classic LAN trust). If exempt, no ticket work is needed
+  for same-LAN/loopback co-op. The decisive experiment: launch `-coop` host + `-client -ip` with
+  `LanMatchmakingDiscoveryOnLoopbackEnable=1` and observe whether a ticket request is issued / join succeeds.
+- Concrete targets to decompile next (via `getReferencesTo` on the string VAs): the JobTicketManagerLogin / AcquireTicket
+  methods (patch candidates for (B)) and the CFCX/LAN join flow (to test exemption).

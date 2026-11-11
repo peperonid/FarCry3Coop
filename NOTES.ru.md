@@ -3679,3 +3679,33 @@ RV-гейт `FUN_11279ba0` -> RV `BackEndServices` сессия (`FUN_112536a0`)
 
 **Вердикт:** шим storm::echo LAN / join-параметров (путь B/A1) на уровне карты траскируем в рабочем модуле. Следующий
 неизвестный для копки: какой обработчик выпускает/заполняет `SessionTicket` (флаг upstream-вопроса ключ-сервис vs ключ-хост).
+
+
+### Сессия 28x - РЕШАЮЩЕЕ: SessionTicket выпускает СЕРВИС (RendezVous JobTicketManager), не хост
+
+Зонд по строкам рабочего модуля `FC3_d3d11.dll` (46bcc097). SessionTicket целиком на стороне авторизации RendezVous:
+
+- `D:/Perforce/FC3/fc3/main/external/technology-group/online/RendezVous/RendezVous/Core/src/Client/Authentication/JobTicket`,
+  `.../TicketManager`; джобы `JobTicketManagerLogin::{InitiateLogin,DeriveKey,ValidateKey,ProcessLoginResult}` (VA строк:
+  DeriveKey `0x116c1a1c`, ValidateKey `0x116c1acc`), `JobTicketManagerAcquireTicket::{PrepareCall `0x116c123c`,
+  ProcessResponse `0x116c17a8`}` (запрос->ответ к сервису), плюс `TicketGrantingProtocol` (`0x116c70f0`), `TICKET_PENDING`,
+  `UseTicketRequestAttachment` (`0x11561550`), `RequestTicket`, `Invalid ticket.` (`0x11665184`).
+- Ключи игровой сессии тоже из RendezVous: `E_SESSION_ERROR_RENDEZVOUS_GAMESESSION_INVALIDSESSIONKEY` (`0x116ecb7c`),
+  `GameSessionKey`/`gameSessionKey`/`m_sessionKey`, и ошибки account/gator `E_SESSION_ERROR_ACCOUNT_COULD_NOT_RETRIEVE_NP_TICKET`
+  (NP = NetPlay-тикет), `E_SESSION_ERROR_TICKET_REQUEST_FAILED`, `E_SESSION_ERROR_GATOR_INVALID_SESSION_TICKET`.
+
+**Вердикт (закрывает открытый вопрос хост-vs-сервис): SessionTicket / GameSessionKey выпускает СЕРВИС (RendezVous
+JobTicketManager AcquireTicket + TicketGrantingProtocol, ключ через DeriveKey/ValidateKey). Не хост.**
+
+Следствия для плана:
+- Маршрут "поставить NetEngineType=LAN и войти по IP" НЕ достаточен, **если LAN/IP-джойн всё ещё требует валидный
+  SessionTicket**. Тогда офлайн-кооп нужен либо (A) сервис, отвечающий на `AcquireTicket`/login (почти полная эмуляция), либо
+  (B) узкий ПАТЧ КЛИЕНТА в пути тикета: заставить `JobTicketManagerAcquireTicket::ProcessResponse` /
+  `JobTicketManagerLogin::ValidateKey` принимать локально подставленный тикет и внедрять `GameSessionKey`, чтобы к RV-сервису
+  не обращаться. (B) теперь **самый дешёвый траскируемый рычаг**, его точные якоря - VA строк выше (крест-ссылки в Ghidra).
+- Всё ещё открыто (нужен декомпил join-flow либо динамический запуск, Frida заблокирована): освобождён ли `storm::echo`
+  LAN/loopback-джойн (`lan::inEvent::DiscoverSession`) от RV JobTicket (классическое LAN-доверие). Если освобождён - для
+  LAN/loopback-кооперации тикетная работа не нужна. Решающий эксперимент: запуск `-coop`-хост + `-client -ip` с
+  `LanMatchmakingDiscoveryOnLoopbackEnable=1`, смотреть, уходит ли запрос тикета / проходит ли джойн.
+- Конкретные цели для декомпила дальше (через `getReferencesTo` по VA строк): методы JobTicketManagerLogin / AcquireTicket
+  (кандидаты на патч (B)) и CFCX/LAN join-flow (для проверки освобождения).
