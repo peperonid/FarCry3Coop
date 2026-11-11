@@ -3722,3 +3722,26 @@ Strategy read (recommendation to owner): direction (B) is the tractable path - p
 (`DAT_12805180+4`, gate `FUN_11218480`, getter `FUN_103660e0`), bypassing the dead RendezVous backend. Direction (A)
 (local fake RendezVous+storm::echo server) is higher effort because the backend is config-driven SOAP + echo. Next
 offline work: locate the RendezVous back-end native functions and the code that raises "service unavailable".
+
+
+### Session 28m (same day) - FUN_11218480 is party-join APPROVAL (not create/connect); RendezVous backend is virtual+config-driven (`scripts/probe_rv_backend.py`)
+
+Full decompile of the join gate and a backend probe (`scripts/probe_rv_backend.py`) refine direction (B).
+
+- **`FUN_11218480` (thiscall) is the party-join APPROVAL, not session create/connect.** Guarded first by
+  `FUN_102000d0(mgr, mgr+0x118, mgr+0x11c)`; then it builds the candidate joiner list (`FUN_11273650`), counts
+  joiners that pass `FUN_1193b8c0`, and REJECTS (returns 0) with log strings "Rejecting partyId: %u; New joiners
+  count: %d because the result teams would have a size difference > 2 ..." and "... more than half the max allowed
+  size for the current playlist". When the connected-guard fails it just `return 1` (no-op). So this is balancing of
+  joiners on an ALREADY-CONNECTED party; it is NOT where "Служба недоступна" comes from.
+- **RV Create/Join are virtual-dispatched** - `RVCreateGameSession 0x10cf6790` / `RVJoinGameSession 0x10cf6690`
+  (loader describe() tags, FC3_d3d11 RVA space) have 0 rel32 callers in FC3.dll; they run through a vtable (like the
+  gate). **The RendezVous tokens found in strings are RTTI/template names** (`qlist<GameSession...>`,
+  `ANetObject.LobbyService`), and `RendezVousBackEndServices_native.cpp` / `OnlineConfigService.svc` have 0 direct
+  code immediates in `.text` -> referenced indirectly. So the RV service object graph is reached via virtual calls and
+  the endpoint is fetched at runtime; it does not resolve by offline string-xref.
+- Implication: the "Служба недоступна" raise site and the RV Create/Join native functions can't be pinned purely
+  offline. Two ways forward for direction (B): (1) LIVE instrumentation (Frida) on the running game to break on the
+  RendezVous session object / the party-manager singleton `DAT_12805180+4` and capture the exact connect+fail call
+  sequence; or (2) locate the Russian dialog string in the localization data -> its key -> the code referencing the
+  key (= the raise site to neutralize). Both are a new phase; the offline orbit+proxy phase is complete and proven.
