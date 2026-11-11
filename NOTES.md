@@ -3903,3 +3903,23 @@ The only remaining technical routes are large:
     the game is handed peer LAN addresses instead of relays; still requires understanding RV/PRUDP session semantics.
 Reusable assets so far: the loader-proxy (orbit fakes, ABI-correct) and the full RV call map (28r-28t). Recommend
 documenting this blocker with the map + the PR, then deciding whether to fund an (A)/(A') spike.
+
+
+### Session 28u (same day) - A' spike verdict: peer-address injection needs full RV session emulation; both A and A' are large
+
+A'-spike (static, no edits) traced the RV host session create `FUN_112536a0` (`RendezVous/Core/.../BackEndServices.cpp`):
+it requires `FUN_11237670` (RV connected), builds the session via factory `FUN_112532a0(...)` stored at `obj+0x74`,
+starts it via a vtable call (`*vtable+4`) and `FUN_112283a0(obj,0)`. The RV Session client is exactly the component
+that, over PRUDP, performs matchmaking and hands each peer the other's address. Therefore:
+
+- **A' (patch the RV-session layer to inject LAN peer addresses) is not cheaper than A** - to form a session the game
+  still needs the RV session to deliver real peer addresses and drive the storm::echo exchange; without the RV service
+  (or a reimplementation of its session semantics) there are no addresses to hand out, so the session cannot form.
+- **A (emulate the Ubisoft online stack)** requires, at minimum: (1) `OnlineConfigService` SOAP returning a
+  `SandboxUrl`/rendezvous config, (2) a **RendezVous server speaking PRUDP** (RC4/DH + ticketing + mutex/state machine
+  + session matchmaking), (3) `UbiAuthentication` login, (4) `SubAccount` - all for the FC3 title. Weeks-scale.
+
+**Bottom line (honest):** FC3 campaign co-op is deeply coupled to Ubisoft's RendezVous + UbiAuth + SubAccount stack;
+there is no in-engine LAN path and no cheap gate-patch. Reusable, shippable assets: the ABI-correct loader proxy
+(orbit fakes) and the complete static RV call map (28r-28u). Recommendation: ship those (PR) and record the RV wall;
+pursuing A is a multi-protocol project that should be scoped as its own effort, not continued piecemeal here.
