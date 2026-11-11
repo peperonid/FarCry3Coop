@@ -3923,3 +3923,31 @@ that, over PRUDP, performs matchmaking and hands each peer the other's address. 
 there is no in-engine LAN path and no cheap gate-patch. Reusable, shippable assets: the ABI-correct loader proxy
 (orbit fakes) and the complete static RV call map (28r-28u). Recommendation: ship those (PR) and record the RV wall;
 pursuing A is a multi-protocol project that should be scoped as its own effort, not continued piecemeal here.
+
+
+### Session 28v (same day) - reconciled with upstream NOTES.md: storm::echo LAN/loopback shim is the tractable path (soften 28u)
+
+Read the upstream `Bantila/FarCry3Coop/NOTES.md`. It maps more than 28u assumed, so correct the verdict:
+
+- **`storm::echo` is a built-in LAN + loopback matchmaking layer**: `storm::echo::lan::inEvent::DiscoverSession`,
+  `lan::outEvent::DiscoveredSession`, `lan::inFunc::GenerateSessionId`, `lan::outEvent::BroadcastLanDiscovery2`;
+  tunables `LanMatchmakingReuseAddress`, `LanMatchmakingDiscoveryOnLoopbackEnable` (multi-instance on one PC),
+  `LanMaxUploadInbps`, `SessionJoinTimeoutInMs`, an "LAN Match Making Port" option, and CLI launch `-coop`,
+  `-client -ip <addr>` (host binds UDP 9000, client 9001), `-dedicated`, `-offline`, `-sessionuid`, `-password`.
+  Gameplay bytes are plain UDP P2P; only session SETUP is service-bound. So offline 2-4 humans is a
+  **session-establishment shim over storm::echo**, NOT a netcode rehost and NOT necessarily full Ubisoft emulation.
+  (28u's "A is weeks-scale, no cheap path" is too strong - retracted to: the LAN/loopback shim is the route.)
+- Two open blockers (upstream): the **SessionTicket** and **UDP crypto / session-key minting** (service vs host).
+- Upstream's own 1.06 wall matches mine: a co-op session is not offline-constructible by field poking; the
+  **1.05 mod route is the leading offline path** (mod FC3.dll `patch_solo_offline_coop_vanilla-262`; "Offline coop"
+  world loads single-player via mod 262; 1.05 engine boots 1.06 data on the island).
+
+**My contribution to upstream's open gate** ("does CampaignCoop host/join use storm::echo LAN discover or only the
+online lobby?"): on the 1.06 DX11 module the co-op session dispatcher `FUN_10441fb6` -> `FUN_1044123b` (online) /
+`FUN_10443663` (host) ALWAYS passes the RendezVous gate `FUN_11279ba0` -> RV `BackEndServices` session (`FUN_112536a0`);
+there is **no storm::echo-LAN branch in the menu-driven co-op path**. So menu co-op is online-gated; a LAN shim must be
+driven through the Storm-session/CLI entry (which exists but "offline flow never drives it") or by replacing the
+`CSessionLoginOperationProvider_RdV` login provider with a local one.
+
+**Alignment going forward:** work the shim on the 1.05 leading route (upstream), with FC3_106 addresses cross-mapped
+via `fc3_addrmap.py`; the RDV provider replacement (A1) and storm::echo LAN discovery are the concrete levers.

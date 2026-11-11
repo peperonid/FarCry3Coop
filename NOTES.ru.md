@@ -3622,3 +3622,30 @@ vtable (`*vtable+4`) и `FUN_112283a0(obj,0)`. Клиент RV Session - это 
 не-LAN пути в движке и дешёвого патча гейта нет. Переиспользуемые поставляемые активы: ABI-корректный загрузчик-прокси
 (фейки orbit) и полная статическая карта RV-вызовов (28r-28u). Рекомендация: поставить это в PR и зафиксировать RV-стену;
 работа над A - это многопротокольный проект, который надо оценивать отдельной задачей, а не продолжать по частям здесь.
+
+
+### Сессия 28v (тот же день) - сверено с upstream NOTES.md: LAN/loopback-шим на storm::echo - траскируемый путь (смягчить 28u)
+
+Прочитан upstream `Bantila/FarCry3Coop/NOTES.md`. Он картирует больше, чем предполагал 28u, потому исправляю вердикт:
+
+- **`storm::echo` - встроенный слой матчмейкинга LAN + loopback**: `storm::echo::lan::inEvent::DiscoverSession`,
+  `lan::outEvent::DiscoveredSession`, `lan::inFunc::GenerateSessionId`, `lan::outEvent::BroadcastLanDiscovery2`;
+  тунables `LanMatchmakingReuseAddress`, `LanMatchmakingDiscoveryOnLoopbackEnable` (несколько инстансов на одном ПК),
+  `LanMaxUploadInbps`, `SessionJoinTimeoutInMs`, опция "LAN Match Making Port" и CLI-запуск `-coop`,
+  `-client -ip <addr>` (хост биндит UDP 9000, клиент 9001), `-dedicated`, `-offline`, `-sessionuid`, `-password`.
+  Игровые байты - обычный UDP P2P; сервисом связан только SETUP сессии. Значит offline 2-4 человека - это
+  **шим установления сессии поверх storm::echo**, а НЕ переписывание неткода и НЕ обязательно полная эмуляция Ubisoft.
+  ("A это недели, дешёвого пути нет" из 28u - слишком сильно; откатываю до: путь = LAN/loopback-шим.)
+- Два открытых блокера (upstream): **SessionTicket** и **UDP crypto / генерация сессионного ключа** (сервис vs хост).
+- Стена 1.06 у upstream совпадает с моей: кооп-сессию нельзя собрать офлайн тыканьем по полям; **ведущий офлайн-путь -
+  мод на 1.05** (мод FC3.dll `patch_solo_offline_coop_vanilla-262`; мир "Offline coop" грузится на одного через mod 262;
+  1.05-движок загружает 1.06-данные на острове).
+
+**Мой вклад в открытый вопрос upstream** ("использует ли host/join кампании storm::echo LAN discover или только онлайн-лобби"):
+на модуле 1.06 DX11 диспетчер кооп-сессии `FUN_10441fb6` -> `FUN_1044123b` (онлайн) / `FUN_10443663` (хост) ВСЕГДА проходит
+RV-гейт `FUN_11279ba0` -> RV `BackEndServices` сессия (`FUN_112536a0`); **ветки на storm::echo-LAN в меню-пути кооперации НЕТ**.
+Значит меню-кооп онлайн-гейтится; LAN-шим надо вести через Storm-сессия/CLI-вход (он есть, но "offline flow никогда его не
+задействует") либо заменой провайдера входа `CSessionLoginOperationProvider_RdV` на локальный.
+
+**Синхронизация дальше:** работать шим на ведущем 1.05-пути (upstream), адреса FC3_106 кросс-картировать через `fc3_addrmap.py`;
+конкретные рычаги - замена RDV-провайдера (A1) и storm::echo LAN discovery.
