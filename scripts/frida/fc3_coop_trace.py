@@ -46,7 +46,23 @@ def main():
         return 3
     pid = sessions[0].pid
     print("attaching to %s pid=%d ; writing %s" % (PROC, pid, OUT))
-    session = frida.attach(pid)
+    wf("ATTACH-TRY pid=%d" % pid)
+    session = None
+    last = None
+    for attempt in range(1, 9):
+        try:
+            session = frida.attach(pid)
+            break
+        except Exception as e:
+            last = e
+            print("attach attempt %d failed: %s (retry in 2.5s; make sure the game is idle at the main menu)" % (attempt, e), flush=True)
+            wf("ATTACH-FAIL %d %s" % (attempt, e))
+            time.sleep(2.5)
+    if session is None:
+        print("could not attach after retries: %s\nFully quit the game (and any leftover python/frida), relaunch, get to the main menu, and rerun." % last)
+        wf("ATTACH-ABORT %s" % last)
+        return 4
+    session = session  # attached above
     script = session.create_script(open(JS, encoding="utf-8").read())
     script.on("message", on_message)
     try:
