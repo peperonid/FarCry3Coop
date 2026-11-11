@@ -3776,3 +3776,28 @@ Full decompile of the join gate and a backend probe (`scripts/probe_rv_backend.p
 - **Next tool step:** the tracer now dumps the first 64 bytes (hex) of `sendto`/`recvfrom` to/from the rendezvous
   ports. Re-capture once to read the actual handshake and the server's refusal -> that bytes-level view enables both
   (A) a local fake RendezVous (replay/forge the handshake) and (B) pinpointing the game-side call to neutralize.
+
+
+### Session 28p (same day) - rendezvous recon result: backend alive + responds; blocker is app-layer PRUDP/RendezVous negotiation
+
+Repeated fresh live captures (`frida_coop_*.log`) reliably show the online init at the main menu:
+`gethostbyname("lb-rdv-as-prod01.ubisoft.com")` resolves, game `bind`s `0.0.0.0:3074` + `<lan>:9000`
+(storm::echo). The actual co-op connect UDP burst (`sendto -> 203.132.26.108/109:11000/11001` + `recvfrom`
+replies, NOTES 28o) fired on the first fresh session and is intermittent after that (the client short-circuits to
+"service unavailable" on later attempts). Net findings, unchanged by the extra runs:
+
+- RendezVous backend is **reachable and ANSWERS UDP** - it is not a dead-host / DNS / routing wall, and not the
+  orbit/Uplay layer (that is already faked by the loader proxy).
+- The "Far Cry 3 service is unavailable" is therefore the **RendezVous application-layer (PRUDP) negotiation** for
+  the FC3 title/tenant failing on the server side.
+- Reimplementing PRUDP is the only way to make a *server* answer it. This is a real fork in investment:
+  - **(A) local PRUDP/RendezVous emulator** (point `lb-rdv-*` via hosts, speak PRUDP+ticketing) - highest fidelity
+    for "friends join over the internet through us", but multi-week protocol RE.
+  - **(B) bypass RendezVous in FC3.dll and run the co-op session on the game's own echo/peer transport (LAN
+    first, relay later)** - avoids PRUDP; needs the RV session-create/join call sites, which are virtual-dispatched
+    and only resolvable by live tracing the RV/echo objects (keep the frida tracer, hook the RV natives on the
+    sendto path once named). Medium-high, uncertain.
+  - **(C) document as a known blocker with the endpoint identified** and scope down.
+
+Recommendation: (B) LAN-first (matches the coop-networking playbook and skips PRUDP); the next technical step is a
+frida trace that names the RV create/join natives reached right before the "unavailable" dialog.
