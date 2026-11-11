@@ -4168,3 +4168,30 @@ both flavors, no LAN branch:
   `CFCXCreate/JoinSessionOperation` + `NetEngineType`, and ticket `FUN_11254be0`/`ProcessResponse` (28z/28aa). No asymmetric crypto anywhere.
 - Deployment for "friends without port forwarding" (post-shim, once LAN sessions form): Tailscale/ZeroTier overlay (no code) or the HXCoop
   local-proxy+relay (§4) over Steam relay. Overlay first because it is zero-code.
+
+
+### Session 28ad - route B precise shim spec: the post-gate session handlers are themselves RV services (SubAccount / UbiAuth)
+
+Ghidra `DecompileShim` on `FC3d3d11_live`. Going one level past the gate `FUN_11279ba0` shows stubbing the gate alone is NOT enough -
+the co-op session handlers it releases into are themselves RendezVous service calls:
+
+- **Host handler `FUN_11275d90`**: builds a `SubAccountClient` session (string `.../RendezVous/Services/SubAccount/src/Client/
+  SubAccountClient.cpp`, via `FUN_11254400`, vtable `&PTR_FUN_116c6e2c`) after `FUN_11210d90`/`FUN_11214010` RV setup helpers. So hosting
+  a co-op session is a **SubAccount** service op, not a plain storm::echo session.
+- **Join handler `FUN_1127a1d0`**: the UbiAuthentication path (28t) - also RV service.
+- **Gate out-handle = an address+port, sourced from RV**: `FUN_11232ef0` returns/uses `ntohs(*p + 2)` (a sockaddr port) and `FUN_11232e20`
+  the address; the gate `FUN_11279ba0` fills `*param_2` from `FUN_11232ef0` after `FUN_112492a0` resolved the RV `SandboxUrl` host. So the
+  peer address the game dials is **RV-provided**, not LAN-derived.
+
+**Precise route-B shim (larger than the ticket patch, still localized, still no crypto secret):**
+1. Replace the two co-op session handlers with raw storm::echo session ops: `FUN_11275d90` (host) -> `CFCXCreateSessionOperation`,
+   `FUN_1127a1d0` (join) -> `CFCXJoinSessionOperation` (and/or `CSessionSearchIPOperation`), with `NetEngineType=LAN` and
+   `LanMatchmakingDiscoveryOnLoopbackEnable=1`, instead of the SubAccount / UbiAuthentication RV calls.
+2. Supply the peer address: the game reads it from the gate `FUN_11279ba0` (address+port via `FUN_11232e20`/`FUN_11232ef0`); the shim must
+   return a LAN address there (or drive `CFCXJoinSessionOperation -ip` directly), bypassing `FUN_112492a0`/`SandboxUrl`.
+3. Bypass the gate preconditions `FUN_11245090` (online flag) / `FUN_112492a0` (RV/SandboxUrl).
+4. Satisfy the RV-gated ticket pipeline `FUN_11237670`/JobTicketManager (MD5-only, 28z/28aa) via a same-mod local derive.
+
+So the whole co-op session establishment (gate + host/join handlers + address + ticket) is RendezVous-shaped, and route B is a
+**session-establishment shim** that swaps those four RV touchpoints for storm::echo session ops + a local address + a self-consistent
+MD5 ticket. No asymmetric crypto anywhere; all four sites are in the running module. This is the actionable route-B spec.
