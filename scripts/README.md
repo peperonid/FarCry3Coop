@@ -193,3 +193,8 @@ already read those verified paths.
   `connect`/`sendto`/`recvfrom`/`bind`) to reveal the co-op service host:port and the DNS/connect failure; plus
   best-effort hooks on the FC3.dll gate offsets. Run after reaching the main menu, then navigate to co-op. Output:
   `local/scratch/frida_coop_<ts>.log`. Used for the direction (B) rendez-vous recon (NOTES 28k-28n).
+- `fc3_coop_force.py` + `fc3_coop_force.js` - direction (B) in-memory go/no-go probe (no disk writes). Logs the
+  net-engine connection mode (`FUN_1092d256` field +0xe: 0=LAN/1=Online/2=Offline) and the online-coop entry
+  (`FUN_1044123b`), and with `FORCE=true` forces the RendezVous gate (`FUN_11245090`/`FUN_112492a0`/`FUN_11279ba0`)
+  to success to see where it dead-ends (expected: UbiAuthentication). Offsets target the running `FC3_d3d11.dll`
+  copy md5 46bcc097. Output: `local/scratch/frida_force_<ts>.log` (NOTES 28r).

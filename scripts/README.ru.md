@@ -144,3 +144,4 @@ scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--ran
   `recvfrom`/`bind`) -> показать host:port кооп-сервиса и сбой DNS/connect; плюс best-effort хуки на смещения гейта
   FC3.dll. Запускать дойдя до главного меню, затем идти в кооп. Вывод: `local/scratch/frida_coop_<ts>.log`.
   Для разведки направления (B) rendez-vous (NOTES 28k-28n).
+- `fc3_coop_force.py` + `fc3_coop_force.js` - живой go/no-go-зонд направления (B) в памяти (без записи на диск). Логирует режим сети движка (`FUN_1092d256` поле +0xe: 0=LAN/1=Online/2=Offline) и вход в онлайн-кооп (`FUN_1044123b`); при `FORCE=true` форсит гейт RendezVous (`FUN_11245090`/`FUN_112492a0`/`FUN_11279ba0`) в успех, чтобы увидеть, где он упирается (ожидаемо: UbiAuthentication). Смещения под `FC3_d3d11.dll` копии md5 46bcc097. Вывод: `local/scratch/frida_force_<ts>.log` (NOTES 28r).
