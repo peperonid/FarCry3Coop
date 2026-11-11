@@ -3801,3 +3801,29 @@ replies, NOTES 28o) fired on the first fresh session and is intermittent after t
 
 Recommendation: (B) LAN-first (matches the coop-networking playbook and skips PRUDP); the next technical step is a
 frida trace that names the RV create/join natives reached right before the "unavailable" dialog.
+
+
+### Session 28q (same day) - direction B unlocks the RV chain; CRITICAL module-identity correction
+
+The backtrace capture (frida_coop log) attributed every rendezvous/echo call to **FC3_d3d11.dll**
+(the running process is `farcry3_d3d11.exe`), never to `FC3.dll`. Named chains (RVA = addr - 0x10000000):
+
+- **RendezVous bootstrap** (drives `gethostbyname("lb-rdv-as-prod01.ubisoft.com")`):
+  `FC3_d3d11.dll+0x122f759` <- `+0x122f96f` <- `+0x123311e` <- `+0x1279bc5` <- `+0x127a320` <- `+0x127a3d2`.
+- **storm::echo socket setup** (`bind <lan>:9000`): wrapper `+0xe5be2c` / `+0xe5be51` <- `+0x41a795` <-
+  `+0x92d2bd` <- pump `+0x55171e` <- `+0x550d96` <- `+0x551737` <- `+0x4f907f`; a second path
+  `+0xe82eef` <- `+0xec069c` <- `+0xefafcf` <- `+0xe666a2`.
+
+**CRITICAL correction (verified with scripts/probe_rv_live.py):** the copy's on-disk binaries differ from
+the real install and from the earlier Ghidra target:
+  - running module = `H:\FarCryCoop\TestFC3_105\bin\FC3_d3d11.dll`  md5 **46bcc097**, 30,057,832 B,
+    ImageBase 0x10000000, SizeOfImage 0x23cc000, machine 0x14c (x86), **not packed / disassembles cleanly**;
+    `FC3.dll` in the copy = md5 5ff04533.
+  - the earlier Ghidra project FC3_106 analysed the real-install `FC3.dll` md5 **5742de2a** (40.7 MB, DX9) -
+    a DIFFERENT file. **All RVAs from sessions 28e-28h (FUN_11218480 party gate etc.) were derived from the
+    wrong binary and do NOT map to the running game.** All future RV/echo/gate RE must target md5 46bcc097.
+
+The RV bootstrap disasm at VA 0x1122f700-0x1122f870 (from probe_rv_live.py) is real code: it calls IAT slots
+0x114ac6e4 / 0x114ac690 with string args at 0x116bc50c / 0x116bc594 and a local call 0x11211290 whose return is
+exactly the frame 0x1122f759 - i.e. this function is the RV host resolver. Next: import md5 46bcc097 into a fresh
+Ghidra project, auto-analyze, and decompile the RV bootstrap + echo-setup chains to design the direction-B bypass.
