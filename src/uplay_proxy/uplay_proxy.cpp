@@ -110,21 +110,13 @@ static void describe(DWORD addr, char* out, size_t cb) {
     sprintf(out, "%s+0x%x%s", path, rva, tag);
 }
 
-int __cdecl apiThunk(int slot, void** argp, DWORD caller);
-int __cdecl apiThunk(int slot, void** argp, DWORD caller) {
+int __cdecl log_entry(int slot, void** argp, DWORD retaddr);
+int __cdecl log_entry(int slot, void** argp, DWORD retaddr) {
     DWORD a[8] = {0,0,0,0,0,0,0,0};
     __try { for (int i = 0; i < 8; i++) a[i] = (DWORD)argp[i]; } __except (EXCEPTION_EXECUTE_HANDLER) {}
     const char* nm = (slot >= 0 && slot < NEXP) ? g_names[slot] : "?";
-    int r; int fk = (g_fake && slot >= 0 && slot < NEXP) ? g_fakeval[slot] : 0;
-    void* real = (slot >= 0 && slot < NEXP) ? g_realp[slot] : NULL;
-    if (fk) r = fk;
-    else if (real) {
-        __try {
-            typedef int (__cdecl*fn)(DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD);
-            r = ((fn)real)(a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7]);
-        } __except (EXCEPTION_EXECUTE_HANDLER) { r = 0x7F000001; }
-    } else r = 0x7F000002;
-    char d[170]; describe(caller, d, sizeof(d));
+    int fk = (g_fake && slot >= 0 && slot < NEXP) ? g_fakeval[slot] : 0;
+    char d[170]; describe(retaddr, d, sizeof(d));
     if (fk) { strcat(d, " [FAKE]"); }
     if (g_log) {
         EnterCriticalSection(&g_cs);
@@ -132,535 +124,941 @@ int __cdecl apiThunk(int slot, void** argp, DWORD caller) {
         fprintf(g_log, "[%02d:%02d:%02d.%03d] t%u #%lu %-45s a=%08x %08x %08x %08x %08x %08x %08x %08x from %s ret=%d (0x%x)%c",
             st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, GetCurrentThreadId(),
             (unsigned long)InterlockedIncrement(&g_seq), nm,
-            a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7], d, r, r, 10);
+            a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7], d, fk, fk, 10);
         fflush(g_log);
         LeaveCriticalSection(&g_cs);
     }
-    return r;
+    return 0;
 }
 
-// cdecl naked thunks: entered with caller args on stack ([esp]=our return addr)
+// SAFE thunks for ALL exports: log on entry under pushfd/pushad (regs+flags restored), then TAIL-CALL the real export (jmp, exact ABI for any calling convention) or, for the 3 gate fakes, return 1. Never re-call the real fn with fabricated args.
+static void* g_rawp_0;
 extern "C" void __declspec(naked) th_0(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 0                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 0                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_0]
+  jmp eax
 } }
+static void* g_rawp_1;
 extern "C" void __declspec(naked) th_1(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 1                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 1                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_1]
+  jmp eax
 } }
+static void* g_rawp_2;
 extern "C" void __declspec(naked) th_2(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 2                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 2                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_2]
+  jmp eax
 } }
+static void* g_rawp_3;
 extern "C" void __declspec(naked) th_3(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 3                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 3                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_3]
+  jmp eax
 } }
+static void* g_rawp_4;
 extern "C" void __declspec(naked) th_4(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 4                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 4                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_4]
+  jmp eax
 } }
+static void* g_rawp_5;
 extern "C" void __declspec(naked) th_5(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 5                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 5                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_5]
+  jmp eax
 } }
+static void* g_rawp_6;
 extern "C" void __declspec(naked) th_6(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 6                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 6                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_6]
+  jmp eax
 } }
+static void* g_rawp_7;
 extern "C" void __declspec(naked) th_7(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 7                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 7                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_7]
+  jmp eax
 } }
+static void* g_rawp_8;
 extern "C" void __declspec(naked) th_8(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 8                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 8                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_8]
+  jmp eax
 } }
+static void* g_rawp_9;
 extern "C" void __declspec(naked) th_9(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 9                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 9                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_9]
+  jmp eax
 } }
+static void* g_rawp_10;
 extern "C" void __declspec(naked) th_10(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 10                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 10                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_10]
+  jmp eax
 } }
+static void* g_rawp_11;
 extern "C" void __declspec(naked) th_11(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 11                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 11                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_11]
+  jmp eax
 } }
+static void* g_rawp_12;
 extern "C" void __declspec(naked) th_12(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 12                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 12                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_12]
+  jmp eax
 } }
+static void* g_rawp_13;
 extern "C" void __declspec(naked) th_13(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 13                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 13                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_13]
+  jmp eax
 } }
+static void* g_rawp_14;
 extern "C" void __declspec(naked) th_14(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 14                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 14                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_14]
+  jmp eax
 } }
+static void* g_rawp_15;
 extern "C" void __declspec(naked) th_15(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 15                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 15                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_15]
+  jmp eax
 } }
+static void* g_rawp_16;
 extern "C" void __declspec(naked) th_16(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 16                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 16                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_16]
+  jmp eax
 } }
+static void* g_rawp_17;
 extern "C" void __declspec(naked) th_17(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 17                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 17                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_17]
+  jmp eax
 } }
+static void* g_rawp_18;
 extern "C" void __declspec(naked) th_18(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 18                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 18                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_18]
+  jmp eax
 } }
+static void* g_rawp_19;
 extern "C" void __declspec(naked) th_19(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 19                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 19                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_19]
+  jmp eax
 } }
+static void* g_rawp_20;
 extern "C" void __declspec(naked) th_20(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 20                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 20                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_20]
+  jmp eax
 } }
+static void* g_rawp_21;
 extern "C" void __declspec(naked) th_21(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 21                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 21                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_21]
+  jmp eax
 } }
+static void* g_rawp_22;
 extern "C" void __declspec(naked) th_22(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 22                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 22                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_22]
+  jmp eax
 } }
+static void* g_rawp_23;
 extern "C" void __declspec(naked) th_23(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 23                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 23                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_23]
+  jmp eax
 } }
+static void* g_rawp_24;
 extern "C" void __declspec(naked) th_24(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 24                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 24                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_24]
+  jmp eax
 } }
+static void* g_rawp_25;
 extern "C" void __declspec(naked) th_25(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 25                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 25                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_25]
+  jmp eax
 } }
+static void* g_rawp_26;
 extern "C" void __declspec(naked) th_26(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 26                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 26                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_26]
+  jmp eax
 } }
+static void* g_rawp_27;
 extern "C" void __declspec(naked) th_27(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 27                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 27                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_27]
+  jmp eax
 } }
+static void* g_rawp_28;
 extern "C" void __declspec(naked) th_28(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 28                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 28                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_28]
+  jmp eax
 } }
+static void* g_rawp_29;
 extern "C" void __declspec(naked) th_29(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 29                   // slot
-  call apiThunk
-  add  esp, 8
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 29                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, 1
   ret
 } }
+static void* g_rawp_30;
 extern "C" void __declspec(naked) th_30(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 30                   // slot
-  call apiThunk
-  add  esp, 8
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 30                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, 1
   ret
 } }
+static void* g_rawp_31;
 extern "C" void __declspec(naked) th_31(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 31                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 31                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_31]
+  jmp eax
 } }
+static void* g_rawp_32;
 extern "C" void __declspec(naked) th_32(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 32                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 32                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_32]
+  jmp eax
 } }
+static void* g_rawp_33;
 extern "C" void __declspec(naked) th_33(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 33                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 33                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_33]
+  jmp eax
 } }
+static void* g_rawp_34;
 extern "C" void __declspec(naked) th_34(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 34                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 34                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_34]
+  jmp eax
 } }
+static void* g_rawp_35;
 extern "C" void __declspec(naked) th_35(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 35                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 35                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_35]
+  jmp eax
 } }
+static void* g_rawp_36;
 extern "C" void __declspec(naked) th_36(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 36                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 36                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_36]
+  jmp eax
 } }
+static void* g_rawp_37;
 extern "C" void __declspec(naked) th_37(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 37                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 37                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_37]
+  jmp eax
 } }
+static void* g_rawp_38;
 extern "C" void __declspec(naked) th_38(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 38                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 38                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_38]
+  jmp eax
 } }
+static void* g_rawp_39;
 extern "C" void __declspec(naked) th_39(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 39                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 39                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_39]
+  jmp eax
 } }
+static void* g_rawp_40;
 extern "C" void __declspec(naked) th_40(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 40                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 40                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_40]
+  jmp eax
 } }
+static void* g_rawp_41;
 extern "C" void __declspec(naked) th_41(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 41                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 41                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_41]
+  jmp eax
 } }
+static void* g_rawp_42;
 extern "C" void __declspec(naked) th_42(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 42                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 42                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_42]
+  jmp eax
 } }
+static void* g_rawp_43;
 extern "C" void __declspec(naked) th_43(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 43                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 43                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_43]
+  jmp eax
 } }
+static void* g_rawp_44;
 extern "C" void __declspec(naked) th_44(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 44                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 44                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_44]
+  jmp eax
 } }
+static void* g_rawp_45;
 extern "C" void __declspec(naked) th_45(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 45                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 45                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_45]
+  jmp eax
 } }
+static void* g_rawp_46;
 extern "C" void __declspec(naked) th_46(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 46                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 46                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_46]
+  jmp eax
 } }
+static void* g_rawp_47;
 extern "C" void __declspec(naked) th_47(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 47                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 47                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_47]
+  jmp eax
 } }
+static void* g_rawp_48;
 extern "C" void __declspec(naked) th_48(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 48                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 48                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_48]
+  jmp eax
 } }
+static void* g_rawp_49;
 extern "C" void __declspec(naked) th_49(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 49                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 49                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_49]
+  jmp eax
 } }
+static void* g_rawp_50;
 extern "C" void __declspec(naked) th_50(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 50                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 50                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_50]
+  jmp eax
 } }
+static void* g_rawp_51;
 extern "C" void __declspec(naked) th_51(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 51                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 51                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_51]
+  jmp eax
 } }
+static void* g_rawp_52;
 extern "C" void __declspec(naked) th_52(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 52                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 52                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_52]
+  jmp eax
 } }
+static void* g_rawp_53;
 extern "C" void __declspec(naked) th_53(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 53                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 53                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_53]
+  jmp eax
 } }
+static void* g_rawp_54;
 extern "C" void __declspec(naked) th_54(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 54                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 54                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_54]
+  jmp eax
 } }
+static void* g_rawp_55;
 extern "C" void __declspec(naked) th_55(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 55                   // slot
-  call apiThunk
-  add  esp, 8
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 55                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, 1
   ret
 } }
+static void* g_rawp_56;
 extern "C" void __declspec(naked) th_56(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 56                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 56                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_56]
+  jmp eax
 } }
+static void* g_rawp_57;
 extern "C" void __declspec(naked) th_57(void){ __asm {
-  push dword ptr [esp]      // caller return address
-  lea  eax, [esp+8]         // &first caller arg
-  push eax
-  push 57                   // slot
-  call apiThunk
-  add  esp, 8
-  ret
+  pushfd
+  pushad
+  lea  eax, [esp+40]        // &first caller arg
+  mov  edx, [esp+36]        // caller return address
+  push edx                  // arg3: retaddr
+  push eax                  // arg2: argp
+  push 57                   // arg1: slot
+  call log_entry
+  add  esp, 12
+  popad
+  popfd
+  mov eax, dword ptr [g_rawp_57]
+  jmp eax
 } }
 
 static void resolveReal(void) {
@@ -680,6 +1078,64 @@ static void resolveReal(void) {
     }
 }
 static void wireRaw(void){
+  g_rawp_0 = g_realp[0];
+  g_rawp_1 = g_realp[1];
+  g_rawp_2 = g_realp[2];
+  g_rawp_3 = g_realp[3];
+  g_rawp_4 = g_realp[4];
+  g_rawp_5 = g_realp[5];
+  g_rawp_6 = g_realp[6];
+  g_rawp_7 = g_realp[7];
+  g_rawp_8 = g_realp[8];
+  g_rawp_9 = g_realp[9];
+  g_rawp_10 = g_realp[10];
+  g_rawp_11 = g_realp[11];
+  g_rawp_12 = g_realp[12];
+  g_rawp_13 = g_realp[13];
+  g_rawp_14 = g_realp[14];
+  g_rawp_15 = g_realp[15];
+  g_rawp_16 = g_realp[16];
+  g_rawp_17 = g_realp[17];
+  g_rawp_18 = g_realp[18];
+  g_rawp_19 = g_realp[19];
+  g_rawp_20 = g_realp[20];
+  g_rawp_21 = g_realp[21];
+  g_rawp_22 = g_realp[22];
+  g_rawp_23 = g_realp[23];
+  g_rawp_24 = g_realp[24];
+  g_rawp_25 = g_realp[25];
+  g_rawp_26 = g_realp[26];
+  g_rawp_27 = g_realp[27];
+  g_rawp_28 = g_realp[28];
+  g_rawp_29 = g_realp[29];
+  g_rawp_30 = g_realp[30];
+  g_rawp_31 = g_realp[31];
+  g_rawp_32 = g_realp[32];
+  g_rawp_33 = g_realp[33];
+  g_rawp_34 = g_realp[34];
+  g_rawp_35 = g_realp[35];
+  g_rawp_36 = g_realp[36];
+  g_rawp_37 = g_realp[37];
+  g_rawp_38 = g_realp[38];
+  g_rawp_39 = g_realp[39];
+  g_rawp_40 = g_realp[40];
+  g_rawp_41 = g_realp[41];
+  g_rawp_42 = g_realp[42];
+  g_rawp_43 = g_realp[43];
+  g_rawp_44 = g_realp[44];
+  g_rawp_45 = g_realp[45];
+  g_rawp_46 = g_realp[46];
+  g_rawp_47 = g_realp[47];
+  g_rawp_48 = g_realp[48];
+  g_rawp_49 = g_realp[49];
+  g_rawp_50 = g_realp[50];
+  g_rawp_51 = g_realp[51];
+  g_rawp_52 = g_realp[52];
+  g_rawp_53 = g_realp[53];
+  g_rawp_54 = g_realp[54];
+  g_rawp_55 = g_realp[55];
+  g_rawp_56 = g_realp[56];
+  g_rawp_57 = g_realp[57];
 }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {

@@ -3608,3 +3608,29 @@ downstream condition depends on runtime netcode state, so the loader-fake↔gate
   `upc Play` run on TestFC3_105 with `FC3COOP_FAKE_PARTY=1`, inspecting whether the co-op submenu path in
   `FUN_11218480` is taken (add breakpoints / log at `DAT_12805180+4` and `DAT_12804acc+0x6c` when building the
   test mod). All addresses 1.06 md5 `5742de2a`.
+
+
+### Session 28i (same day) - fixed the proxy's unsafe re-call (ABI bug) -> tail-call; deployed `sha1 e045f054`
+
+A live `upc Play` attempt crashed `farcry3_d3d11.exe` with **0xc0000005 (access violation), faulting module
+"unknown 0.0.0.0", BEX/StackHash_2beb**, immediately after `UPLAY_PARTY_Init`; the orbit party-gate fakes were
+NEVER reached (no `IsConnected`/`IsPartyLeader` calls from the game). Re-reading `gen_uplay_proxy.py`, the old
+`apiThunk` **re-called** the real export with a fixed 8-arg `__cdecl` prototype and without preserving `ecx` -
+wrong for any non-cdecl / thiscall / pointer-returning export, which corrupts the caller. Rewrote it:
+
+- `apiThunk` -> `log_entry(int slot, void** argp, DWORD retaddr)`: only READS the 8 stack args under SEH and
+  logs; it never calls the real function.
+- Every export (all 58, `cdecl`+`others` unified) is now a naked thunk: `pushfd; pushad; lea eax,[esp+40];
+  mov edx,[esp+36]; push edx; push eax; push slot; call log_entry; add esp,12; popad; popfd;` then either
+  `mov eax,1; ret` (the 3 gate fakes) or `mov eax,[g_rawp_i]; jmp eax` - a **tail-call that preserves the caller's
+  exact stack, return address and registers (incl. ecx)**, so the real export runs with a byte-exact ABI.
+- Rebuilt x86 clean (only C4996 deprecation warnings), `machine 0x14c`, 58 exports, deployed to
+  `TestFC3_105\bin\uplay_r1_loader.dll` = `sha1 e045f054...`.
+- Caveat: `proxytest.exe` (dummy args) still exits 0xc0000005 via the proxy while the direct-real run times out
+  on a network-blocking export - the harness diverges for reasons unrelated to the forwarding (garbage args +
+  fake=1 branch), so it is NOT a clean proxy-vs-real discriminator. The proxy change is justified by the code
+  analysis and the in-game 0xc0000005; the definitive test is the live game, currently blocked (see below).
+- **Current blocker is no longer code:** Ubisoft Connect refuses to launch the game for the signed-in account
+  ("could not verify access to this game"). The game needs the UC DRM handshake to reach a window (direct
+  `farcry3.exe` launch exits with no window), so this entitlement check gates every live test. Owner-side to
+  resolve; see NOTES live-test procedure. No personal identifiers recorded here.

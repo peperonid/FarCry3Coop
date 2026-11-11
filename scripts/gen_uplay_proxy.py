@@ -92,21 +92,13 @@ emit("};",
 "    sprintf(out, " + chr(34) + "%s+0x%x%s" + chr(34) + ", path, rva, tag);",
 "}",
 "",
-"int __cdecl apiThunk(int slot, void** argp, DWORD caller);",
-"int __cdecl apiThunk(int slot, void** argp, DWORD caller) {",
+"int __cdecl log_entry(int slot, void** argp, DWORD retaddr);",
+"int __cdecl log_entry(int slot, void** argp, DWORD retaddr) {",
 "    DWORD a[8] = {0,0,0,0,0,0,0,0};",
 "    __try { for (int i = 0; i < 8; i++) a[i] = (DWORD)argp[i]; } __except (EXCEPTION_EXECUTE_HANDLER) {}",
 "    const char* nm = (slot >= 0 && slot < NEXP) ? g_names[slot] : " + chr(34) + "?" + chr(34) + ";",
-"    int r; int fk = (g_fake && slot >= 0 && slot < NEXP) ? g_fakeval[slot] : 0;",
-"    void* real = (slot >= 0 && slot < NEXP) ? g_realp[slot] : NULL;",
-"    if (fk) r = fk;",
-"    else if (real) {",
-"        __try {",
-"            typedef int (__cdecl*fn)(DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD);",
-"            r = ((fn)real)(a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7]);",
-"        } __except (EXCEPTION_EXECUTE_HANDLER) { r = 0x7F000001; }",
-"    } else r = 0x7F000002;",
-"    char d[170]; describe(caller, d, sizeof(d));",
+"    int fk = (g_fake && slot >= 0 && slot < NEXP) ? g_fakeval[slot] : 0;",
+"    char d[170]; describe(retaddr, d, sizeof(d));",
 "    if (fk) { strcat(d, " + chr(34) + " [FAKE]" + chr(34) + "); }",
 "    if (g_log) {",
 "        EnterCriticalSection(&g_cs);",
@@ -114,29 +106,31 @@ emit("};",
 "        fprintf(g_log, " + chr(34) + BIGFMT + chr(34) + ",",
 "            st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, GetCurrentThreadId(),",
 "            (unsigned long)InterlockedIncrement(&g_seq), nm,",
-"            a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7], d, r, r, 10);",
+"            a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7], d, fk, fk, 10);",
 "        fflush(g_log);",
 "        LeaveCriticalSection(&g_cs);",
 "    }",
-"    return r;",
+"    return 0;",
 "}",
 "",
-"// cdecl naked thunks: entered with caller args on stack ([esp]=our return addr)")
-for i in range(len(cdecls)):
-    emit('extern "C" void __declspec(naked) th_%d(void){ __asm {' % i,
-         "  push dword ptr [esp]      // caller return address",
-         "  lea  eax, [esp+8]         // &first caller arg",
-         "  push eax",
-         "  push %d                   // slot" % i,
-         "  call apiThunk",
-         "  add  esp, 8",
-         "  ret",
-         "} }")
-for j in range(len(others)):
-    k = len(cdecls) + j
-    emit("static void* g_rawp_%d;" % k,
-         'extern "C" void __declspec(naked) rawf_%d(void){ __asm { mov eax, dword ptr [g_rawp_%d]' % (k, k),
-         "  jmp eax } }")
+"// SAFE thunks for ALL exports: log on entry under pushfd/pushad (regs+flags restored), then TAIL-CALL the real export (jmp, exact ABI for any calling convention) or, for the 3 gate fakes, return 1. Never re-call the real fn with fabricated args.")
+for k in range(len(names)):
+    fk = names[k] in FAKE_ONE
+    tail = ["  mov eax, 1", "  ret"] if fk else ["  mov eax, dword ptr [g_rawp_%d]" % k, "  jmp eax"]
+    lines = ["static void* g_rawp_%d;" % k,
+             'extern "C" void __declspec(naked) th_%d(void){ __asm {' % k,
+             "  pushfd",
+             "  pushad",
+             "  lea  eax, [esp+40]        // &first caller arg",
+             "  mov  edx, [esp+36]        // caller return address",
+             "  push edx                  // arg3: retaddr",
+             "  push eax                  // arg2: argp",
+             "  push %d                   // arg1: slot" % k,
+             "  call log_entry",
+             "  add  esp, 12",
+             "  popad",
+             "  popfd"] + tail + ["} }"]
+    emit(*lines)
 emit("",
 "static void resolveReal(void) {",
 "    BYTE* img = (BYTE*)g_real;",
@@ -155,8 +149,7 @@ emit("",
 "    }",
 "}",
 "static void wireRaw(void){")
-for j in range(len(others)):
-    k = len(cdecls) + j
+for k in range(len(names)):
     emit("  g_rawp_%d = g_realp[%d];" % (k, k))
 emit("}",
 "",
@@ -185,10 +178,8 @@ emit("}",
 "}")
 
 def_lines = ["LIBRARY uplay_r1_loader", "EXPORTS"]
-for i, n in enumerate(cdecls):
+for i, n in enumerate(names):
     def_lines.append("  %s = th_%d" % (n, i))
-for j, n in enumerate(others):
-    def_lines.append("  %s = rawf_%d" % (n, len(cdecls) + j))
 
 open(os.path.join(OUTD, "uplay_proxy.cpp"), "w", encoding="utf-8", newline="\n").write("\n".join(L) + "\n")
 open(os.path.join(OUTD, "uplay_proxy.def"), "w", encoding="utf-8", newline="\n").write("\n".join(def_lines) + "\n")
