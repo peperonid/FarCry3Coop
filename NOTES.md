@@ -4011,3 +4011,30 @@ Consequences for the plan:
   `LanMatchmakingDiscoveryOnLoopbackEnable=1` and observe whether a ticket request is issued / join succeeds.
 - Concrete targets to decompile next (via `getReferencesTo` on the string VAs): the JobTicketManagerLogin / AcquireTicket
   methods (patch candidates for (B)) and the CFCX/LAN join flow (to test exemption).
+
+
+### Session 28y - ticket patch-surface (B) mapped: localized, and the key only needs to MATCH between peers
+
+Ghidra `DecompileTicket`/`Decompile1` pass on `FC3d3d11_live` (46bcc097). The ticket flow (real code, not registrars):
+
+- **PrepareCall** `FUN_1124e5e0`: builds the AcquireTicket job, stores params (`param_1[0x1b..0x1e]`), sets the response
+  handler to `FUN_1124d660`, name "JobTicketManagerAcquireTicket::PrepareCall", then `FUN_1121c8f0(&handler)` sends it.
+- **ProcessResponse** `FUN_1124d660`: on the success branch writes the received ticket into an out buffer via
+  `**(param_1+0x78) = *(local_c+0x10)`, calls vtable+4, and `FUN_1124a430(2)` (status=success). => **the ticket-inject point**.
+- **ValidateKey** `FUN_1124d7b0`: gated by global `DAT_1174d35a`. Branch A (`==0`) calls **`FUN_112547c0`** and fails with
+  `0x80010001`/status 3 if it returns 0. Branch B (`!=0`) calls `FUN_112547f0` (an alternate path).
+- **`FUN_112547c0` / `FUN_112547f0` are thin VIRTUAL THUNKS** that dispatch the real crypto/derive through the vtable backend
+  `PTR_PTR_117531f4` (slots +4/+8) with selector `DAT_11f07f1c`. So the ticket/key crypto is a **pluggable backend object**,
+  not inline crypto.
+- **DeriveKey** `FUN_1124e670`: checks job state `+0x114`, calls `FUN_11210ad0(...)`, and chains to ValidateKey
+  (`FUN_1124d7b0`); key bytes carried at `+0x13c/+0x140`.
+- Session error enum `FUN_113abb34`: `E_SESSION_ERROR_TICKET_REQUEST_FAILED`=5, `JOIN_FAILED*`, `SEARCH_FAILED*`, etc.
+  (the observable failure surface).
+
+**Key realization for a friends-only co-op mod:** the ticket's crypto only has to MATCH between the peers (both sides must
+derive the same `GameSessionKey`), it does NOT have to be authentic to Ubisoft. So patch (B) is: (1) stop `PrepareCall` from
+networking and fill the out-ticket buffer locally (from session id / a shared password), (2) make `ValidateKey`/`DeriveKey`
+accept it (neutralize the `FUN_112547c0` crypto check or swap the `PTR_PTR_117531f4` backend for a deterministic local one).
+Every co-op player installs the same mod, so the locally-derived key matches on all peers -> session forms with no RV service.
+Surface is small (4 functions + 1 vtable backend), all in the running module. Next drill: dump the `PTR_PTR_117531f4` backend
+vtable to pick the exact swap or the single validate-check to neutralize.
