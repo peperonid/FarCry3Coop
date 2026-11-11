@@ -3860,3 +3860,24 @@ selector**, not PRUDP. Concrete next steps:
 > (RendezVous/Services/UbiAuthentication/.../UbiAuthenticationClient.cpp). Forcing the gate alone dead-ends at
 > UbiAuth, so direction B must use the engine's LAN mode (`FUN_1092d256` param+0xe:0), not fake online success.
 > Network-type singleton DAT_11e42a90 is read ~80x / written once (constructor FUN_100bc087).
+
+
+### Session 28s (same day) - co-op session dispatcher decodes a NON-RV path (direction B lever) + live Frida now blocked by anti-injection
+
+Fast re-decompiles of the analyzed `FC3d3d11_live` (no re-analysis) resolved the mode decision:
+
+- **Co-op session-create dispatcher `FUN_10441fb6`** (invoked via a vtable at 0x11526798): resolves a per-session
+  record (`FUN_10431a1b` over `FUN_1041dba9`; record stride 0x90, id at +0x10) and branches on a byte flag `*(rec+5)`:
+  - flag `== 0` -> **`FUN_1044123b` = the ONLINE path** -> RV bootstrap (`FUN_1127a380`/`FUN_1127a3b0`) -> UbiAuth (dead).
+  - flag `!= 0` -> **`FUN_10443663` = the NON-RV path** -> `FUN_11275f40(rec, &id, ..., this+1)` creates/joins the
+    session WITHOUT RendezVous. Both report failures through the error-code dispatcher `FUN_104532ec`.
+
+So the engine already contains a non-RV co-op session path; direction B = make the co-op session take
+`FUN_10443663`/`FUN_11275f40` instead of the online `FUN_1044123b`. Open questions (next static work): confirm
+`FUN_11275f40` is a direct storm::echo/UDP peer host (no Ubisoft), and locate where the record +5 LAN flag is set
+(i.e. whether the co-op host/join UI can create a LAN-type session, or it is hard-wired online).
+
+**Live Frida is now blocked:** the x86 injector is healthy (attaching Frida to a 32-bit SysWOW64 process succeeds in
+2.1s, same frida-helper-x86 path the game uses), but attach to `farcry3_d3d11.exe` reliably times out even on a fresh
+game after purging all frida-helpers. => FC3's anti-injection is now consistently refusing attach (in 28q the same
+tracer attached fine). The interactive force-probe is therefore unreliable; continue via static + on-disk patch tests.
