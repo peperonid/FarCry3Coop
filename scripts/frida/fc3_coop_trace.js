@@ -9,6 +9,23 @@ var log = function(){ var a=Array.prototype.slice.call(arguments).join(' '); try
 // hex of first n bytes at p (guarded).
 function hex(p, n){ try { var b=p.readByteArray(n); if(!b) return ''; var u=new Uint8Array(b), s=''; for(var i=0;i<u.length;i++){ s+=(u[i]<16?'0':'')+u[i].toString(16); } return s; } catch(e){ return '<bad>'; } }
 
+// ---------- game-module attribution + call-stack backtrace (direction B: name the RV callers) ----------
+var MODS = Process.enumerateModules().map(function(m){ return { base:m.base, end:m.base.add(m.size), name:m.name }; });
+function findMod(a){ for (var i=0;i<MODS.length;i++){ if (a.compare(MODS[i].base)>=0 && a.compare(MODS[i].end)<0) return MODS[i]; } return null; }
+function isGame(s){ return /farcry3|^FC3/i.test(s); }
+function fmtAddr(a){ var m=findMod(a); if(!m) return null; return m.name+'+0x'+a.sub(m.base).toString(16); }
+function gameFrames(ctx, mode){
+  var fr=[]; try { fr = Thread.backtrace(ctx, mode); } catch(e){ return []; }
+  var out=[]; for (var i=0;i<fr.length;i++){ var f=fmtAddr(fr[i]); if(f && isGame(f)) out.push(f); }
+  return out;
+}
+function bt(ctx){
+  var g = gameFrames(ctx, Backtracer.ACCURATE);
+  if (g.length < 2){ var fz = gameFrames(ctx, Backtracer.FUZZY); if (fz.length > g.length) g = fz; }
+  return g.slice(0,12).join(' <- ');
+}
+function isRv(s){ return s && (s.indexOf(':1100')>=0 || s.indexOf('203.132.26')>=0 || s.indexOf(':3074')>=0); }
+
 // ---------- winsock ----------
 function sockaddrInfo(p){
   try {
@@ -23,23 +40,26 @@ function sockaddrInfo(p){
 ['ws2_32.dll','ws2_32'].forEach(function(mod){
   var m = Process.findModuleByName(mod); if(!m) return;
   var ghn = m.findExportByName('gethostbyname');
-  if (ghn) Interceptor.attach(ghn, { onEnter:function(args){ this.n = args[0].readCString(); },
+  if (ghn) Interceptor.attach(ghn, { onEnter:function(args){ this.n = args[0].readCString(); this.ctx=this.context; },
     onLeave:function(r){ if(!this.n || this.n.indexOf('.')<0) return; var hosts=''; if(!r.isNull()){ try{ hosts=r.readPointer().readCString(); }catch(e){} }
-      log('[DNS] gethostbyname("' + this.n + '") -> ' + (r.isNull()?'NULL(fail)':('hostent name='+hosts))); } });
+      log('[DNS] gethostbyname("' + this.n + '") -> ' + (r.isNull()?'NULL(fail)':('hostent name='+hosts)));
+      if (/ubisoft|rdv/i.test(this.n)) log('[RV-BT] gethostbyname("'+this.n+'") callers: '+bt(this.ctx)); } });
   var gai = m.findExportByName('getaddrinfo');
   if (gai) Interceptor.attach(gai, { onEnter:function(args){ this.node = args[0].isNull()?'null':args[0].readCString(); this.svc = args[1].isNull()?'null':args[1].readCString(); },
     onLeave:function(r){ log('[DNS] getaddrinfo(node="'+this.node+'", svc="'+this.svc+'") -> ret='+r); } });
   var con = m.findExportByName('connect');
-  if (con) Interceptor.attach(con, { onEnter:function(args){ var si = sockaddrInfo(args[1]); this.si=si.s; },
-    onLeave:function(r){ log('[NET] connect(fd, '+this.si+') -> '+r.toInt32()+(r.toInt32()===0?' OK':' (WSAErro r '+(r.toInt32()<0?(-r.toInt32()):r.toInt32())+')')); } });
+  if (con) Interceptor.attach(con, { onEnter:function(args){ var si = sockaddrInfo(args[1]); this.si=si.s; this.ctx=this.context; },
+    onLeave:function(r){ log('[NET] connect(fd, '+this.si+') -> '+r.toInt32()+(r.toInt32()===0?' OK':' (WSAErro r '+(r.toInt32()<0?(-r.toInt32()):r.toInt32())+')')); if(isRv(this.si)) log('[RV-BT] connect('+this.si+') callers: '+bt(this.ctx)); } });
   var sto = m.findExportByName('sendto');
-  if (sto) Interceptor.attach(sto, { onEnter:function(args){ this.dst = args[4].isNull()?'<none/connected>':sockaddrInfo(args[4]).s; this.len=args[2].toInt32(); this.buf=args[1]; },
-    onLeave:function(r){ if(this.len>0) log('[NET] sendto(fd, len='+this.len+', dst='+this.dst+') -> '+r.toInt32()+' data='+hex(this.buf, Math.min(this.len,64))); } });
+  if (sto) Interceptor.attach(sto, { onEnter:function(args){ this.dst = args[4].isNull()?'<none/connected>':sockaddrInfo(args[4]).s; this.len=args[2].toInt32(); this.buf=args[1]; this.ctx=this.context; },
+    onLeave:function(r){ if(this.len>0) log('[NET] sendto(fd, len='+this.len+', dst='+this.dst+') -> '+r.toInt32()+' data='+hex(this.buf, Math.min(this.len,64)));
+      if(isRv(this.dst)) log('[RV-BT] sendto->'+this.dst+' callers: '+bt(this.ctx)); } });
   var rfo = m.findExportByName('recvfrom');
   if (rfo) Interceptor.attach(rfo, { onEnter:function(args){ this.src = args[4].isNull()?'<none>':sockaddrInfo(args[4]).s; this.buf=args[1]; },
     onLeave:function(r){ var n=r.toInt32(); if(n>0) log('[NET] recvfrom(fd, n='+n+', src='+this.src+') data='+hex(this.buf, Math.min(n,64))); } });
   var bnd = m.findExportByName('bind');
-  if (bnd) Interceptor.attach(bnd, { onEnter:function(args){ log('[NET] bind(fd, '+sockaddrInfo(args[1]).s+')'); } });
+  if (bnd) Interceptor.attach(bnd, { onEnter:function(args){ this.sa=sockaddrInfo(args[1]).s; this.ctx=this.context; log('[NET] bind(fd, '+this.sa+')'); },
+    onLeave:function(r){ if(/:3074|:9000/.test(this.sa)) log('[RV-BT] bind('+this.sa+') callers: '+bt(this.ctx)); } });
   var snd = m.findExportByName('send');
   if (snd) Interceptor.attach(snd, { onEnter:function(a){ this.fd=a[0]; this.buf=a[1]; this.len=a[2].toInt32(); },
     onLeave:function(r){ if(this.len>0 && r.toInt32()>0) log('[NET] send(fd='+this.fd+', n='+r.toInt32()+') data='+hex(this.buf, Math.min(this.len,64))); } });
