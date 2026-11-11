@@ -3634,3 +3634,28 @@ wrong for any non-cdecl / thiscall / pointer-returning export, which corrupts th
   ("could not verify access to this game"). The game needs the UC DRM handshake to reach a window (direct
   `farcry3.exe` launch exits with no window), so this entitlement check gates every live test. Owner-side to
   resolve; see NOTES live-test procedure. No personal identifiers recorded here.
+
+
+### Session 28j (same day) - CORRECTED launch model: upc launches `TestFC3_105` directly; junction method is obsolete here
+
+Owner correction (authoritative, fix this in every future session): **Ubisoft Connect's registered Far Cry 3
+install path on this PC is `H:\FarCryCoop\TestFC3_105` itself** (the owner pointed upc at that folder earlier).
+Therefore upc's Play button runs `H:\FarCryCoop\TestFC3_105\bin\farcry3.exe` DIRECTLY. The Session-13 junction
+trick (register `H:\Uplay\Far Cry 3`, then `mklink` it to the copy) is **obsolete on this PC and must not be
+used** - it renames the real install for no benefit and strands it (see below). This is the root cause of the
+confusion in Sessions 28b/28i: the game was always launching from the copy; the fake=1 runs were real upc launches
+inheriting HKCU env, and helper-based direct launches are a different, no-window path.
+
+- Env consequence: because **upc** (not a helper) spawns the game, the gate-fake switch must live in HKCU -
+  `setx FC3COOP_FAKE_PARTY 1` + a full Ubisoft Connect restart - for it to reach the process. A helper that sets
+  env only for its own child does not represent the upc path.
+- Stray filesystem state from the abandoned junction (verified): `H:\Uplay\Far Cry 3` is MISSING and the real
+  install sits renamed at `H:\Uplay\Far Cry 3.OFFICIAL`. Cleanup (owner, admin): run `undo_junction.bat` - with no
+  junction present it only renames `Far Cry 3.OFFICIAL` back to `Far Cry 3` (safe, touches no copy). Do NOT run
+  `use_copy_junction.bat` again.
+- Corrected live-test procedure: (1) `undo_junction.bat` (tidy, optional but recommended); (2)
+  `setx FC3COOP_FAKE_PARTY 1`; (3) fully quit Ubisoft Connect (incl. tray) and reopen; (4) Play FC3 - upc runs the
+  copy directly, proxy `sha1 e045f054` + fakes active; (5) navigate to the co-op menu; agent then reads
+  `H:\FarCryCoop\TestFC3_105\bin\uplay_api.log`.
+- If Ubisoft Connect still shows "could not verify access to this game", that is an account/entitlement matter for
+  the account currently signed in (it must own FC3 and be online) - owner-side, outside the mod work.
