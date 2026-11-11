@@ -4038,3 +4038,34 @@ accept it (neutralize the `FUN_112547c0` crypto check or swap the `PTR_PTR_11753
 Every co-op player installs the same mod, so the locally-derived key matches on all peers -> session forms with no RV service.
 Surface is small (4 functions + 1 vtable backend), all in the running module. Next drill: dump the `PTR_PTR_117531f4` backend
 vtable to pick the exact swap or the single validate-check to neutralize.
+
+
+### Session 28z - FINALIZED patch (B): the ticket "crypto" is MD5 only; single validate slot identified
+
+Ghidra `DecompileBackend`/`Decompile2` on `FC3d3d11_live` (46bcc097). The backend reached from `ValidateKey` via thunks
+`FUN_112547c0`/`FUN_112547f0`/`FUN_112548b0` -> vtable `PTR_PTR_117531f4`:
+
+- **One backend object, lazily created** `if (PTR_PTR_117531f4==0) PTR_PTR_117531f4 = &PTR_PTR_11759160` (only writes to
+  `PTR_PTR_117531f4` are in `FUN_112547f0` and `FUN_112548b0`, both set it to that SAME default). Object `0x11759160` ->
+  **vtable V = `0x116c6e48`**.
+- **Vtable slots:** `+0` `FUN_112544f0`; **`+4` `FUN_11254be0`** (usedby `FUN_112547c0` = ValidateKey thunk);
+  **`+8` `FUN_11254ae0`** (usedby `FUN_112547f0`); `+12` `FUN_11254c40` (usedby `FUN_112548b0`); `+32` `FUN_11256190` (ref-count).
+- **The algorithm is MD5, NOT a signature:** `FUN_11254be0`, `FUN_11254c40` reference
+  `RendezVous/./OnlineCore/src/Core/Checksum/MD5/MD5Checksum.h` and call `FUN_112378a0(...,mode=2)` (compute+compare);
+  `FUN_11254ae0` (derive) indexes with `param_3 % this->[8] + this->[4]` and calls `FUN_1122df00`. There is **no
+  asymmetric/RSA key and no baked Ubisoft secret** - it is MD5 over data both peers can hold.
+- **Gate** `DAT_1174d35a` (picks the ValidateKey branch) is set to `0` by game init `FUN_10431d9a` (which also installs
+  `DAT_11f06688=FUN_104319c7`, `DAT_11f0668c=FUN_104319d8` and configures timeouts via `FUN_11232a60/FUN_11232a80`).
+- Selector `DAT_11f07f1c` selects the derive sub-branch in `FUN_112547f0`.
+
+**Finalized patch (B) surface (all in-module, no crypto to break):**
+1. **Inject** the ticket in `ProcessResponse` `FUN_1124d660` (out buffer `**(param_1+0x78)`) with a deterministic value derived
+   from the session id / a shared password - and skip the network in `PrepareCall` `FUN_1124e5e0`.
+2. **Neutralize the single validate check**: make the MD5 compare in vtable+4 `FUN_11254be0` (dispatched by `FUN_112547c0`)
+   always succeed - OR overwrite vtable slot `+4`/`+8` of `0x116c6e48`, OR (cleanest, non-destructive) set `PTR_PTR_117531f4`
+   to a custom backend vtable providing a deterministic `derive`(+8)/`validate`(+4). This is the "backend swap signature":
+   the object pointer lives only in `PTR_PTR_117531f4` and is never read from config, so a loader/DLL can repoint it at init.
+- **Feasibility verdict:** because the scheme is MD5-only, a patched host can derive the ticket locally and every patched
+  peer validates the same MD5 - **no RendezVous service, no key to break.** Route B is confirmed the cheap, viable offline
+  co-op path (contingent on the LAN-ticket question from the `fc3_lan_coop_launch.bat` experiment; if LAN join bypasses
+  tickets entirely, even step 2 may be unnecessary).

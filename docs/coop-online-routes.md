@@ -46,3 +46,11 @@ Make the client satisfy itself without the service:
 1. Run the LAN experiment first (may make ticket work moot).
 2. If a ticket is needed on LAN, prefer **Route B** (patch the client), and only fall back to Route A if B proves too broad.
 3. Keep the work on the upstream 1.05 leading route; cross-map addresses with `scripts/fc3_addrmap.py`.
+
+
+## Update (28z): Route B crypto is MD5-only (risk LOW)
+Backend vtable `0x116c6e48` (object `0x11759160`; its pointer lives only in `PTR_PTR_117531f4`, set only in `FUN_112547f0`/`FUN_112548b0`).
+Validate slot `+4` = `FUN_11254be0`, derive slot `+8` = `FUN_11254ae0` - both MD5 (`OnlineCore/src/Core/Checksum/MD5/MD5Checksum.h`),
+mode `FUN_112378a0(...,2)`. **No asymmetric key and no baked Ubisoft secret.** Neutralize the MD5 compare in `FUN_11254be0`, or
+repoint `PTR_PTR_117531f4` to a deterministic local backend (derive +8 / validate +4). A patched host derives the ticket and every
+patched peer validates the same MD5 -> no RV service, no key to break. See NOTES 28z for the full slot map.
