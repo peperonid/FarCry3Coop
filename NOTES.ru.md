@@ -3388,3 +3388,33 @@ host/join. Исходники `src/uplay_proxy/{uplay_proxy.cpp,uplay_proxy.def,
 Оба большие; следующий offline-шаг, полезный для (A) в любом случае, — найти эндпоинт кооп-сервиса, на который звонит игра.
 Это подтверждает тезис проекта от начала до конца: блокер кооперации — мёртвый онлайн-сервис, достигнутый родным
 неткодом, а не проверки логина orbit.
+
+
+### Сессия 28l (тот же день) - стек кооп-онлайна в FC3.dll определён: RendezVous + storm::echo + .svc SOAP; флаг CLI `-coop`
+
+Offline-скан строк `FC3.dll` / `FC3_d3d11.dll` (только чтение) обосновывает развилку стратегии из 28k.
+
+- **«Rv» = RendezVous**, онлайн-бэкенд сессий/матчмейкинга Ubisoft. Пути исходников вбиты в бинарь:
+  `..\platforms\win32\OnlineSession\RendezVousBackEndServices_native.cpp` и
+  `..\platforms\win32\OnlineSession\RendezVousGuestBackEndServices_native.cpp`. Сообщения сессий RendezVous:
+  `GameSessionUnsuccessfulJoinSession`, `GameSessionSearchWithParticipantsResult`, `GameSessionInvitationReceived`.
+  Это тот же слой, что гейт 28g `FUN_11218480` и RVA загрузчика `RVCreateGameSession`/`RVJoinGameSession` —
+  точки входа «RendezVous Create/Join GameSession».
+- **Транспорт — `storm::echo`**: `storm::echo::RoutablePacket`, `storm::echo::session_time::...`,
+  `storm::echo::simulation::internal::inEvent::CreateCamera`, `CEchoStartupParams`. Подтверждает план «нативный
+  storm::echo»; дата-плейн кооперации едет по storm::echo, плоскость лобби/матчмейкинга — по RendezVous.
+- **Онлайн-сервисы — HTTP/SOAP**: `/OnlineConfigService.svc/GetOnlineConfig?onlineConfigID=...` и SOAP-конверты
+  `<s:Envelope ...soap-envelope...>` — конфиг-сервис WCF `.svc`. Живое «Служба недоступна» (28k) — это
+  недостижимость этого RendezVous/config-бэкенда; эндпоинт получается в рантайме (Uplay + OnlineConfig), поэтому
+  простого хоста кооперации в DLL нет.
+- **Есть CLI-флаги кооперации**: `-coop`, `-coopchallengesettings`, `-firestorm`, `-fromuplay`, `-sessionuid`,
+  `-networktimeslice`. Опция запуска `-coop` может форсить кооп-режим; дёшево проверить, но кооп всё равно требует
+  сервис, поэтому в одиночку гейт вряд ли обойдёт.
+- Объекты геймплея кооперации: `CFCXCompetitiveCoop*`, `CCoopChallengeService`, `CCoopAISpawnerService`,
+  `ActivateCoopGate`, `CDominoNetFunc*Coop*` — контент кооп-сессии, когда сессия уже есть.
+
+Чтение стратегии (рекомендация владельцу): направление (B) — проходимое: прошить `RendezVousBackEndServices_native`
+/ путь RV Create/Join в `FC3.dll`, чтобы локальный вход сообщался успешным, и наполнить Rv-менеджер пати
+(`DAT_12805180+4`, гейт `FUN_11218480`, геттер `FUN_103660e0`), обходя мёртвый бэкенд RendezVous. Направление (A)
+(локальный фейк-сервер RendezVous+storm::echo) трудозатратнее, т.к. бэкенд — конфиг-управляемый SOAP + echo.
+Следующая offline-работа: найти нативные функции бэкенда RendezVous и код, поднимающий «service unavailable».

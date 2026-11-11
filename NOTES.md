@@ -3691,3 +3691,34 @@ surface. The real gate is the native co-op-service connection (and only after it
 Both are large; next offline step that serves (A) either way is to locate the co-op service endpoint the game dials.
 This validates the project thesis end-to-end: the co-op blocker is a dead online service reached by native netcode,
 not the orbit login checks.
+
+
+### Session 28l (same day) - co-op online stack identified in FC3.dll: RendezVous + storm::echo + .svc SOAP; `-coop` CLI flag
+
+Offline strings scan of `FC3.dll` / `FC3_d3d11.dll` (read-only) grounds the 28k strategy fork.
+
+- **"Rv" = RendezVous**, Ubisoft's online session/matchmaking backend. Source paths baked in the binary:
+  `..\platforms\win32\OnlineSession\RendezVousBackEndServices_native.cpp` and
+  `..\platforms\win32\OnlineSession\RendezVousGuestBackEndServices_native.cpp`. RendezVous session messages present:
+  `GameSessionUnsuccessfulJoinSession`, `GameSessionSearchWithParticipantsResult`, `GameSessionInvitationReceived`.
+  This is the same layer as the 28g gate `FUN_11218480` and the loader's `RVCreateGameSession`/`RVJoinGameSession`
+  RVAs - the "RendezVous Create/Join GameSession" entry points.
+- **Transport is `storm::echo`**: `storm::echo::RoutablePacket`, `storm::echo::session_time::...`,
+  `storm::echo::simulation::internal::inEvent::CreateCamera`, `CEchoStartupParams`. Confirms the PLAN's
+  "native storm::echo" direction; the co-op data plane rides storm::echo, the lobby/matchmaking plane rides
+  RendezVous.
+- **Online services are HTTP/SOAP**: `/OnlineConfigService.svc/GetOnlineConfig?onlineConfigID=...` and SOAP
+  `<s:Envelope ...soap-envelope...>` - a WCF `.svc` config service. The live "Служба недоступна" (28k) is this
+  RendezVous/config backend being unreachable; the endpoint is fetched at runtime (Uplay + OnlineConfig), which is
+  why no plain co-op hostname is hard-coded in the DLL.
+- **Co-op CLI flags exist**: `-coop`, `-coopchallengesettings`, `-firestorm`, `-fromuplay`, `-sessionuid`,
+  `-networktimeslice`. A `-coop` launch option may force co-op mode; cheap to probe but co-op still needs the
+  service, so it is unlikely to bypass the gate on its own.
+- Co-op gameplay objects: `CFCXCompetitiveCoop*`, `CCoopChallengeService`, `CCoopAISpawnerService`,
+  `ActivateCoopGate`, `CDominoNetFunc*Coop*` - the co-op session content once a session exists.
+
+Strategy read (recommendation to owner): direction (B) is the tractable path - patch `RendezVousBackEndServices_native`
+/ the RV Create/Join path in `FC3.dll` so a local join is reported successful and feed the Rv party manager
+(`DAT_12805180+4`, gate `FUN_11218480`, getter `FUN_103660e0`), bypassing the dead RendezVous backend. Direction (A)
+(local fake RendezVous+storm::echo server) is higher effort because the backend is config-driven SOAP + echo. Next
+offline work: locate the RendezVous back-end native functions and the code that raises "service unavailable".
