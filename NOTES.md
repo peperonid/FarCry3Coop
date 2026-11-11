@@ -3827,3 +3827,36 @@ The RV bootstrap disasm at VA 0x1122f700-0x1122f870 (from probe_rv_live.py) is r
 0x114ac6e4 / 0x114ac690 with string args at 0x116bc50c / 0x116bc594 and a local call 0x11211290 whose return is
 exactly the frame 0x1122f759 - i.e. this function is the RV host resolver. Next: import md5 46bcc097 into a fresh
 Ghidra project, auto-analyze, and decompile the RV bootstrap + echo-setup chains to design the direction-B bypass.
+
+
+### Session 28r (same day) - RV map decoded + net engine has a first-class LAN mode (direction B needs NO PRUDP)
+
+Ghidra import+analysis of the running `FC3_d3d11.dll` copy (md5 46bcc097, project `FC3d3d11_live`, ~48 min),
+then decompiled the 28q chains (`rv_decompile.txt`). Maps:
+
+- **RendezVous bootstrap chain (top->down):** game entry `FUN_1044123b` -> `FUN_1127a3b0` -> `FUN_1127a300`
+  -> **`FUN_11279ba0` (the gate: returns 1 only if the RV net-op `FUN_112492a0` succeeds, else 0)** ->
+  on success `FUN_1127a1d0` does the post-RV session op. Config side: `FUN_1122f870` parses a server URL string,
+  `FUN_1122f680` splits `address=<host>;port=<n>`, resolver `FUN_11211290` = `inet_addr` else `gethostbyname`
+  (IPv4 stored at obj+4; special-case "255.255.255.255"). Lazy "ready" flag getter `FUN_11233110` returns obj+0x4a.
+- **Net engine init `FUN_1092d256` (caller only via a vtable at 0x115c0e24):** has a FIRST-CLASS connection mode:
+  `param_1[0xe]` = 0 -> logs **"LAN"**, 1 -> **"Online"**, 2 -> **"Offline"**; plus a singleton
+  `(**(*DAT_11e42a90 + 4))()` returning 1/2/3 mapped to 3/2/1 (a network-type selector). It binds the echo UDP
+  socket (`FUN_1041a75a` -> `FUN_10e5bdc0`) and only errors "Net engine initialization failed.(UDP binding)"
+  (code -0xf4229) on a bind failure. `FUN_105516a8` is the per-frame session pump (states 0..4 over a peer list).
+
+**Direction-B conclusion (de-risked):** the game ALREADY has a LAN netcode path; co-op only fails because the
+session is put in "Online" mode and then RendezVous refuses the FC3 tenant. The lever is the **network-mode
+selector**, not PRUDP. Concrete next steps:
+1. Find every writer of the mode (fields around `obj+0xe`, the `DAT_11e42a90` singleton + its vtable slot +4) and
+   where the co-op menu sets Online vs LAN.
+2. Frida **in-memory** experiment (no disk writes): force the net mode to LAN (and/or force `FUN_11279ba0` to
+   return 1) at the co-op connect, and observe whether "service unavailable" disappears and which sockets/peers the
+   LAN path then uses. This is the safe go/no-go test before any on-disk patch.
+
+> **28r addendum (rv2 pass):** gate FUN_11279ba0 first reads global online flag `FUN_11245090`=`DAT_11f07e48`
+> (0 -> immediate fail); net-op FUN_112492a0 reads config **"SandboxUrl"**, status 2/3 -> fail, else needs
+> `FUN_11233110` (address resolved) -> success; post-RV FUN_1127a1d0 builds a **UbiAuthentication** session
+> (RendezVous/Services/UbiAuthentication/.../UbiAuthenticationClient.cpp). Forcing the gate alone dead-ends at
+> UbiAuth, so direction B must use the engine's LAN mode (`FUN_1092d256` param+0xe:0), not fake online success.
+> Network-type singleton DAT_11e42a90 is read ~80x / written once (constructor FUN_100bc087).
