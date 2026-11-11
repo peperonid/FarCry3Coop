@@ -3659,3 +3659,35 @@ inheriting HKCU env, and helper-based direct launches are a different, no-window
   `H:\FarCryCoop\TestFC3_105\bin\uplay_api.log`.
 - If Ubisoft Connect still shows "could not verify access to this game", that is an account/entitlement matter for
   the account currently signed in (it must own FC3 and be online) - owner-side, outside the mod work.
+
+
+### Session 28k (same day) - LIVE milestone: co-op connect reached; the blocker is the NATIVE "FC3 service", not orbit
+
+First fully-stable live run of the copy through the proxy (owner: `setx FC3COOP_FAKE_PARTY 1` + full UC restart +
+Play). No crash; the game bootstrapped and ran its normal orbit pump. Owner navigated main menu -> "ИГРА ОНЛАЙН"
+(co-op) -> the game showed a sequence of dialogs, screenshotted:
+1. "Вы не подключены к серверам Ubisoft. Хотите попробовать подключить сейчас?" (OK/Cancel)
+2. after OK: "Идет подключение к серверам Far Cry 3. Пожалуйста, подождите."
+3. end state: **"ОШИБКА. Служба Far Cry 3 недоступна. Повторите попытку позже."**
+
+Findings from the proxy log:
+- The co-op navigation raised `UPLAY_USER_IsConnected` repeatedly and our `[FAKE] ret=1` fired every time - **yet
+  the game still reported "not connected"**. So the game's notion of "connected to the co-op service" is NOT driven
+  by the orbit `IsConnected` bool.
+- During "Идет подключение" the log shows the async pattern `UPLAY_HasOverlappedOperationCompleted` (+`
+  GetOverlappedOperationResult`) spinning - the game issued an async orbit op and was polling it.
+- At the "Служба недоступна" error the log shows **ONLY** the idle `UPLAY_Update`/`GetNextEvent` pump - **zero
+  orbit exports** accompany the failure. => The Far Cry 3 co-op service connection is performed by the game's own
+  networking stack (storm::echo / PRUDP over UDP straight to the Ubisoft FC3 co-op backend), NOT through
+  `uplay_r1_loader`. That backend is shut down, so the connect fails and co-op refuses to open.
+
+Conclusion / strategy: orbit transparency + bool fakes are correct and proven but can only cover the orbit API
+surface. The real gate is the native co-op-service connection (and only after it succeeds does the Rv party manager
+`DAT_12805180+4` / gate `FUN_11218480` get fed). Two directions to actually get offline co-op:
+- (A) Local fake co-op server: point the game's co-op-service endpoint to a local host speaking storm::echo/PRUDP
+  enough to drive the party handshake to "available". Needs the endpoint (host:port) + protocol trace.
+- (B) Patch the game's service/connection state machine in `FC3.dll` so it skips/simulates the service-available
+  check and proceeds to the Rv party layer, then populate the party manager there (the 28g-28h map).
+Both are large; next offline step that serves (A) either way is to locate the co-op service endpoint the game dials.
+This validates the project thesis end-to-end: the co-op blocker is a dead online service reached by native netcode,
+not the orbit login checks.
