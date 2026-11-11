@@ -3881,3 +3881,25 @@ So the engine already contains a non-RV co-op session path; direction B = make t
 2.1s, same frida-helper-x86 path the game uses), but attach to `farcry3_d3d11.exe` reliably times out even on a fresh
 game after purging all frida-helpers. => FC3's anti-injection is now consistently refusing attach (in 28q the same
 tracer attached fine). The interactive force-probe is therefore unreliable; continue via static + on-disk patch tests.
+
+
+### Session 28t (same day) - DEFINITIVE: campaign co-op session is RendezVous-mandated (no in-engine LAN path)
+
+Final fast decompiles settle direction B's feasibility:
+
+- The "other" co-op flavor `FUN_10443663 -> FUN_11275f40` STILL calls the RendezVous gate `FUN_11279ba0`, then
+  **`FUN_11275d90`**, which references `.../online/RendezVous/RendezVous/Services/SubAccount/src/Client/SubAccountClient.cpp`
+  and calls `FUN_112536a0(...)` = create a **RendezVous Session**. So this branch is the RendezVous **host** path
+  (SubAccount + RVSession). The `+5==0` branch (`FUN_1127a1d0`) is the RendezVous **UbiAuthentication join** path.
+- Therefore BOTH campaign co-op session flavors go through RendezVous (`FUN_11279ba0` is mandatory), which needs
+  OnlineConfigService/`SandboxUrl` + Ubi auth - all dead. The net engine's LAN/Online/Offline (`FUN_1092d256`) is
+  only transport initialization; there is **no non-RendezVous co-op session code path** to force.
+
+**Reassessment:** direction B as "force LAN / skip RendezVous in-engine" is NOT viable - nothing to redirect to.
+The only remaining technical routes are large:
+  - **(A) emulate the Ubisoft online stack** the co-op path needs (OnlineConfigService SOAP -> SandboxUrl,
+    RendezVous/PRUDP session server, UbiAuthentication, SubAccount) so the client completes its own handshake.
+  - **(A') deeper patch at the RendezVous Session layer**: intercept RV session peer-address exchange (PRUDP) so
+    the game is handed peer LAN addresses instead of relays; still requires understanding RV/PRUDP session semantics.
+Reusable assets so far: the loader-proxy (orbit fakes, ABI-correct) and the full RV call map (28r-28t). Recommend
+documenting this blocker with the map + the PR, then deciding whether to fund an (A)/(A') spike.
