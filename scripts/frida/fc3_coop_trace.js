@@ -6,6 +6,9 @@
 // Use send() (guaranteed delivered to the python host via on_message 'send'); console.log is not captured there.
 var log = function(){ var a=Array.prototype.slice.call(arguments).join(' '); try { send(a); } catch(e) { console.log(a); } };
 
+// hex of first n bytes at p (guarded).
+function hex(p, n){ try { var b=p.readByteArray(n); if(!b) return ''; var u=new Uint8Array(b), s=''; for(var i=0;i<u.length;i++){ s+=(u[i]<16?'0':'')+u[i].toString(16); } return s; } catch(e){ return '<bad>'; } }
+
 // ---------- winsock ----------
 function sockaddrInfo(p){
   try {
@@ -30,11 +33,11 @@ function sockaddrInfo(p){
   if (con) Interceptor.attach(con, { onEnter:function(args){ var si = sockaddrInfo(args[1]); this.si=si.s; },
     onLeave:function(r){ log('[NET] connect(fd, '+this.si+') -> '+r.toInt32()+(r.toInt32()===0?' OK':' (WSAErro r '+(r.toInt32()<0?(-r.toInt32()):r.toInt32())+')')); } });
   var sto = m.findExportByName('sendto');
-  if (sto) Interceptor.attach(sto, { onEnter:function(args){ this.dst = args[4].isNull()?'<none/connected>':sockaddrInfo(args[4]).s; this.len=args[2].toInt32(); },
-    onLeave:function(r){ if(this.len>0) log('[NET] sendto(fd, len='+this.len+', dst='+this.dst+') -> '+r.toInt32()); } });
+  if (sto) Interceptor.attach(sto, { onEnter:function(args){ this.dst = args[4].isNull()?'<none/connected>':sockaddrInfo(args[4]).s; this.len=args[2].toInt32(); this.buf=args[1]; },
+    onLeave:function(r){ if(this.len>0) log('[NET] sendto(fd, len='+this.len+', dst='+this.dst+') -> '+r.toInt32()+' data='+hex(this.buf, Math.min(this.len,64))); } });
   var rfo = m.findExportByName('recvfrom');
-  if (rfo) Interceptor.attach(rfo, { onEnter:function(args){ this.src = args[4].isNull()?'<none>':sockaddrInfo(args[4]).s; },
-    onLeave:function(r){ if(r.toInt32()>0) log('[NET] recvfrom(fd, n='+r.toInt32()+', src='+this.src+')'); } });
+  if (rfo) Interceptor.attach(rfo, { onEnter:function(args){ this.src = args[4].isNull()?'<none>':sockaddrInfo(args[4]).s; this.buf=args[1]; },
+    onLeave:function(r){ var n=r.toInt32(); if(n>0) log('[NET] recvfrom(fd, n='+n+', src='+this.src+') data='+hex(this.buf, Math.min(n,64))); } });
   var bnd = m.findExportByName('bind');
   if (bnd) Interceptor.attach(bnd, { onEnter:function(args){ log('[NET] bind(fd, '+sockaddrInfo(args[1]).s+')'); } });
   log('winsock hooks installed on '+mod);

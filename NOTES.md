@@ -3757,3 +3757,22 @@ Full decompile of the join gate and a backend probe (`scripts/probe_rv_backend.p
   (+ `.fat`), so the localization-key -> raise-site trace (28m option 2) needs a `.dat/.fat` unpacker first - a new
   sub-tool. Together with the virtual/config RendezVous backend, this closes the productive OFFLINE-only avenues for
   direction (B). Next real step needs the live game instrumented (Frida) or the packed data unpacked.
+
+
+### Session 28o (same day) - co-op service endpoint found via Frida: lb-rdv-as-prod01.ubisoft.com / UDP 11000-11001 (REACHABLE, responds)
+
+`scripts/frida/fc3_coop_trace.py` capture on the live co-op connect (`local/scratch/frida_coop_*.log`):
+
+- **RendezVous host:** `gethostbyname("lb-rdv-as-prod01.ubisoft.com")` resolves (non-null hostent). rdv = RendezVous.
+- **The game exchanges UDP with the backend:** `sendto -> 203.132.26.108:11000`, `203.132.26.108:11001`,
+  `203.132.26.109:11000`, and `recvfrom` returns packets (4) - the backend ANSWERS. So it is NOT a dead host /
+  routing wall; the storm::echo / PRUDP UDP handshake happens and gets responses.
+- **Game sockets:** `bind 0.0.0.0:3074` (Ubisoft standard NAT/live port) and `bind 192.168.1.8:9000` (the local
+  storm::echo data port on the LAN IP). Repeated `gethostbyname("IT")` = the game resolving the local PC name
+  (COMPUTERNAME `IT`) while enumerating local interfaces - noise, not the service.
+- **Conclusion:** "Служба Far Cry 3 недоступна" is an application-layer outcome of the RendezVous handshake
+  (the server likely still accepts the socket but rejects/deprecates the FC3 rendezvous tenant/session ops), NOT a
+  reachability failure. The lever is now the handshake CONTENT and outcome.
+- **Next tool step:** the tracer now dumps the first 64 bytes (hex) of `sendto`/`recvfrom` to/from the rendezvous
+  ports. Re-capture once to read the actual handshake and the server's refusal -> that bytes-level view enables both
+  (A) a local fake RendezVous (replay/forge the handshake) and (B) pinpointing the game-side call to neutralize.
