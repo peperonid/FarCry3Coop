@@ -4404,3 +4404,20 @@ ANSWER to "how to exit to LAN": force the co-op session PARAM to the LAN provide
 
 OPEN ITEMS (next static steps): (1) the exact `NetEngineType` enum value for LAN/offline (read the `ENetEngineType` enum / the switch that maps type->provider, e.g. near the `_RdV` vtable); (2) the co-op menu has no LAN entry, so the param must be forced in code (detour the param builder / op-param `FUN_1092d256` writes param[0xe]=0 for LAN), not via the UI; (3) confirm the JOIN side drives LAN discovery via `ScanPortStart/Range` + `LanClientBroadcastPort`.
 
+
+
+### Session 28aq - option B refined: the co-op Host gate is a UbiAuthentication/RendezVous helper; FC3 CAMPAIGN CO-OP is hardwired to online (no co-op LAN entry)
+
+Disassembling the already-firing co-op gate `FUN_11279ba0` (VA `0x11279ba0`) shows what it actually is:
+- `call 0x11245090` -> esi = the online/RV context (the `DAT_11f07e48` global getter the shim hooks); `esi==0` -> return 0 (fail).
+- builds a struct, `call 0x112492a0` (`rv_sandboxurl`, also hooked) for the RV sandbox URL, then the cluster at `0x11279c20..0x11279c9a` all push the string `'UbiAuthenticationLoginCustomData'` (`0x116cf7d0/f7f4/f818`) -> this is the **UbiAuthenticationClient** login-custom-data accessor chain.
+- finally `mov word ptr [edx], ax` writes the port field (the value the shim's "LAN 127.0.0.1:9000" fake supplies) and returns 1.
+
+So the gate is INSIDE the UbiAuthentication/RendezVous blob-builder, not an online-vs-LAN branch. Conclusion (correcting/finishing 28ap): the storm::echo LAN matchmaking primitives (NetEngineType Online/Offline, `LanMatchmaking*`, `EAccountFlags_LAN`) are the MULTIPLAYER / dedicated-server session layer; FC3 **campaign co-op** ("Co-op -> Host") is hardwired to the online provider (`UbiAuthenticationClient` + RendezVous + GATOR) with NO LAN menu/code entry. That is why our gate success still ends in `E_SESSION_ERROR_GATOR_SERVICE_UNAVAILABLE` - downstream the code needs the real UbiAuthentication/RV blob.
+
+Therefore the two live routes are unchanged in kind, and the LAN shortcut does not exist for co-op:
+- (A) synthesize the UbiAuthentication/RV/GATOR login payload the co-op path consumes (28ao A) - heavy, possibly crypto/identity-gated.
+- (B') force the co-op `CSessionParam` onto the LAN storm::echo engine (NetEngineType id 0x3c = offline/LAN + MatchMakingEnabled id 0x4d = 0) at the session-creation op, so RV/GATOR is skipped entirely - but the co-op session layer is built around RV, so B' must override the op that currently supplies RV params (the gate cluster above). Uncertain whether the co-op session node accepts a non-RV provider at all.
+
+Decision for the owner/Bantila: ask directly whether "1.05 LAN" is REAL campaign-co-op-over-LAN (which provider did he force?) or MP-only LAN. That answer selects A vs B'. Next static step for B': find the co-op session-creation op that fills the CSessionParam (callers of the param binder region `~0x1061e600`) and the `NetEngineType` writer, to see if it can be detoured to LAN. PR #1 updated with this finding and a precise question to Bantila.
+
