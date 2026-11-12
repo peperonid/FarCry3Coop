@@ -4276,3 +4276,25 @@ The LAN path is first-class in the net engine (storm::echo), selected by a param
    success + LAN `sockaddr_in`, ticket validate -> accept local MD5.
 Remaining runtime-only unknown: the exact op-param builder call site where `NetEngineType`/`SearchIdAddress` are written (to patch the
 value there), and confirmation that the LAN `CFCXCreateSessionOperation` is reached once the RV handlers are neutralized - needs a live run.
+
+
+### Session 28ah - MILESTONE: Route B static analysis EXHAUSTED; only a live run of coop_shim remains (handoff)
+
+Recorded as a checkpoint: **everything derivable from the DLL by static analysis has been extracted.** No further progress on Route B
+is possible without running the game, which the agent cannot do (FC3 anti-injection refuses Frida attach; no live debugging).
+
+Solid static picture (NOTES 28r-28ag), all in running module `FC3_d3d11.dll` md5 46bcc097, base `0x10000000`:
+- The whole campaign-co-op session layer is RendezVous-gated (`FUN_11279ba0` = online flag `FUN_11245090`/`DAT_11f07e48` AND rv
+  `FUN_112492a0`); the RV ticket is service-minted but its crypto is MD5-only (`FUN_11254be0`/`FUN_11254ae0`), so a self-consistent
+  local ticket works between same-mod peers with no Ubisoft secret.
+- storm::echo LAN is a first-class transport (`FUN_1092d256` `param[0xe]` 0=LAN/1=Online/2=Offline; op param `NetEngineType` id `0x3c`);
+  the session ops are a C++ name-registry factory (not hand-callable from a detour).
+- Route B shim = force `NetEngineType=LAN` + short-circuit the RV auth handlers `FUN_11275d90`/`FUN_1127a1d0` + bypass the gate/online/
+  rv-connected (`FUN_11237670`)/rv-sandboxurl + accept a local MD5 ticket; the gate out is a `sockaddr_in`. Scaffold `src/coop_shim/`
+  implements this intent and compiles clean (x86), inert by default.
+
+What remains (runtime-only, owner-side): run `coop_shim` on `H:\FarCryCoop\TestFC3_105\` per the checklist in `src/coop_shim/README(.ru).md`.
+The single unknowns that only a live run resolves: (a) exact op-param builder site writing `NetEngineType`/`SearchIdAddress` (to patch the
+value there), (b) per-hook calling-convention/stack balance + saved-byte trampolines, (c) confirmation that the native LAN storm::echo
+`CFCXCreateSessionOperation` actually forms a session once the RV handlers are neutralized, (d) the shared ticket field set so both peers
+derive the same MD5 key. Static analysis cannot close any of these; the next action belongs to a human at the running game.

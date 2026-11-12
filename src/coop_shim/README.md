@@ -65,3 +65,11 @@ build_x86.bat   -> coop_shim.dll   (x86; needs VS 18 + vcvars32)
 ## 28ag correction (op registry + correct host/join lever)
 - storm::echo session ops are created by NAME through a C++ op-type registry (`FUN_1008bf50` -> `FUN_1008bff8`; descriptors `DAT_11e6b208`/`DAT_11e74ee0`/`DAT_11e42de8`) with an async op lifecycle (factory vtable + param block + refcount). A 5-byte detour cannot hand-build them, so `hk_host`/`hk_join` do NOT build CFCX ops.
 - Correct lever: (1) force `NetEngineType=LAN` (net-engine `FUN_1092d256` `param[0xe]=0`; op-param field id `0x3c`) and (2) short-circuit the RV auth handlers `FUN_11275d90` (SubAccountClient) / `FUN_1127a1d0` (UbiAuthenticationClient) to no-op success; the game's own storm::echo LAN op then forms the session. Join precondition `FUN_1127a0d0` is unlocked by the `rv_connected` hook.
+
+
+## Status (NOTES 28ah) - static analysis EXHAUSTED
+Route B static work is complete: everything derivable from `FC3_d3d11.dll` (md5 46bcc097) by static RE is in NOTES 28r-28ag. The scaffold
+compiles and encodes the design. **Nothing further can be closed statically.** The only remaining step is a human-run live test of `coop_shim`
+on `H:\FarCryCoop\TestFC3_105\` (the agent cannot attach - FC3 anti-injection). Open items live-test resolves: the `NetEngineType`/
+`SearchIdAddress` write site, per-hook trampolines/calling-convention, "does the LAN storm::echo op form a session once RV auth is short-circuited",
+and the shared ticket field set.
