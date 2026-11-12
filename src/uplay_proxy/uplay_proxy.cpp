@@ -111,8 +111,26 @@ static void describe(DWORD addr, char* out, size_t cb) {
     sprintf(out, "%s+0x%x%s", path, rva, tag);
 }
 
+// ---- lazy, loader-lock-safe one-shot load of the co-op shim (NOTES 28ah/RUN) ----
+// Triggered from log_entry (a normal C fn called by the export thunks), i.e. OUTSIDE DllMain/loader-lock.
+static LONG g_shim_done = 0;
+static char g_dir[MAX_PATH] = {0};   // directory of uplay_r1_loader.dll, with trailing separator
+static void tryLoadShim(void) {
+    if (InterlockedCompareExchange(&g_shim_done, 1, 0) != 0) return;   // once
+    const char* en = getenv("FC3COOP_SHIM");
+    if (!en || en[0] != '1') return;                                    // only when the owner enables it
+    char full[MAX_PATH];
+    if (g_dir[0]) { lstrcpynA(full, g_dir, MAX_PATH); lstrcpynA(full + strlen(g_dir), "coop_shim.dll", MAX_PATH - (int)strlen(g_dir)); }
+    else strcpy(full, "coop_shim.dll");
+    HMODULE m = LoadLibraryA(full);
+    char msg[512]; sprintf(msg, "uplay_proxy: LoadLibrary coop_shim %s -> %s", full, m ? "OK" : "FAIL");
+    OutputDebugStringA(msg);
+    if (g_log) { EnterCriticalSection(&g_cs); fprintf(g_log, "shim load: %s ret=%p err=%u%c", full, m, m ? 0 : GetLastError(), 10); fflush(g_log); LeaveCriticalSection(&g_cs); }
+}
+
 int __cdecl log_entry(int slot, void** argp, DWORD retaddr);
 int __cdecl log_entry(int slot, void** argp, DWORD retaddr) {
+    tryLoadShim();
     DWORD a[8] = {0,0,0,0,0,0,0,0};
     __try { for (int i = 0; i < 8; i++) a[i] = (DWORD)argp[i]; } __except (EXCEPTION_EXECUTE_HANDLER) {}
     const char* nm = (slot >= 0 && slot < NEXP) ? g_names[slot] : "?";
@@ -1150,6 +1168,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         char exe[MAX_PATH]; GetModuleFileNameA(NULL, exe, MAX_PATH);
         char* b = strrchr(exe, 92); if (b) strcpy(g_exe, b + 1);
         char self[MAX_PATH]; GetModuleFileNameA(h, self, MAX_PATH);
+        lstrcpynA(g_dir, self, MAX_PATH); { char* d = strrchr(g_dir, 92); if (d) d[1] = 0; }
         char* s = strrchr(self, 92);
         if (s) sprintf(s + 1, "real%suplay_r1_loader.dll", BSB);
         g_real = LoadLibraryExA(self, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);

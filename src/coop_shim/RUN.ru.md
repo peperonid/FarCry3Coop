@@ -23,21 +23,17 @@ cd src/coop_shim
 build_x86.bat        -> на выходе coop_shim.dll   (ожидать: BUILD_DONE 0)
 ```
 
-## 2. Заставить игру загрузить шим (одноразовый хук в прокси)
-Никто не импортирует `coop_shim.dll`, значит его должен загрузить через `LoadLibrary` кто-то, кто уже в пути загрузки. Этот кто-то - прокси.
-Добавьте **ленивую, безопасную по loader-lock** однократную загрузку в `src/uplay_proxy/uplay_proxy.cpp`: НЕ в `DllMain` (loader lock),
-а при первом UPLAY-экспорте:
-```c
-// рядом с остальными глобалами:
-static LONG g_shim_loaded = 0;
-static void tryLoadShim(void) {
-    if (InterlockedCompareExchange(&g_shim_loaded, 1, 0) == 0) {
-        LoadLibraryA("coop_shim.dll");   // рядом с uplay_r1_loader.dll в bin/
-    }
-}
+## 2. Путь загрузки (уже вшит в прокси)
+Однократная загрузка уже есть в `src/uplay_proxy/uplay_proxy.cpp`: `tryLoadShim()` вызывается из `log_entry` (её зовёт каждый экспортный
+thunk, вне DllMain/loader-lock) и **только при `FC3COOP_SHIM=1`** делает однократный `LoadLibraryA("<каталог-прокси>\coop_shim.dll")`. Править
+нечего - просто пересобери прокси и задеплой:
 ```
-Вызовите `tryLoadShim();` в начале трampoline-а `UPLAY_Init` (`th_20`). Затем пересоберите прокси (`build_x86.bat`/`build.bat` в
-`src/uplay_proxy`) и задеплойте в `.../bin/uplay_r1_loader.dll`. (Можно попросить агента это прописать и собрать.)
+cd src/uplay_proxy
+build_x86.bat          -> uplay_r1_loader.dll   (ожидать: BUILD_DONE 0)
+```
+Перезадеплой этот `uplay_r1_loader.dll` поверх `H:/FarCryCoop/TestFC3_105/bin/uplay_r1_loader.dll` (настоящий загрузчик Ubisoft остаётся в `bin/real/`).
+При первом вызове `UPLAY_*` в DebugView появится `uplay_proxy: LoadLibrary coop_shim ... -> OK`, затем init-строки `shim:`. Откат - пересобрать
+прокси без деплоя либо удалить `bin/coop_shim.dll`.
 
 ## 3. Развернуть
 - Скопировать `coop_shim.dll` в `H:/FarCryCoop/TestFC3_105/bin/` (тот же каталог, что `uplay_r1_loader.dll`).

@@ -23,21 +23,17 @@ cd src/coop_shim
 build_x86.bat        -> produces coop_shim.dll   (expect: BUILD_DONE 0)
 ```
 
-## 2. Make the game load the shim (one-time proxy hook)
-Nothing imports `coop_shim.dll`, so it must be `LoadLibrary`-ed by something already in the load path. The proxy already is. Add a
-**lazy, loader-lock-safe** one-shot load to `src/uplay_proxy/uplay_proxy.cpp`: it must NOT be in `DllMain` (loader lock). Do it on the
-first UPLAY export instead:
-```c
-// near the top, with the other globals:
-static LONG g_shim_loaded = 0;
-static void tryLoadShim(void) {
-    if (InterlockedCompareExchange(&g_shim_loaded, 1, 0) == 0) {
-        LoadLibraryA("coop_shim.dll");   // found next to uplay_r1_loader.dll in bin/
-    }
-}
+## 2. Load path (already wired into the proxy)
+The one-shot loader is already in `src/uplay_proxy/uplay_proxy.cpp`: `tryLoadShim()` runs from `log_entry` (called by every export thunk,
+outside DllMain/loader-lock) and, **only when `FC3COOP_SHIM=1`**, does a single `LoadLibraryA("<proxy-dir>\coop_shim.dll")`. Nothing to edit -
+just rebuild the proxy and deploy it:
 ```
-Call `tryLoadShim();` at the start of the `UPLAY_Init` trampoline body (`th_20`). Then rebuild the proxy (`build_x86.bat` / `build.bat`
-in `src/uplay_proxy`) and redeploy it to `.../bin/uplay_r1_loader.dll`. (Ask the agent to wire this and rebuild if you prefer.)
+cd src/uplay_proxy
+build_x86.bat          -> uplay_r1_loader.dll   (expect: BUILD_DONE 0)
+```
+Redeploy that `uplay_r1_loader.dll` over `H:/FarCryCoop/TestFC3_105/bin/uplay_r1_loader.dll` (the real Ubisoft loader stays in `bin/real/`).
+On the first `UPLAY_*` call DebugView shows `uplay_proxy: LoadLibrary coop_shim ... -> OK`, then the `shim:` init lines. To revert, rebuild
+the proxy without the deploy, or just delete `bin/coop_shim.dll`.
 
 ## 3. Deploy
 - Copy `coop_shim.dll` to `H:/FarCryCoop/TestFC3_105/bin/` (same folder as `uplay_r1_loader.dll`).
