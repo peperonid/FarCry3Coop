@@ -153,3 +153,11 @@ scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--ran
   Сначала задай `GAME_DIR` на КОПИЮ игры и включи echo-тунable `LanMatchmakingDiscoveryOnLoopbackEnable=1`. Правило
   решения печатается в конце (вход без ошибки тикета == LAN-путь свободен от тикета).
 
+
+
+## Хелпер деплоя coop_shim
+
+- `deploy_coop_shim.bat` - копирует СОБРАННЫЕ `src/uplay_proxy/uplay_r1_loader.dll` + `src/coop_shim/coop_shim.dll` в `bin\` рабочей копии
+  игры (`H:\FarCryCoop\TestFC3_105` по умолчанию; иной путь — первым аргументом), предварительно делая timestamped `.bak-<ts>` бэкап каждого,
+  и пишет там же лаунчер `run_coop_shim.bat` (ставит `FC3COOP_SHIM=1`/`FC3COOP_SECRET`, запускает игру). Запускать ВРУЧНУЮ после сборки обоих
+  DLL. Реальную установку `H:\Uplay\Far Cry 3` не трогает (отказывается). Пара к `src/coop_shim/RUN.md` (NOTES 28ai).

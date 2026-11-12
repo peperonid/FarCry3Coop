@@ -205,3 +205,12 @@ already read those verified paths.
   `-client -ip` instance and records whether the storm::echo LAN join works without the service-minted SessionTicket.
   Set `GAME_DIR` to a game COPY and enable the echo tunable `LanMatchmakingDiscoveryOnLoopbackEnable=1` first. The
   decision rule is printed at the end (join OK with no ticket error == the LAN path is ticket-exempt).
+
+
+## coop_shim deploy helper
+
+- `deploy_coop_shim.bat` - copies the BUILT `src/uplay_proxy/uplay_r1_loader.dll` + `src/coop_shim/coop_shim.dll` into a game working
+  copy's `bin\` (`H:\FarCryCoop\TestFC3_105` by default; pass a different path as arg 1 to override), making a timestamped `.bak-<ts>`
+  backup of each before overwriting, and writes a `run_coop_shim.bat` launcher there (sets `FC3COOP_SHIM=1`/`FC3COOP_SECRET`, starts the
+  game). Run it MANUALLY after building both DLLs. It refuses the real install `H:\Uplay\Far Cry 3`. Companion of `src/coop_shim/RUN.md`
+  (NOTES 28ai).
