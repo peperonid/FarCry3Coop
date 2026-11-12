@@ -50,6 +50,9 @@ rem ---- launcher with the env stub (edit FC3COOP_SECRET before the join test; %
   echo set FC3COOP_SHIM=1
   echo rem proxy: fake the Uplay online-service overlapped op so co-op Host passes service unavailable - NOTES 28al
   echo set FC3COOP_FAKE_ONLINE=1
+  echo rem tune the online-fake return values without rebuilding - uncomment to override - defaults DONE=1 - RESULT=0
+  echo rem set FC3COOP_FAKE_DONE=1
+  echo rem set FC3COOP_FAKE_RESULT=0
   echo set FC3COOP_SECRET=change-me-same-on-all-peers
   echo start "FC3" "%EXE%" %%*
 )
@@ -59,6 +62,8 @@ echo.
 echo Done. Manual alternative (if you launch the game yourself, set these in the SAME console):
 echo     set FC3COOP_SHIM=1
 echo     set FC3COOP_FAKE_ONLINE=1
+echo     set FC3COOP_FAKE_DONE=1          rem optional, default 1 = HasOverlapped completed
+echo     set FC3COOP_FAKE_RESULT=0        rem optional, default 0 = GetOverlappedResult success
 echo     set FC3COOP_SECRET=^<same on all peers^>
 echo Then: the shim logs to bin\coop_shim.log (RUN step 5); run run_coop_shim.bat, go to co-op Host.
 echo Rollback: delete bin\coop_shim.dll and restore the .bak proxy.

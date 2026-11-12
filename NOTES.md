@@ -4365,3 +4365,8 @@ Per the 28al live trace (blocker = the unfinished online-service overlapped op, 
 - `scripts/deploy_coop_shim.bat` launcher now also sets `FC3COOP_FAKE_ONLINE=1` (with a rem; comment it out for a plain run). Fixed a bug where
   an echo line with `()` inside the launcher `(...)` block truncated the generated launcher.
 - Built green: `build_x86.bat` -> `BUILD_DONE 0`, `uplay_r1_loader.dll` 140288 B. NOT deployed to the game (owner re-runs deploy + Host).
+
+
+### Session 28an - online-fake values now tunable by env (no rebuild)
+
+Follow-up to 28am. `g_fo_done`/`g_fo_result` are now overridden in `DllMain` from env: `FC3COOP_FAKE_DONE` and `FC3COOP_FAKE_RESULT` (via `atoi`, applied only if set and non-empty; defaults stay 1 and 0). The `th_18`/`th_19` thunks read the global at call time, so a re-test can sweep the online-fake return values (e.g. `FC3COOP_FAKE_RESULT=0` vs `1`) by editing `run_coop_shim.bat` only - no proxy rebuild. `scripts/deploy_coop_shim.bat` launcher now prints both as commented `rem set ...=...` lines to uncomment. Built green: `build_x86.bat` -> `BUILD_DONE 0`, `uplay_r1_loader.dll` 141312 B. Still NOT deployed to the game (owner runs deploy + Host).
