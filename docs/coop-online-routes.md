@@ -64,3 +64,12 @@ the net-engine LAN/Online/Offline mode (`FUN_1092d256`) is transport-only and ca
 - **Route C (new): VPN overlay (Tailscale/ZeroTier) or HXCoop local-proxy+relay** for "friends without port forwarding" - zero-code,
   but ONLY after Route B makes the game form LAN sessions; overlay alone does not work because the session gate blocks before any LAN session.
 - Order of work: prove/build the Route-B session shim first (it is the only real blocker); Route C rides on top of it.
+
+
+## Implementation status (as of NOTES 28ae/28af)
+- A compiling scaffold exists at `src/coop_shim/` (x86 DLL, inert by default; **NOT deployed, NOT runtime-tested**).
+- Route B patch points (4): session gate `FUN_11279ba0` (plus online global `DAT_11f07e48`, rv-connected `FUN_11237670`, rv `FUN_112492a0`);
+  host `FUN_11275d90` -> `CFCXCreateSessionOperation`; join `FUN_1127a1d0` -> `CFCXJoinSessionOperation`; ticket `FUN_11254be0`/`FUN_1124e5e0`.
+- Known ABI (28af): gate out = `sockaddr_in`; online = a global byte; ticket = MD5-only.
+- Done: full static RV map, decision doc + Route C, PR #1 shared upstream, scaffold compiles clean. Blocked: the runtime test
+  (FC3 anti-injection blocks agent attach) that is needed to pin the struct ABIs, the CFCX op-registry calls, and the ticket field set.

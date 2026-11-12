@@ -43,3 +43,20 @@ real install `H:\Uplay\Far Cry 3\` is read-only by project rule. Test only on th
 ```
 build_x86.bat   -> coop_shim.dll   (x86; needs VS 18 + vcvars32)
 ```
+
+
+## 28af refinement (ABI now concrete)
+- Online flag = global `DAT_11f07e48` (RVA `0x1f07e48`); the scaffold writes 1 at init (the hook is kept too).
+- Gate out-struct = `sockaddr_in`: family@+0 (AF_INET=2), port@+2 (network), IPv4@+4 (network) - NOTES 28af. `hk_gate` builds this (htons/htonl).
+- Added hook `rv_connected` (`FUN_11237670` -> 1), required by AcquireTicket + the ticket builder.
+- `derive_local_ticket` still hashes only `FC3COOP_SECRET`; the exact shared fields (session id / playlist / account, NOTES 28aa) need a live run.
+
+## Runtime test checklist (owner-side; the agent cannot attach - FC3 blocks injection)
+1. Build: `build_x86.bat` -> `coop_shim.dll` (x86).
+2. Load it into the working copy `H:\FarCryCoop\TestFC3_105\` (NOT the real install): DLL-load-order hijack, or have the existing
+   `src/uplay_proxy` loader call the shim's `init()` (it already sits in the load path).
+3. Set env before launch: `FC3COOP_SHIM=1`, `FC3COOP_SECRET=<same on every peer>`, (TODO) host IP/port.
+4. Launch 2 instances (see `scripts/fc3_lan_coop_launch.bat`). Watch `OutputDebugString` (DebugView) for `shim:` lines:
+   `online global ...=1`, `gate -> success (LAN ...)`, `host -> CFCXCreate...`, `join -> CFCXJoin...`, `ticket_validate -> accept`.
+5. Success signal: a co-op session forms with NO "service unavailable"/ticket error and both clients share one world.
+6. Crash at a hook => that site's saved-bytes/calling-convention is wrong (trampoline TODO): re-disassemble that RVA and fix.

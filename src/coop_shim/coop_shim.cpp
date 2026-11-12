@@ -38,7 +38,14 @@ enum {
   RVA_ticket_derive   = 0x01254ae0, // FUN_11254ae0 MD5 derive   (vtable+8)
   RVA_ticket_prepare  = 0x0124e5e0, // FUN_1124e5e0 AcquireTicket::PrepareCall (skip the network)
   RVA_ticket_response = 0x0124d660, // FUN_1124d660 AcquireTicket::ProcessResponse (out-ticket buffer)
+  RVA_rv_connected    = 0x01237670, // FUN_11237670 "RendezVous connected" gate (AcquireTicket + builder require it)
 };
+
+// Online-enable global read by FUN_11245090 ("return DAT_11f07e48"). Setting it to 1 lets the gate precondition pass.
+#define RVA_online_flag_global 0x01f07e48
+
+// The gate out-struct is a classic sockaddr_in (NOTES 28af): family@+0 u16, port@+2 network order
+// (FUN_11232ef0 reads it via ntohs(*(p+2))), IPv4 addr@+4 network order (FUN_11232e20 via ntohl/inet_ntoa).
 
 // ------------------------------------------------------------------ shim config (set by your loader / env / file)
 struct ShimConfig { uint32_t lan_ip; uint16_t lan_port; char shared_secret[64]; int enable; };
@@ -138,10 +145,17 @@ static int hk_rv_sandboxurl(void* out /*FUN_112492a0 local_54 out*/) {
 // Co-op session gate: succeed + hand out the LAN address+port (instead of RV).
 static int hk_gate(void* out1, void* out2) {
   LOGF("shim: gate -> success (LAN %u.%u.%u.%u:%u)\n", (g_cfg.lan_ip>>24)&255,(g_cfg.lan_ip>>16)&255,(g_cfg.lan_ip>>8)&255,g_cfg.lan_ip&255, g_cfg.lan_port);
-  // TODO(NOTES 28ad): set *out2 = lan_port (host order? gate does ntohs; match it) and fill address via out1/FUN_11232e20 shape.
+  // The gate hands the game a sockaddr_in to dial (NOTES 28af). Fill family/port/addr in NETWORK byte order.
+  // out1 is the address struct slot (FUN_11232e20 shape); out2 is the port (FUN_11232ef0 shape).
+  // TODO(NOTES 28af): confirm which pointer is the sockaddr and which is the scalar port; then:
+  //   ((unsigned short*)sa)[0] = htons(2 /*AF_INET*/); ((unsigned short*)sa)[1] = htons(g_cfg.lan_port);
+  //   *(unsigned*)(sa+4) = htonl(g_cfg.lan_ip);
   (void)out1; (void)out2;
   return 1;
 }
+
+// "RendezVous connected" (FUN_11237670): the ticket AcquireTicket + message builder require it -> force true.
+static int __cdecl hk_rv_connected(void* a) { (void)a; return 1; }
 
 // Host path: create a storm::echo session instead of SubAccountClient.
 static int hk_host(void* a,void* b,void* c,void* d,void* e,int f,void* g) {
@@ -184,6 +198,7 @@ static void install_hooks(void) {
     { RVA_join_handler,    (void*)hk_join,            "join_handler" },
     { RVA_ticket_validate, (void*)hk_ticket_validate, "ticket_validate" },
     { RVA_ticket_prepare,  (void*)hk_ticket_prepare,  "ticket_prepare" },
+    { RVA_rv_connected,    (void*)hk_rv_connected,     "rv_connected" },
   };
   for (unsigned i = 0; i < sizeof(tbl)/sizeof(tbl[0]); ++i) {
     void* tgt = (void*)VA((uint32_t)tbl[i].rva);
@@ -200,6 +215,9 @@ static void init(void) {
   LOGF("shim: FC3_d3d11 base=0x%08x enable=%d\n", (uint32_t)g_mod, g_cfg.enable);
   if (!g_cfg.enable) { LOGF("shim: inert (set FC3COOP_SHIM=1 to enable)\n"); return; }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
+  // Cheap precondition: force the online-enable global (FUN_11245090 returns DAT_11f07e48) to 1.
+  *(volatile unsigned char*)VA(RVA_online_flag_global) = 1;
+  LOGF("shim: online global DAT_11f07e48=1\n");
   install_hooks();
   LOGF("shim: hooks installed (SCAFFOLD - untested)\n");
 }

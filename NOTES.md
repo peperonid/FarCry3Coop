@@ -4213,3 +4213,28 @@ Contents:
 - Explicit TODOs (need a running client the agent cannot attach to): exact gate/struct ABIs (`FUN_11232e20`/`FUN_11232ef0`),
   the storm::echo CFCX op-registry calls, per-hook trampolines + calling-convention/stack balance, ticket MD5 input fields
   (28aa bundle), a module-md5 guard, and an injection path. This is the actionable next build step for a human test run.
+
+
+### Session 28af - gate out-struct is a sockaddr_in; online global + rv-connected identified (scaffold filled)
+
+Ghidra `DecompileAbi`. Concrete ABIs now fill the `src/coop_shim` hook bodies:
+
+- **Online flag is a bare global**: `FUN_11245090` = `return DAT_11f07e48;`. So the shim just writes `DAT_11f07e48 = 1`
+  (RVA `0x1f07e48`) at init - no hook strictly needed (kept the hook too as belt-and-braces).
+- **Gate out-struct = classic `sockaddr_in`**: the peer the game dials is read by `FUN_11232ef0` (`ntohs(*(p+2))` = port at +2,
+  network order) and `FUN_11232e20` (`ntohl(*(p+4))` + `inet_ntoa` = IPv4 at +4, network order; also `this[0x12]`/`FUN_1122f870`
+  init). So `family@+0 (u16)=AF_INET(2)`, `port@+2 (u16, network)`, `addr@+4 (u32, network)`. The `hk_gate` replacement must build
+  exactly that (documented inline with the `htons/htonl` recipe).
+- **`FUN_11237670` ("RendezVous connected")** is not a simple flag - it checks a live connection/session object (via `FUN_1043341b`,
+  `FUN_112345d0`) and is required by `AcquireTicket` (`FUN_1124e7b0`) + the ticket builder (`FUN_1125a200`). So it must be **hooked to
+  return 1** (added `hk_rv_connected`, RVA `0x1237670`).
+- **`FUN_112492a0`** reads config `"SandboxUrl"` (`FUN_11213a10`) and resolves an address list (`FUN_11249220`, then `FUN_11233110`/
+  `FUN_11235be0`); returning 1 from the hook skips that RV resolution.
+
+**Ticket MD5 inputs (still the one open field set):** the derive (`FUN_11254ae0`) / validate (`FUN_11254be0`) index a baked checksum
+table by `idx = param_3 % obj[8] + obj[4]` with buffer `**job+0xF4`, index `job+0xF0` (NOTES 28aa). The semantic names of those
+InitiateLogin-context fields (session id / playlist / account / password) are still only inferred (RV core forwards them opaquely), so
+the scaffold's `derive_local_ticket` currently hashes only `FC3COOP_SECRET` - a real run must confirm the exact shared fields so both
+peers derive the same key.
+
+Scaffold updated and re-compiles clean (`build_x86.bat` -> BUILD_DONE 0).
