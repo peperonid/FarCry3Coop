@@ -17,7 +17,26 @@
 #include <string.h>
 #include <stdio.h>
 
-#define LOGF(...) do { char _b[512]; int _n = wsprintfA(_b, __VA_ARGS__); OutputDebugStringA(_b); (void)_n; } while (0)
+static FILE* g_logf = 0;
+static HINSTANCE g_hinst = 0;
+// Open (lazily) the file log: env FC3COOP_LOG wins, else "<dir of coop_shim.dll>\coop_shim.log".
+static void logOpen(void) {
+    if (g_logf) return;
+    char path[MAX_PATH] = {0};
+    const char* e = getenv("FC3COOP_LOG");
+    if (e && e[0]) { lstrcpynA(path, e, MAX_PATH); }
+    else {
+        char self[MAX_PATH] = {0};
+        if (g_hinst && GetModuleFileNameA(g_hinst, self, MAX_PATH)) {
+            char* b = strrchr(self, 92); if (b) b[1] = 0;
+            lstrcpynA(path, self, MAX_PATH); lstrcpynA(path + strlen(path), "coop_shim.log", MAX_PATH - (int)strlen(path));
+        } else strcpy(path, "coop_shim.log");
+    }
+    g_logf = fopen(path, "a");
+    if (g_logf) { fprintf(g_logf, "===== coop_shim log pid=%u =====\n", GetCurrentProcessId()); fflush(g_logf); }
+}
+#define LOGF(...) do { char _b[512]; int _n = wsprintfA(_b, __VA_ARGS__); OutputDebugStringA(_b); \
+    if (g_logf) { fprintf(g_logf, "%s\n", _b); fflush(g_logf); } (void)_n; } while (0)
 
 // ------------------------------------------------------------------ module + RVA map
 #define FC3_BASE_DEFAULT 0x10000000u
@@ -224,6 +243,7 @@ static void install_hooks(void) {
 
 // ------------------------------------------------------------------ init
 static void init(void) {
+  logOpen();
   HMODULE m = GetModuleHandleA("FC3_d3d11.dll");
   g_mod = (uintptr_t)(m ? m : (HMODULE)FC3_BASE_DEFAULT);
   load_config();
@@ -239,6 +259,6 @@ static void init(void) {
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r) {
   (void)r;
-  if (reason == DLL_PROCESS_ATTACH) { DisableThreadLibraryCalls(h); init(); }
+  if (reason == DLL_PROCESS_ATTACH) { DisableThreadLibraryCalls(h); g_hinst = h; init(); }
   return TRUE;
 }

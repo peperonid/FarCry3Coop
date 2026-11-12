@@ -46,13 +46,13 @@ set FC3COOP_SECRET=одинаковыйДляВсехПиров
 ```
 `FC3COOP_SHIM` должен быть ровно `1`, иначе шим загрузится инативным. `FC3COOP_SECRET` обязан совпадать у всех пиров (затравка локального MD5-тикета).
 
-## 5. Включить захват лога
-- Запустить **DebugView от администратора**, Options -> включить **Capture Win32** и **Capture Global Win32**, Edit -> Filter/include `shim:`.
-- Не закрывать DebugView весь прогон.
+## 5. Куда пишется лог
+`coop_shim` пишет каждую строку `shim:` в **`bin/coop_shim.log`** (рядом с DLL; переопределяется env `FC3COOP_LOG=<путь>`). Открой или
+смотри в реальном времени этот файл до запуска - ни слушателя, ни админа не нужно. (`OutputDebugStringA`/DebugView тоже работают, но файл проще.)
 
 ## 6. Smoke-тест (один инстанс) - начать с этого
 1. `H:/FarCryCoop/TestFC3_105/bin/farcry3.exe` (обычный запуск, соло).
-2. В DebugView ожидать по порядку:
+2. В `bin/coop_shim.log` ожидать по порядку:
    - `shim: FC3_d3d11 base=0x... enable=1`
    - `shim: online global DAT_11f07e48=1`
    - восемь строк `shim: patch <имя> @0x...`, затем `shim: hooks installed (SCAFFOLD - untested)`
@@ -70,7 +70,7 @@ scripts/fc3_lan_coop_launch.bat        (сначала host, дождаться 
 
 ## 8. Записать и вернуть (ради этого и прогон)
 Собрать и прислать:
-- полный хвост лога `shim:`;
+- полный хвост `bin/coop_shim.log` (или `FC3COOP_LOG`);
 - при краше: **модуль + смещение** сбоя и какая строка `shim: ...` напечаталась последней (укажет, какой хук/соглашение чинить);
 - при попытке входа: загрузился ли мир или выскочила ошибка, любой текст `Ticket`/`INVALIDSESSIONKEY`/`GameSessionKey`.
 Это закрывает четыре рантайм-Only TODO из NOTES 28ah: место записи `NetEngineType`/`SearchIdAddress`, трамплины/соглашения вызова по хукам,

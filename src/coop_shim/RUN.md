@@ -46,13 +46,13 @@ set FC3COOP_SECRET=whateverSameOnAllPeers
 ```
 `FC3COOP_SHIM` must be exactly `1` or the shim loads inert. `FC3COOP_SECRET` must match on every peer (the local MD5 ticket seed).
 
-## 5. Start capture
-- Run **DebugView as Administrator**, Options -> tick **Capture Win32** and **Capture Global Win32**, Edit -> Filter/include `shim:`.
-- Leave DebugView open for the whole run.
+## 5. Where the log goes
+`coop_shim` writes every `shim:` line to **`bin/coop_shim.log`** (next to the DLL; override with env `FC3COOP_LOG=<path>`). Open or tail
+that file before launching - no listener and no admin needed. (`OutputDebugStringA`/DebugView still works too, but the file is simpler.)
 
 ## 6. Smoke test (single instance) - do this first
 1. `H:/FarCryCoop/TestFC3_105/bin/farcry3.exe` (normal launch, solo).
-2. In DebugView expect, in order:
+2. In `bin/coop_shim.log` expect, in order:
    - `shim: FC3_d3d11 base=0x... enable=1`
    - `shim: online global DAT_11f07e48=1`
    - eight `shim: patch <name> @0x...` lines, then `shim: hooks installed (SCAFFOLD - untested)`
@@ -70,7 +70,7 @@ scripts/fc3_lan_coop_launch.bat        (host first, wait for world, then client 
 
 ## 8. Record and hand back (this is the point of the run)
 Capture and send back:
-- the full `shim:` log tail;
+- the full `bin/coop_shim.log` (or `FC3COOP_LOG`) tail;
 - for any crash: faulting **module + offset** and which `shim: ...` line printed last (tells which hook/calling-convention to fix);
 - for a join attempt: whether the world loaded or an error popped, and any `Ticket`/`INVALIDSESSIONKEY`/`GameSessionKey` text.
 That closes the four runtime-only TODOs in NOTES 28ah: the `NetEngineType`/`SearchIdAddress` write site, per-hook trampolines/calling-conventions,

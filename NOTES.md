@@ -4298,3 +4298,18 @@ The single unknowns that only a live run resolves: (a) exact op-param builder si
 value there), (b) per-hook calling-convention/stack balance + saved-byte trampolines, (c) confirmation that the native LAN storm::echo
 `CFCXCreateSessionOperation` actually forms a session once the RV handlers are neutralized, (d) the shared ticket field set so both peers
 derive the same MD5 key. Static analysis cannot close any of these; the next action belongs to a human at the running game.
+
+
+### Session 28aj - coop_shim now file-logs; headless load smoke verified (no game)
+
+Two things so a real run needs no DebugView/listener:
+- `coop_shim.cpp` `LOGF` now writes each line to a **file** as well as `OutputDebugStringA`: `logOpen()` (first call from `init()`) opens
+  env `FC3COOP_LOG` if set, else `<dir of coop_shim.dll>/coop_shim.log`. So during a real run the log lands in `bin/coop_shim.log`. `g_hinst`
+  is now captured in `DllMain` for that path. Bilingual `src/coop_shim/RUN(.ru).md` step 5 changed from "run DebugView" to "read `bin/coop_shim.log`".
+- Removed an unverified external DBWIN-buffer capture script (it did not capture in tests); the in-DLL file log is simpler and is what the
+  run uses. (Rule: don't ship unverified tooling.)
+
+Verified headless (no game, since I cannot reach the GUI): built an x86 loader that `LoadLibrary`-ed `coop_shim.dll` -> `err=0`; `DllMain`/
+`init()` ran; with `FC3COOP_SHIM=0` it took the inert path and the log file got `===== coop_shim log pid=... =====` + `shim: FC3_d3d11
+base=0x10000000 enable=0` + `shim: inert (set FC3COOP_SHIM=1 to enable)`. That proves the DLL loads and logs; the patch lines and hook
+firing still only appear inside the live game. coop_shim recompiled clean (`BUILD_DONE 0`, 0 errors).
