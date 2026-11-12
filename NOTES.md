@@ -4313,3 +4313,22 @@ Verified headless (no game, since I cannot reach the GUI): built an x86 loader t
 `init()` ran; with `FC3COOP_SHIM=0` it took the inert path and the log file got `===== coop_shim log pid=... =====` + `shim: FC3_d3d11
 base=0x10000000 enable=0` + `shim: inert (set FC3COOP_SHIM=1 to enable)`. That proves the DLL loads and logs; the patch lines and hook
 firing still only appear inside the live game. coop_shim recompiled clean (`BUILD_DONE 0`, 0 errors).
+
+
+### Session 28ak - FIRST LIVE INJECTION of coop_shim succeeded (ASLR base 0x02e30000; all 8 patch VAs correct; gate+join hooks fired, no crash)
+
+The agent ran the full path (deploy via `scripts/deploy_coop_shim.bat` -> live launch -> read `bin/coop_shim.log`). Result: the shim
+injected into the running game through the proxy auto-load and worked.
+
+- Process = `farcry3_d3d11.exe` (pid 38260); `FC3_d3d11.dll` **runtime base = `0x02e30000`** -> ASLR is active, NOT the static `0x10000000`.
+  The shim's `VA = g_mod + rva` handled it: all 8 logged patch targets equal `base + RVA` and match the known offsets in module md5 46bcc097
+  (verified 8/8, e.g. gate `0x02e30000+0x1279ba0=0x040a9ba0` matches the live log).
+- File logging works in-game: `bin/coop_shim.log` got `enable=1`, `online global DAT_11f07e48=1`, the eight `patch ... @0x...` lines, `hooks installed`.
+- On a plain solo launch (`run_coop_shim.bat`, no `-coop`) the game itself reached the co-op path and **fired two hooks**:
+  `shim: gate -> success (LAN 127.0.0.1:9000)` and `shim: join -> short-circuit RV auth (UbiAuthenticationClient) ...`. Both returned success and
+  the game did NOT crash - it went into a `UPLAY_HasOverlappedOperationCompleted` async poll loop (`FC3_d3d11.dll+0x86899b`).
+- The process then disappeared only because the agent's poller tore down the process tree on exit (the launched game inherited the tool's stdout);
+  "FC3 not running" is the teardown, NOT a crash.
+
+Still untested live: `hk_host` and the ticket hooks never fired on this startup path, and actual LAN storm::echo session formation still needs a Host + a second client.
+Next (owner-side, game independent of the agent): launch `run_coop_shim.bat` from a normal console, navigate to co-op Host/Join, send the new `bin/coop_shim.log` tail.
