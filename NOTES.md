@@ -4387,3 +4387,20 @@ IMPLICATION: passing "service unavailable" by return-CODE faking is impossible -
 NEXT LEVERS (deeper, static RE; agent picks B then A):
 - (B) find the online-vs-LAN branch: locate the code/string that raises "service unavailable" and the predicate around the co-op Host entry; if FC3 has a LAN/`storm::echo` path (Bantila "1.05 LAN") that skips the Uplay login gate, routing to it makes (A) unnecessary.
 - (A) if no LAN bypass: reverse the consumer of `GetOverlappedOperationResult` (caller `FC3_d3d11.dll+0x7acb19`) + the credential/cdkey buffer layout + `UPLAY_USER_GetAccountId`, and synthesize a valid "logged-in" payload in the proxy. Risk: identity/crypto checks may make it unwinnable.
+
+
+### Session 28ap - option B: FC3 DOES have native LAN co-op hosting in storm::echo; how to reach it (replaces the "fake Uplay login" plan)
+
+Static RE (read-only) for option B. The co-op "service unavailable" is `E_SESSION_ERROR_GATOR_SERVICE_UNAVAILABLE` (string `0x116ee7f4`, name table switch at `0x113abfd0..0x113ac068`). The GATOR error family around it is all ONLINE-session AUTH errors: `E_SESSION_ERROR_GATOR_INVALID_TICKET / INVALID_TOKEN / EXPIRED_TOKEN / KEY_DECRYPTION_FAILED / SERVICE_UNAVAILABLE` - i.e. the online session service (RendezVous + GATOR) is authentication-gated, which is exactly why return-code faking (28ao) could not pass it.
+
+Matchmaking provider classes (RTTI/name strings, referenced from `.rdata` tables, not by imm32): `CGameMatchmakingProvider` (`0x11589231`) base, `CGameMatchmakingProvider_RdV` (`0x1158b43d`) = the ONLINE (RendezVous/GATOR) provider the co-op menu uses. Account feature-flag names (`0x11526af4..0x11526b58`): `EAccountFlags_Rendezvous | Gator | Live | LAN | Offline`; the LAN bit is tested at `0x1044400a` (`test bl,0x02`). Engine has offline states: `NetEngineType` (`0x115615fc`) and `ENetEngineState_Initialized_Online` vs `_Offline`, `ENetEngineState_Initializing_Online` vs `_Offline`.
+
+Native LAN hosting/discovery is fully present in the netcode (storm::echo). `net_` group CVars (registered around `0x10103e80`; the LAN-matchmaking pair read at `0x107a25xx`):
+`LanMatchmakingDiscoveryOnLoopbackEnable` (discover sessions on the local machine only, no broadcast - loopback), `LanMatchmakingReuseAddress` (SO_REUSEADDR so many apps can host sessions on one machine), `LanHostBroadcastPort`, `LanClientBroadcastPort`, `ScanPortStart`, `ScanPortRange`, `ScanFreePorts`, `LanMin/Initial/MaxUploadInbps`. This is a provider-agnostic LAN path with no GATOR and no Uplay login.
+
+DECISIVE: the session/search parameter binder (`~0x1061e600`) binds named fields to struct field-ids: `SessionRefId`=0x20, `SessionType`=0x38, `NetEngineType`=**0x3c** (corroborates the 28ag Route-B field id), `AccountType`=0x40, `MatchMakingEnabled`=**0x4d** (bool setter `0x102629b5`), `PlaylistId`=0x34, `DeleteMessageId`=0x30, plus `Search*` fields.
+
+ANSWER to "how to exit to LAN": force the co-op session PARAM to the LAN provider instead of RdV - set `NetEngineType` (id 0x3c) to the offline/LAN value and `MatchMakingEnabled` (id 0x4d) to 0 on the CSessionParam, so `CSession...CreateSession` runs the storm::echo LAN path (broadcast or `LanMatchmakingDiscoveryOnLoopbackEnable` for a same-machine test, `LanMatchmakingReuseAddress` for several clients on one box) and never contacts GATOR -> no "service unavailable" and `host_handler`/`ticket_*` become reachable. This supersedes faking the Uplay login payload (28ao path A).
+
+OPEN ITEMS (next static steps): (1) the exact `NetEngineType` enum value for LAN/offline (read the `ENetEngineType` enum / the switch that maps type->provider, e.g. near the `_RdV` vtable); (2) the co-op menu has no LAN entry, so the param must be forced in code (detour the param builder / op-param `FUN_1092d256` writes param[0xe]=0 for LAN), not via the UI; (3) confirm the JOIN side drives LAN discovery via `ScanPortStart/Range` + `LanClientBroadcastPort`.
+

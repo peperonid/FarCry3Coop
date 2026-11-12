@@ -4086,3 +4086,20 @@ uplay_api.log (вся сессия, 75 вызовов, текущий pid): co-o
 СЛЕДУЮЩИЕ РЫЧАГИ (глубже, статический RE; агент берёт B потом A):
 - (B) найти ветку online-vs-LAN: найти код/строку, поднимающую «служба недоступна», и предикат вокруг входа co-op Host; если у FC3 есть LAN/`storm::echo`-путь (Bantila «1.05 LAN»), обходящий гейт логина Uplay, то вывод на него делает (A) ненужным.
 - (A) если LAN-обхода нет: разобрать потребителя `GetOverlappedOperationResult` (вызывающий `FC3_d3d11.dll+0x7acb19`) + раскладку буфера кредитов/cdkey + `UPLAY_USER_GetAccountId` и синтезировать валидный «залогиненный» пейлоад в прокси. Риск: проверки идентичности/крипто могут сделать это неразрешимым.
+
+
+### Сессия 28ap - вариант B: у FC3 ЕСТЬ нативный LAN-хостинг co-op в storm::echo; как на него выйти (заменяет план «подделать логин Uplay»)
+
+Статический RE (только чтение) по варианту B. «service unavailable» в co-op = `E_SESSION_ERROR_GATOR_SERVICE_UNAVAILABLE` (строка `0x116ee7f4`, switch имён `0x113abfd0..0x113ac068`). Семейство GATOR-ошибок вокруг - это ВСЕ auth-ошибки онлайн-сессий: `E_SESSION_ERROR_GATOR_INVALID_TICKET / INVALID_TOKEN / EXPIRED_TOKEN / KEY_DECRYPTION_FAILED / SERVICE_UNAVAILABLE` - т.е. онлайн-сервис сессий (RendezVous + GATOR) закрыт авторизацией; поэтому подмена кодов возврата (28ao) его и не взяла.
+
+Классы провайдеров matchmaking (RTTI/имена, ссылки из таблиц `.rdata`, не imm32): `CGameMatchmakingProvider` (`0x11589231`) база, `CGameMatchmakingProvider_RdV` (`0x1158b43d`) = ОНЛАЙН-провайдер (RendezVous/GATOR), который использует co-op-меню. Имена флагов аккаунта (`0x11526af4..0x11526b58`): `EAccountFlags_Rendezvous | Gator | Live | LAN | Offline`; LAN-бит тестится в `0x1044400a` (`test bl,0x02`). Движок имеет offline-состояния: `NetEngineType` (`0x115615fc`) и `ENetEngineState_Initialized_Online` vs `_Offline`, `ENetEngineState_Initializing_Online` vs `_Offline`.
+
+Нативный LAN-хостинг/дисквери полностью присутствует в неткоде (storm::echo). CVar группы `net_` (регистрируются около `0x10103e80; LAN-matchmaking-пара читается в `0x107a25xx`):
+`LanMatchmakingDiscoveryOnLoopbackEnable` (дисквер sessions только на локальной машине, без broadcast - loopback), `LanMatchmakingReuseAddress` (SO_REUSEADDR, чтобы много приложений хостили сессии на одной машине), `LanHostBroadcastPort`, `LanClientBroadcastPort`, `ScanPortStart`, `ScanPortRange`, `ScanFreePorts`, `LanMin/Initial/MaxUploadInbps`. Это провайдер-независимый LAN-путь без GATOR и без логина Uplay.
+
+РЕШАЮЩЕЕ: биндер параметра сессии/поиска (`~0x1061e600`) привязывает именованные поля к id структуры: `SessionRefId`=0x20, `SessionType`=0x38, `NetEngineType`=**0x3c** (подтверждает id из Route-B 28ag), `AccountType`=0x40, `MatchMakingEnabled`=**0x4d** (bool-сеттер `0x102629b5`), `PlaylistId`=0x34, `DeleteMessageId`=0x30, плюс поля `Search*`.
+
+ОТВЕТ на «как выйти в LAN»: форсировать ПАРАМЕТР co-op-сессии на LAN-провайдер вместо RdV - выставить в CSessionParam `NetEngineType` (id 0x3c) в значение offline/LAN и `MatchMakingEnabled` (id 0x4d) в 0, чтобы `CSession...CreateSession` пошёл по LAN-пути storm::echo (broadcast или `LanMatchmakingDiscoveryOnLoopbackEnable` для теста на одной машине, `LanMatchmakingReuseAddress` для нескольких клиентов на одной коробке) и вообще не трогал GATOR -> «service unavailable» не возникнет, а `host_handler`/`ticket_*` станут достижимы. Это замещает подделку логина Uplay (путь A из 28ao).
+
+ОТКРЫТО (следующие статические шаги): (1) точное значение enum `NetEngineType` для LAN/offline (прочитать enum `ENetEngineType` / switch, маппящий type->провайдер, напр. рядом с vtable `_RdV`); (2) в co-op-меню нет LAN-пункта, поэтому параметр надо форсить в коде (детурнуть билдер параметра / op-param `FUN_1092d256` пишет param[0xe]=0 для LAN), не через UI; (3) подтвердить, что сторона JOIN использует LAN-дисквери через `ScanPortStart/Range` + `LanClientBroadcastPort`.
+
