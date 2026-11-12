@@ -4332,3 +4332,18 @@ injected into the running game through the proxy auto-load and worked.
 
 Still untested live: `hk_host` and the ticket hooks never fired on this startup path, and actual LAN storm::echo session formation still needs a Host + a second client.
 Next (owner-side, game independent of the agent): launch `run_coop_shim.bat` from a normal console, navigate to co-op Host/Join, send the new `bin/coop_shim.log` tail.
+
+
+### Session 28al - live HOST attempt: gate+join fire, host/ticket never; game aborts on UPLAY_USER_IsConnected / unfinished overlapped online op ("service unavailable")
+
+Owner navigated the live game (shim injected, 28ak) to co-op online -> Host; the UI popped "Служба Far Cry 3 недоступна / Far Cry 3 service unavailable". `bin/coop_shim.log` (pid 7204, base 0x7a190000) shows exactly which hooks fired:
+
+- Fired: `gate -> success` x3 and `join -> short-circuit RV auth` x3 (the co-op navigation reached the session gate + the join/session op).
+- NEVER fired: `host_handler` (FUN_11275d90), `ticket_validate`, `ticket_prepare`.
+- After those, the game loops `UPLAY_HasOverlappedOperationCompleted` forever. Cross-check of `bin/uplay_api.log` for the session shows the co-op-relevant Uplay calls are: `UPLAY_USER_IsConnected` (151x, the game repeatedly asking if the online user is connected), `UPLAY_GetOverlappedOperationResult` (fetching the async online op result), plus `UPLAY_PARTY_Init`/`UPLAY_FRIENDS_Init`/`UPLAY_ClearGameSession`/`UPLAY_USER_GetCredentials`.
+
+Conclusion (confirms and sharpens 28k/28t, now with live trace): the online-coop Host path is gated at the **Uplay online-service layer** - the user-not-connected state (`UPLAY_USER_IsConnected`) and an async overlapped online op that never completes drive the "service unavailable" and stop Host **before** `host_handler` is ever called. The Route-B game-code detours (gate/host/join/ticket) are downstream of the actual wall and do not, by themselves, make co-op start.
+
+What this does NOT rule out: whether Host uses `host_handler` at all (we only saw the gate+join stage; the "join" handler firing on a Host click suggests FC3 hosts via the same gate + session-search/join op, then would reach host creation only once the online op completes).
+
+Next (the lever moved from FC3 code to the PROXY): to get past "service unavailable" the proxy must (a) report the online user connected (`UPLAY_USER_IsConnected` -> true) and (b) make the pending overlapped online op complete (`HasOverlappedOperationCompleted` -> true + a success `GetOverlappedOperationResult`), and possibly pump the login/party event. The current proxy fake only covers the 3 party gates and is otherwise transparent; so the next build step is to extend the proxy fake for `UPLAY_USER_IsConnected` + overlapped-op completion and re-test Host. (This is the NOTES 28k/28t "RV/PRUDP app layer is the true blocker" seen live from the client side.)

@@ -75,3 +75,10 @@ on `H:\FarCryCoop\TestFC3_105\` (the agent cannot attach - FC3 anti-injection). 
 and the shared ticket field set.
 
 Full step-by-step run procedure (build, load via the proxy, DebugView, smoke + join, record/rollback): see [RUN.md](RUN.md).
+
+
+## Live findings (NOTES 28al)
+On a live HOST attempt: `hk_gate` and `hk_join` fired (3x each, returning success) but `hk_host` and the ticket hooks never did, and the game
+showed "Far Cry 3 service unavailable", looping `UPLAY_HasOverlappedOperationCompleted`. `uplay_api.log` shows the co-op path gated on
+`UPLAY_USER_IsConnected` + an unfinished overlapped online op -> the wall is the **Uplay online-service layer (proxy side)**, downstream of the FC3
+detours. Next lever: extend the proxy fake to report online-connected + complete the overlapped op, then re-test Host.
