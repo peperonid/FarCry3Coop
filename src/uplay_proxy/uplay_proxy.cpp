@@ -75,6 +75,10 @@ static const char* g_names[NEXP] = {
 };
 static int g_fakeval[NEXP] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0};
 static int g_fake = 0;
+static int g_fakeonline = 0;      // env FC3COOP_FAKE_ONLINE -> fake the Uplay online-service overlapped op (NOTES 28al)
+static int g_fo_done      = 1;    // slot 19 UPLAY_HasOverlappedOperationCompleted return (1 = completed)
+static int g_fo_result    = 0;    // slot 18 UPLAY_GetOverlappedOperationResult return (0 = UPLAY success code)
+// NOTE: slot 55 UPLAY_USER_IsConnected (th_55) ALREADY returns 1 unconditionally in this proxy, so 'connected' is already faked.
 static int g_logpump = 0;
 
 static void logOpen(void) {
@@ -453,6 +457,11 @@ extern "C" void __declspec(naked) th_18(void){ __asm {
   add  esp, 12
   popad
   popfd
+  cmp dword ptr [g_fakeonline], 0
+  je  Ltail_18
+  mov eax, dword ptr [g_fo_result]
+  ret                       // plain ret (cdecl), same ABI assumption as the existing party fakes th_29/th_30/th_55
+Ltail_18:
   mov eax, dword ptr [g_rawp_18]
   jmp eax
 } }
@@ -469,6 +478,11 @@ extern "C" void __declspec(naked) th_19(void){ __asm {
   add  esp, 12
   popad
   popfd
+  cmp dword ptr [g_fakeonline], 0
+  je  Ltail_19
+  mov eax, dword ptr [g_fo_done]
+  ret                       // plain ret (cdecl), same ABI assumption as the existing party fakes th_29/th_30/th_55
+Ltail_19:
   mov eax, dword ptr [g_rawp_19]
   jmp eax
 } }
@@ -1164,6 +1178,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         DisableThreadLibraryCalls(h);
         logOpen();
         g_fake = (getenv("FC3COOP_FAKE_PARTY") != NULL) ? 1 : 0;
+        g_fakeonline = (getenv("FC3COOP_FAKE_ONLINE") != NULL) ? 1 : 0;
         g_logpump = (getenv("FC3COOP_LOG_PUMP") != NULL) ? 1 : 0;
         char exe[MAX_PATH]; GetModuleFileNameA(NULL, exe, MAX_PATH);
         char* b = strrchr(exe, 92); if (b) strcpy(g_exe, b + 1);
@@ -1177,7 +1192,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         EnterCriticalSection(&g_cs);
         if (g_log) {
             int miss = 0; for (int i = 0; i < NEXP; i++) if (!g_realp[i]) miss++;
-            fprintf(g_log, "proxy up: real=%p exports=%d missing=%d fake=%d%c", g_real, NEXP, miss, g_fake, 10); fflush(g_log);
+            fprintf(g_log, "proxy up: real=%p exports=%d missing=%d fake=%d online=%d%c", g_real, NEXP, miss, g_fake, g_fakeonline, 10); fflush(g_log);
         }
         LeaveCriticalSection(&g_cs);
     }

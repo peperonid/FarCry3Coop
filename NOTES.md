@@ -4347,3 +4347,21 @@ Conclusion (confirms and sharpens 28k/28t, now with live trace): the online-coop
 What this does NOT rule out: whether Host uses `host_handler` at all (we only saw the gate+join stage; the "join" handler firing on a Host click suggests FC3 hosts via the same gate + session-search/join op, then would reach host creation only once the online op completes).
 
 Next (the lever moved from FC3 code to the PROXY): to get past "service unavailable" the proxy must (a) report the online user connected (`UPLAY_USER_IsConnected` -> true) and (b) make the pending overlapped online op complete (`HasOverlappedOperationCompleted` -> true + a success `GetOverlappedOperationResult`), and possibly pump the login/party event. The current proxy fake only covers the 3 party gates and is otherwise transparent; so the next build step is to extend the proxy fake for `UPLAY_USER_IsConnected` + overlapped-op completion and re-test Host. (This is the NOTES 28k/28t "RV/PRUDP app layer is the true blocker" seen live from the client side.)
+
+
+### Session 28am - proxy gate FC3COOP_FAKE_ONLINE: fake the Uplay online overlapped op; discovered IsConnected was already faked
+
+Per the 28al live trace (blocker = the unfinished online-service overlapped op, NOT IsConnected), extended `src/uplay_proxy/uplay_proxy.cpp`:
+
+- New gate `g_fakeonline` from env `FC3COOP_FAKE_ONLINE` (default OFF -> every export behaves exactly as before, no regression).
+- When ON: `th_19` (UPLAY_HasOverlappedOperationCompleted) returns `g_fo_done` (=1 completed) instead of tail-calling real, and
+  `th_18` (UPLAY_GetOverlappedOperationResult) returns `g_fo_result` (=0, the UPLAY success code) instead of tail-calling real. The values are
+  plain tunable statics (`g_fo_done`/`g_fo_result`) so a re-test can flip them (e.g. result 1 vs 0) and rebuild.
+- **Discovery:** `th_55` (UPLAY_USER_IsConnected) ALREADY does `mov eax,1; ret` unconditionally (like th_29/30) - so in the 28al Host run
+  "connected" was ALREADY faked true, and co-op still failed with "service unavailable". This confirms the wall is the async online overlapped op
+  (HasOverlapped never completing), not IsConnected; that is exactly what the new th_18/th_19 fakes target.
+- ABI note/caveat: the fakes use a plain `ret` (cdecl, caller-cleans), matching the existing th_29/30/55 fakes. If HasOverlapped/GetResult are
+  actually stdcall this could unbalance the stack - it is test-gated (off by default) and will show immediately if wrong.
+- `scripts/deploy_coop_shim.bat` launcher now also sets `FC3COOP_FAKE_ONLINE=1` (with a rem; comment it out for a plain run). Fixed a bug where
+  an echo line with `()` inside the launcher `(...)` block truncated the generated launcher.
+- Built green: `build_x86.bat` -> `BUILD_DONE 0`, `uplay_r1_loader.dll` 140288 B. NOT deployed to the game (owner re-runs deploy + Host).

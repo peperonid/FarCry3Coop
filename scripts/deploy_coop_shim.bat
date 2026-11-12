@@ -5,6 +5,9 @@ rem RUN MANUALLY. Build the two DLLs first:
 rem     cd src\uplay_proxy  & build_x86.bat
 rem     cd src\coop_shim    & build_x86.bat
 rem
+rem The launcher turns on FC3COOP_SHIM=1 + FC3COOP_FAKE_ONLINE=1 (proxy fakes the Uplay online-service overlapped op,
+rem NOTES 28al). Comment out FC3COOP_FAKE_ONLINE in run_coop_shim.bat for a plain run.
+rem
 rem SAFETY: this only writes into GAME_DIR (default the working copy). It NEVER touches the real install
 rem (H:\Uplay\Far Cry 3), which is read-only by project rule. Edit GAME_DIR or pass it as the 1st argument.
 setlocal EnableExtensions
@@ -45,6 +48,8 @@ rem ---- launcher with the env stub (edit FC3COOP_SECRET before the join test; %
   echo @echo off
   echo rem Launch FC3 with the co-op shim enabled. Set FC3COOP_SECRET the SAME on every peer.
   echo set FC3COOP_SHIM=1
+  echo rem proxy: fake the Uplay online-service overlapped op so co-op Host passes service unavailable - NOTES 28al
+  echo set FC3COOP_FAKE_ONLINE=1
   echo set FC3COOP_SECRET=change-me-same-on-all-peers
   echo start "FC3" "%EXE%" %%*
 )
@@ -53,7 +58,9 @@ echo   launcher: %GAME_DIR%\run_coop_shim.bat
 echo.
 echo Done. Manual alternative (if you launch the game yourself, set these in the SAME console):
 echo     set FC3COOP_SHIM=1
+echo     set FC3COOP_FAKE_ONLINE=1
 echo     set FC3COOP_SECRET=^<same on all peers^>
-echo Then: DebugView capture (RUN step 5), then run run_coop_shim.bat. Rollback: delete bin\coop_shim.dll and the .bak files.
+echo Then: the shim logs to bin\coop_shim.log (RUN step 5); run run_coop_shim.bat, go to co-op Host.
+echo Rollback: delete bin\coop_shim.dll and restore the .bak proxy.
 
 endlocal
