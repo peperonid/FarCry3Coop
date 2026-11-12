@@ -4370,3 +4370,20 @@ Per the 28al live trace (blocker = the unfinished online-service overlapped op, 
 ### Session 28an - online-fake values now tunable by env (no rebuild)
 
 Follow-up to 28am. `g_fo_done`/`g_fo_result` are now overridden in `DllMain` from env: `FC3COOP_FAKE_DONE` and `FC3COOP_FAKE_RESULT` (via `atoi`, applied only if set and non-empty; defaults stay 1 and 0). The `th_18`/`th_19` thunks read the global at call time, so a re-test can sweep the online-fake return values (e.g. `FC3COOP_FAKE_RESULT=0` vs `1`) by editing `run_coop_shim.bat` only - no proxy rebuild. `scripts/deploy_coop_shim.bat` launcher now prints both as commented `rem set ...=...` lines to uncomment. Built green: `build_x86.bat` -> `BUILD_DONE 0`, `uplay_r1_loader.dll` 141312 B. Still NOT deployed to the game (owner runs deploy + Host).
+
+
+### Session 28ao - LIVE Host with FAKE_ONLINE=1: return-code faking is exhausted; the gate is the Uplay login/credential RESULT payload
+
+Owner navigated co-op Host on pid 38212 with the new proxy (`proxy up ... fake=1 online=1`, `coop_shim.dll` loaded). Result: same "Far Cry 3 service unavailable" (RU dialog), V1.05 UI.
+
+coop_shim.log: `gate` fired 6x (returned our LAN success), `join` fired 6x (RV-auth short-circuit). `host_handler` / `ticket_*` / `rv_connected` NEVER fired.
+
+uplay_api.log (whole session, 75 calls, current pid): the co-op login burst is `UPLAY_ClearGameSession -> UPLAY_USER_GetCredentials -> UPLAY_USER_GetCdKeys -> HasOverlappedOperationCompleted x2 -> GetOverlappedOperationResult x2` (the credentials + cdkeys overlapped ops). Our `th_19` (HasOverlapped->done) IS taking effect: the game polls the op ONCE and moves on instead of looping forever (vs 28al). `IsConnected` forced 1 every time. Then NO co-op/party/lobby call ever follows; on the Host click the game made ZERO Uplay calls and just raised "service unavailable" -> it checked its OWN cached login/auth state, not a fresh call.
+
+ROOT CAUSE: `UPLAY_GetOverlappedOperationResult` writes the operation RESULT (the credentials blob / cdkey data) through an OUT-POINTER, and our `th_18` fakes only the RETURN value, leaving the out-buffer empty. The game reads an invalid/empty credential+cdkey payload, its login/auth state stays invalid, and the online entry aborts with "service unavailable" BEFORE any party/lobby/host code - so `hk_host` can never be reached. Confirmed: the 58 proxy exports contain NO `UPLAY_PARTY_Create`/host/join call; FC3 forms the co-op session via RendezVous + `USER_SetGameSession`, all gated on the Uplay online login/credential state.
+
+IMPLICATION: passing "service unavailable" by return-CODE faking is impossible - it needs VALID Uplay login payloads (the GetCredentials/GetCdKeys out-buffer contents + AccountId/identity). That is Ubisoft online-DRM payload synthesis (heavy RE, possibly identity/crypto validated) - the exact online-service wall NOTES 28t predicted. The cheap lever is done.
+
+NEXT LEVERS (deeper, static RE; agent picks B then A):
+- (B) find the online-vs-LAN branch: locate the code/string that raises "service unavailable" and the predicate around the co-op Host entry; if FC3 has a LAN/`storm::echo` path (Bantila "1.05 LAN") that skips the Uplay login gate, routing to it makes (A) unnecessary.
+- (A) if no LAN bypass: reverse the consumer of `GetOverlappedOperationResult` (caller `FC3_d3d11.dll+0x7acb19`) + the credential/cdkey buffer layout + `UPLAY_USER_GetAccountId`, and synthesize a valid "logged-in" payload in the proxy. Risk: identity/crypto checks may make it unwinnable.
