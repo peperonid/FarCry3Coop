@@ -73,3 +73,5 @@ compiles and encodes the design. **Nothing further can be closed statically.** T
 on `H:\FarCryCoop\TestFC3_105\` (the agent cannot attach - FC3 anti-injection). Open items live-test resolves: the `NetEngineType`/
 `SearchIdAddress` write site, per-hook trampolines/calling-convention, "does the LAN storm::echo op form a session once RV auth is short-circuited",
 and the shared ticket field set.
+
+Full step-by-step run procedure (build, load via the proxy, DebugView, smoke + join, record/rollback): see [RUN.md](RUN.md).
