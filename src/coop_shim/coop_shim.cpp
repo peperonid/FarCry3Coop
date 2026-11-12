@@ -27,8 +27,8 @@ static inline uintptr_t VA(uint32_t rva) { return g_mod + rva; }
 // Sites (RVA = abs - 0x10000000). Source of truth: NOTES 28r-28ad.
 enum {
   RVA_gate            = 0x01279ba0, // FUN_11279ba0 co-op session gate (online flag AND RV/SandboxUrl)
-  RVA_host_handler    = 0x01275d90, // FUN_11275d90 host -> SubAccountClient session (replaces w/ CFCXCreate)
-  RVA_join_handler    = 0x0127a1d0, // FUN_1127a1d0 join -> UbiAuthentication   (replaces w/ CFCXJoin)
+  RVA_host_handler    = 0x01275d90, // FUN_11275d90 host -> SubAccountClient RV auth (short-circuit, see hk_host)
+  RVA_join_handler    = 0x0127a1d0, // FUN_1127a1d0 join -> UbiAuthentication  RV auth (short-circuit, see hk_join)
   RVA_join_online_var = 0x0127a300, // FUN_1127a300 online-join flavor (also gates on gate)
   RVA_online_flag     = 0x01245090, // FUN_11245090 global online-enable check (0 => gate fails)
   RVA_rv_sandboxurl   = 0x012492a0, // FUN_112492a0 RV net-op needing resolved SandboxUrl
@@ -39,7 +39,18 @@ enum {
   RVA_ticket_prepare  = 0x0124e5e0, // FUN_1124e5e0 AcquireTicket::PrepareCall (skip the network)
   RVA_ticket_response = 0x0124d660, // FUN_1124d660 AcquireTicket::ProcessResponse (out-ticket buffer)
   RVA_rv_connected    = 0x01237670, // FUN_11237670 "RendezVous connected" gate (AcquireTicket + builder require it)
+  // storm::echo session-op registry (op types lazy-registered by NAME; C++ factory vtable - NOT hand-callable from a detour, NOTES 28ag):
+  RVA_op_register     = 0x01008bf50, // FUN_1008bf50 register("CFCXCreateSessionOperation", factory)
+  RVA_net_engine_init = 0x01092d256, // FUN_1092d256 net-engine init; param[0xe]: 0=LAN / 1=Online / 2=Offline
+  RVA_join_precond    = 0x01127a0d0, // FUN_1127a0d0 join precondition; returns 0 unless rv_connected (28af hook unlocks it)
 };
+
+// Op-registry descriptors (static op-type data, created via their lazy registrar only; for reference, NOTES 28ag):
+#define VA_DESC_CFCX_CREATE  0x11e6b208u // "CFCXCreateSessionOperation"  (via FUN_107de8fa)
+#define VA_DESC_CFCX_JOIN    0x11e74ee0u // "CFCXJoinSessionOperation"    (via FUN_1092e764)
+#define VA_DESC_SEARCHIP     0x11e42de8u // "CSessionSearchIPOperation"   (via FUN_10425918)
+// Join/create op PARAM BLOCK schema (registered by FUN_1061e581): NetEngineType field id = 0x3c (0=LAN), SearchIdAddress, JoinSessionId.
+#define OUTFIELD_NETENGINETYPE_ID 0x3c
 
 // Online-enable global read by FUN_11245090 ("return DAT_11f07e48"). Setting it to 1 lets the gate precondition pass.
 #define RVA_online_flag_global 0x01f07e48
@@ -157,20 +168,24 @@ static int hk_gate(void* out1, void* out2) {
 // "RendezVous connected" (FUN_11237670): the ticket AcquireTicket + message builder require it -> force true.
 static int __cdecl hk_rv_connected(void* a) { (void)a; return 1; }
 
-// Host path: create a storm::echo session instead of SubAccountClient.
+// Host path (NOTES 28ag): do NOT hand-build a CFCX op - the op registry is a C++ name factory with an async op lifecycle.
+// Instead neutralize the RV auth step (it only allocates SubAccountClient + issues an RV service vtable call) so the game's own
+// storm::echo create op (already built from a NetEngineType=LAN param) forms the session over LAN. Returns success, issues no RV call.
 static int hk_host(void* a,void* b,void* c,void* d,void* e,int f,void* g) {
-  LOGF("shim: host -> CFCXCreateSessionOperation (NetEngineType=LAN)\n");
+  LOGF("shim: host -> short-circuit RV auth (SubAccountClient) so native LAN storm::echo op proceeds\n");
   (void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;
-  // TODO: call the storm::echo session-op registry: CFCXCreateSessionOperation with NetEngineType=0(LAN),
-  // PlaylistId/SessionType from the join params. Needs the op registry API (FUN_1008bf50 registers by name).
+  // TODO(NOTES 28ag): confirm the caller ignores the RV async handle; force NetEngineType=0 (LAN) at the op-param builder
+  //   (FUN_1061e581 field id 0x3c / FUN_1092d256 param[0xe]) so the native create op is the LAN flavor.
   return 1;
 }
 
-// Join path: join a storm::echo session by address instead of UbiAuthentication.
+// Join path (NOTES 28ag): same idea as hk_host - short-circuit the UbiAuthentication RV auth to success (no RV service call);
+// the native storm::echo join op (NetEngineType=LAN, SearchIdAddress=our sockaddr) forms the session.
 static int hk_join(void* a,void* b,void* c,void* d,void* e,void* f,void* g,void* h,void* i) {
-  LOGF("shim: join -> CFCXJoinSessionOperation -ip\n");
+  LOGF("shim: join -> short-circuit RV auth (UbiAuthenticationClient) so native LAN storm::echo op proceeds\n");
   (void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;(void)i;
-  // TODO: CFCXJoinSessionOperation / CSessionSearchIPOperation to g_cfg.lan_ip:lan_port.
+  // TODO(NOTES 28ag): the join precondition FUN_1127a0d0 needs rv_connected=1 (hooked); ensure SearchIdAddress in the
+  //   op-param block points at g_cfg.lan_ip:lan_port (sockaddr_in) so the LAN storm::echo join op dials us.
   return 1;
 }
 

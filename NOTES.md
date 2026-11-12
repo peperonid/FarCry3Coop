@@ -4238,3 +4238,41 @@ the scaffold's `derive_local_ticket` currently hashes only `FC3COOP_SECRET` - a 
 peers derive the same key.
 
 Scaffold updated and re-compiles clean (`build_x86.bat` -> BUILD_DONE 0).
+
+
+### Session 28ag - op registry is a C++ name factory (not hand-callable); correct lever = force NetEngineType=LAN + short-circuit RV auth
+
+Ghidra `DecompileReg`/`DecompileReg2`/`DecompileNet`. Question: can `hk_host`/`hk_join` create storm::echo `CFCXCreate/JoinSessionOperation` directly? **No** - and the correct lever is simpler.
+
+Op registry mechanism (why not hand-callable):
+- `FUN_1008bf50(this, "CFCXCreateSessionOperation", factory)` -> `FUN_1008bff8(name, factory, cnt)` appends the create-factory into a
+  fixed op-type **descriptor array** (RTTI-style, no `strcmp` in the cluster - it is not a name->factory hash). Each op type is a static
+  lazy-registered descriptor holding name + a create-factory vtable: `CFCXCreateSessionOperation` -> `&DAT_11e6b208` (via `FUN_107de8fa`),
+  `CFCXJoinSessionOperation` -> `&DAT_11e74ee0` (via `FUN_1092e764`), `CSessionSearchIPOperation` -> `&DAT_11e42de8` (via `FUN_10425918`);
+  all wrap base `CFCXGameOperation` -> `&DAT_11e68fd0` (via `FUN_107b2956`). The descriptors are referenced **only** by their lazy
+  registrars, i.e. ops are created by the game through this descriptor's create-vtable + a param block + an async op lifecycle (refcount,
+  completion callback). A 5-byte detour stub cannot safely reproduce that C++ lifecycle. So "replace host/join with hand-built CFCX ops"
+  (the 28ad wording) is **wrong**; corrected below.
+
+The RV auth handlers are not the session transport:
+- `FUN_11275d90` (host) allocates a `SubAccountClient` (`FUN_11210af0(0x20, ".../SubAccountClient.cpp", 0x3b)`) and issues an RV service
+  vtable call `(**(code**)(*param_1+0x14))(...)`; returns void, drives the RV async job.
+- `FUN_1127a1d0` (join) gates on precondition `FUN_1127a0d0(...)` and builds a `UbiAuthenticationClient`
+  (`FUN_11210af0(0x1a8, ".../UbiAuthenticationClient.cpp", 0x41)`) + RV vtable call `(**(code**)(*piVar3+4))()`; returns 1/0.
+- Precondition `FUN_1127a0d0` returns 0 unless `FUN_11237670` (rv-connected) is true -> forcing it (28af hook) unlocks the join precondition.
+
+The LAN path is first-class in the net engine (storm::echo), selected by a param, not by RV:
+- `FUN_1092d256` (net-engine init) reads `param_1[0xe]`: `0="LAN"`, `1="Online"`, `2="Offline"` (it binds UDP; on failure logs
+  "Net engine initialization failed.(UDP binding)"). So the transport mode is a plain init param.
+- The join/create op **param block** (schema registered by `FUN_1061e581`) carries `NetEngineType` (field id `0x3c`), `SearchIdAddress`,
+  `JoinSessionId` (28w). Setting `NetEngineType=0 (LAN)` makes the game build its own storm::echo `CFCXCreate/JoinSessionOperation` over LAN.
+
+**Corrected shim design (Route B, concrete):** do NOT hand-build CFCX ops. Instead:
+1. Force the net-engine/session op param `NetEngineType = 0 (LAN)` (`FUN_1092d256` `param[0xe]`; op param field id `0x3c`) so the game's
+   own code creates the storm::echo session op.
+2. Short-circuit the RV auth handlers `FUN_11275d90` (host) and `FUN_1127a1d0` (join) to no-op success so no `SubAccountClient`/
+   `UbiAuthenticationClient` RV service calls are issued; the native LAN op then forms the session.
+3. Keep the 28af levers: online global `DAT_11f07e48=1`, `FUN_11237670` rv-connected -> 1, `FUN_112492a0` -> 1, gate `FUN_11279ba0` ->
+   success + LAN `sockaddr_in`, ticket validate -> accept local MD5.
+Remaining runtime-only unknown: the exact op-param builder call site where `NetEngineType`/`SearchIdAddress` are written (to patch the
+value there), and confirmation that the LAN `CFCXCreateSessionOperation` is reached once the RV handlers are neutralized - needs a live run.

@@ -72,4 +72,5 @@ the net-engine LAN/Online/Offline mode (`FUN_1092d256`) is transport-only and ca
   host `FUN_11275d90` -> `CFCXCreateSessionOperation`; join `FUN_1127a1d0` -> `CFCXJoinSessionOperation`; ticket `FUN_11254be0`/`FUN_1124e5e0`.
 - Known ABI (28af): gate out = `sockaddr_in`; online = a global byte; ticket = MD5-only.
 - Done: full static RV map, decision doc + Route C, PR #1 shared upstream, scaffold compiles clean. Blocked: the runtime test
-  (FC3 anti-injection blocks agent attach) that is needed to pin the struct ABIs, the CFCX op-registry calls, and the ticket field set.
+  (FC3 anti-injection blocks agent attach) to pin struct ABIs and the ticket field set, and to confirm the native LAN storm::echo op forms once the RV
+  auth handlers are short-circuited and NetEngineType is forced to LAN (28ag: the CFCX op registry is a C++ name factory, not hand-callable).

@@ -60,3 +60,8 @@ build_x86.bat   -> coop_shim.dll   (x86; needs VS 18 + vcvars32)
    `online global ...=1`, `gate -> success (LAN ...)`, `host -> CFCXCreate...`, `join -> CFCXJoin...`, `ticket_validate -> accept`.
 5. Success signal: a co-op session forms with NO "service unavailable"/ticket error and both clients share one world.
 6. Crash at a hook => that site's saved-bytes/calling-convention is wrong (trampoline TODO): re-disassemble that RVA and fix.
+
+
+## 28ag correction (op registry + correct host/join lever)
+- storm::echo session ops are created by NAME through a C++ op-type registry (`FUN_1008bf50` -> `FUN_1008bff8`; descriptors `DAT_11e6b208`/`DAT_11e74ee0`/`DAT_11e42de8`) with an async op lifecycle (factory vtable + param block + refcount). A 5-byte detour cannot hand-build them, so `hk_host`/`hk_join` do NOT build CFCX ops.
+- Correct lever: (1) force `NetEngineType=LAN` (net-engine `FUN_1092d256` `param[0xe]=0`; op-param field id `0x3c`) and (2) short-circuit the RV auth handlers `FUN_11275d90` (SubAccountClient) / `FUN_1127a1d0` (UbiAuthenticationClient) to no-op success; the game's own storm::echo LAN op then forms the session. Join precondition `FUN_1127a0d0` is unlocked by the `rv_connected` hook.
