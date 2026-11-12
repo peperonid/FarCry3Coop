@@ -4421,3 +4421,21 @@ Therefore the two live routes are unchanged in kind, and the LAN shortcut does n
 
 Decision for the owner/Bantila: ask directly whether "1.05 LAN" is REAL campaign-co-op-over-LAN (which provider did he force?) or MP-only LAN. That answer selects A vs B'. Next static step for B': find the co-op session-creation op that fills the CSessionParam (callers of the param binder region `~0x1061e600`) and the `NetEngineType` writer, to see if it can be detoured to LAN. PR #1 updated with this finding and a precise question to Bantila.
 
+
+
+### Session 28ar - option B' structural answer: co-op host is polymorphic over a session provider; no in-path online/lan branch; LAN swap = provider-object swap at init
+
+Disassembled the co-op Host path in `FC3_d3d11.dll`:
+
+Flow: a wrapper at `0x11275f40` runs the gate `FUN_11279ba0` (`UbiAuthenticationLoginCustomData` blob builder) as a PRE-CHECK (`test al,al; jne` at `0x11275f67`); only on success does it build the arg struct and `call FUN_11275d90` (the real host handler). Join mirrors this (gate call at `0x1127a31b`). Our shim makes the gate return success, so the pre-check passes and `FUN_11275d90` runs and hits RV.
+
+Inside `FUN_11275d90` (host handler):
+- It constructs a **RendezVous SubAccountClient**: pushes the internal source path string (`.rdata` `0x116ce2a8` = `.../online/RendezVous/RendezVous/Services/SubAccount/src/Client/SubAccountClient.cpp`) into a constructor at `0x11210af0`, and assigns RV-object vtables (`0x116c6e2c`, `0x116ce3d0`). (Internal Ubisoft Perforce path observed in the binary - kept local, not for the PR.)
+- It then creates the host session through a **POLYMORPHIC provider**: `mov edx,[esi]; mov edx,[edx+0x14]; call edx` at `0x11275e7e` (a virtual method of the controller object `esi=this`), plus a `call 0x112536a0` with a class-name descriptor pointer `0x115279f4` (inside the `CSessionCreateOperation*` name pool).
+
+So there is NO online-vs-LAN `if` inside the co-op host code: the provider object (its vtable) decides RV vs LAN. `NetEngineType` (id 0x3c) / `MatchMakingEnabled` (id 0x4d) are declared in the param type-descriptor (one-time reflection registration at `~0x1061e580`, guarded by init flag `0x11e5d612`), and per-session values are assigned via field-id setters by the FCX create-session op (`CFCXCreateSessionOperation` / `CSessionCreateGameOperation`).
+
+Verdict on B': feasible in PRINCIPLE but NOT a flag flip. The netcode has a non-RdV base `CSessionCreateOperation` (`0x11523fa8`) separate from `CSessionCreateOperation_RdV` (`0x11527a78`), i.e. a native storm::echo (LAN-capable) session provider EXISTS, and the co-op host/join handlers are polymorphic over it -> the co-op node COULD run on the LAN provider. The detour is therefore: make the session controller construct/attach the **LAN/base provider object instead of the RendezVous one** at controller init (this is the `NetEngineType` decision that gives `esi` its vtable), NOT to patch a branch in the host call.
+
+Blocker for the exact detour: RTTI is stripped in this build (no `.?AV...` names), so the provider-construction switch (where the controller chooses base vs `_RdV`, driven by `NetEngineType`) is not reachable by name xref. Best next step is a runtime logging detour on the provider virtual factory (`this->vtable[+0x14]`, i.e. the `call edx` at `0x11275e7e`) and/or dumping `esi`'s vtable at Host, to (a) capture the RV provider vtable, (b) find the base/LAN provider vtable (compare to the `CSessionCreateOperation` base), and (c) force-rewrite `esi`'s vtable pointer to the LAN provider. That is a shim change + one Host run (owner UI).
+
