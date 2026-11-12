@@ -25,3 +25,10 @@ src/uplay_proxy/*.dll
 src/uplay_proxy/*.lib
 src/uplay_proxy/*.exp
 src/uplay_proxy/*.log
+
+# coop_shim (route B scaffold) build artifacts (sources .cpp/.bat/README tracked; binaries not)
+src/coop_shim/obj/
+src/coop_shim/*.dll
+src/coop_shim/*.lib
+src/coop_shim/*.exp
+src/coop_shim/*.log

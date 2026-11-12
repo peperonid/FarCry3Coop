@@ -4195,3 +4195,21 @@ the co-op session handlers it releases into are themselves RendezVous service ca
 So the whole co-op session establishment (gate + host/join handlers + address + ticket) is RendezVous-shaped, and route B is a
 **session-establishment shim** that swaps those four RV touchpoints for storm::echo session ops + a local address + a self-consistent
 MD5 ticket. No asymmetric crypto anywhere; all four sites are in the running module. This is the actionable route-B spec.
+
+
+### Session 28ae - route B shim scaffold created (src/coop_shim), compiles as x86 DLL
+
+Added `src/coop_shim/` (`coop_shim.cpp`, `build_x86.bat`, `README.md`, `README.ru.md`): a **scaffold** for the Route-B
+session-establishment shim (design only; **not deployed, not written to the game, not runtime-tested**). It builds cleanly
+with MSVC x86 (`build_x86.bat` -> `coop_shim.dll`, links `user32.lib`; binaries gitignored).
+
+Contents:
+- RVA map for the running module `FC3_d3d11.dll` md5 46bcc097 (base `0x10000000`): gate `0x1279ba0`, host `0x1275d90`,
+  join `0x127a1d0`, online-flag `0x1245090`, rv_sandboxurl `0x12492a0`, ticket validate `0x1254be0`, ticket prepare `0x124e5e0`.
+- A 5-byte inline-detour helper (`E9` rel32 + trampoline), inert-by-default guard (`FC3COOP_SHIM=1` to enable), env config
+  (`FC3COOP_SECRET` seed), and a self-contained MD5 (no asymmetric crypto) for the local ticket derive.
+- Hook stubs implementing the intent: online_flag->1; rv_sandboxurl/gate -> LAN address+port; host -> `CFCXCreateSessionOperation`;
+  join -> `CFCXJoinSessionOperation`; ticket validate -> accept local MD5; ticket prepare -> skip network.
+- Explicit TODOs (need a running client the agent cannot attach to): exact gate/struct ABIs (`FUN_11232e20`/`FUN_11232ef0`),
+  the storm::echo CFCX op-registry calls, per-hook trampolines + calling-convention/stack balance, ticket MD5 input fields
+  (28aa bundle), a module-md5 guard, and an injection path. This is the actionable next build step for a human test run.
