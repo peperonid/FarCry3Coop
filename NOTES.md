@@ -4663,3 +4663,22 @@ NEXT (planned): (1) make a patched 1.06 DLL copy (party-loop jbe->jmp + mutex jn
 Internal Ubisoft paths stay LOCAL; Bantila's method is cited to his public repo with attribution.
 
 
+
+
+### Session 28bg - Prep for the dev-session route: applied Bantila's party-loop + single-instance-mutex patches to our 1.06 working copy, created the dev-launch script, and confirmed the GATOR-fallback PRUDP protocol is the well-documented Quazal Rendez-Vous (de-risks the fallback)
+
+**(a) PRUDP reference check (fallback insurance, web).** FC3's RendezVous is **Quazal Rendez-Vous (QRV)** ("seen in many many games, especially Ubisoft"); **RV clients use the original Rendez-Vous variation of PRUDP** (not Nintendo's PRUDPv0/v1). Public references exist and document the packet format (fields: src, dst, flags, type, sessionId, packetSignature, sequenceId, fragmentIndex, payload; little-endian) plus RV packet signature handling: NintendoClients Rendez-Vous wiki, `Stary2001/nex-dissector`, `PretendoNetwork/nex-go`. So if we ever fall back to the GATOR emulator (docs/coop-gator-emulation-plan.md), stage S1 (PRUDP codec) is **more tractable than feared** - the framing + signature of the RV PRUDP variant are publicly documented; the in-game session-service semantics remain the hard part. Not used on the primary route.
+
+**(b) Working-copy patches (write to H:\FarCryCoop\TestFC3_105\bin, NOT the install; .orig backups kept).** Ran local/scratch/apply_bantila_patch.py (reuses scripts/patch_dll.py finders + patch):
+- FC3.dll: party-loop `jbe->jmp` @0x10622c7a, mutex `jnz->6 NOP` @0x100041bb (7 bytes changed). Backup `FC3.dll.orig`.
+- FC3_d3d11.dll: party-loop @0x1077e1df, mutex @0x10004092 (7 bytes). Backup `FC3_d3d11.dll.orig`.
+- end-session NOP confirmed already present (0 call sites, from solo262 loader) -> patch_dll's end-session step is a no-op here.
+These patches are benign for normal single-player / normal play (party-loop + end-session affect co-op only; mutex removal just allows a 2nd instance). To revert: copy the `.orig` files back over the DLLs.
+
+**(c) Dev-launch script** `H:\FarCryCoop\TestFC3_105\dev_coop.ps1` (English comments; not committed, has local paths): `-Role host` runs `farcry3_d3d11.exe -host coop_vidar -login Host -coop` (windowed, `-skipintro -quickstartup`); `-Role client [-Ip <ipv4>]` runs `-client -login Guest -ip <Ip> -coop` and auto-detects a non-loopback IPv4 if -Ip omitted. **Does NOT set FC3COOP_SHIM**, so the coop shim loads inert (`coop_shim.cpp:524` returns before install_hooks when enable=0) and does not interfere with the dev session. The proxy loader still loads (the exe imports it) but is transparent.
+
+**Recipe to test (owner's hands; 2 windows + UI observation):** host binds UDP 9000 on its FIRST adapter, client 9001; the client -Ip must be that adapter's IPv4 (loopback may not be it - on Bantila's PC the first adapter was a VirtualBox 192.168.56.1). Expected per Bantila: host loads coop_vidar, client joins, then possibly both freeze on an empty dark panel. If it reproduces, the next step is RE of the main-thread freeze (Bantila sample addrs 0x10338ad4 / 0x102f1b1d / 0x103e07db / 0x1040aaa3 / 0x10327bbd) to find what the co-op lobby waits on. **Open risk:** Ubisoft Connect DRM may refuse a direct `farcry3_d3d11.exe` launch (Bantila was on Steam 1.05); first run will show whether the engine even starts standalone.
+
+Internal Ubisoft paths stay LOCAL; Bantila's method cited to his public repo.
+
+

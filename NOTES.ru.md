@@ -4362,3 +4362,22 @@ READ-ONLY ПРОВЕРКА на НАШЕМ 1.06 (TestFC3_105/bin, через fin
 Внутренние пути Ubisoft остаются ЛОКАЛЬНЫМИ; метод Bantila цитируется по его публичному репо с указанием авторства.
 
 
+
+
+### Сессия 28bg - Подготовка к dev-пути: применил патчи Bantila (party-loop + single-instance mutex) к нашей рабочей копии 1.06, создал скрипт dev-запуска, и подтвердил, что PRUDP для GATOR-фолбэка - это хорошо задокументированный Quazal Rendez-Vous (снижает риск фолбэка)
+
+**(a) Сверка PRUDP-референсов (страховка фолбэка, веб).** RendezVous у FC3 - это **Quazal Rendez-Vous (QRV)** («виден во множестве игр, особенно Ubisoft»); **RV-клиенты используют оригинальный вариант PRUDP Rendez-Vous** (не Nintendo PRUDPv0/v1). Есть публичные референсы с форматом пакета (поля: src, dst, flags, type, sessionId, packetSignature, sequenceId, fragmentIndex, payload; little-endian) и обработкой подписи RV-пакета: NintendoClients wiki Rendez-Vous, `Stary2001/nex-dissector`, `PretendoNetwork/nex-go`. Так что если когда-нибудь вернёмся к эмулятору GATOR (docs/coop-gator-emulation-plan.md), стадия S1 (кодек PRUDP) **тректабельнее, чем казалось**, - кадрирование и подпись RV-варианта PRUDP публично задокументированы; трудная часть - семантика игрового session-сервиса. На основном пути не используется.
+
+**(b) Патчи рабочей копии (запись в H:\FarCryCoop\TestFC3_105\bin, НЕ в установку; бэкапы .orig сохранены).** Запущен local/scratch/apply_bantila_patch.py (переиспользует finders + patch из scripts/patch_dll.py):
+- FC3.dll: party-loop `jbe->jmp` @0x10622c7a, mutex `jnz->6 NOP` @0x100041bb (7 байт). Бэкап `FC3.dll.orig`.
+- FC3_d3d11.dll: party-loop @0x1077e1df, mutex @0x10004092 (7 байт). Бэкап `FC3_d3d11.dll.orig`.
+- NOP на end-session подтверждён уже присутствующим (0 вызовов, от solo262-лоадера) -> шаг patch_dll про end-session здесь no-op.
+Эти патчи безвредны для обычной одиночной/штатной игры (party-loop + end-session влияют только на co-op; снятие mutex просто разрешает 2-й инстанс). Вернуть: скопировать `.orig` обратно поверх DLL.
+
+**(c) Dev-launch скрипт** `H:\FarCryCoop\TestFC3_105\dev_coop.ps1` (комментарии на английском; не коммитится, содержит локальные пути): `-Role host` запускает `farcry3_d3d11.exe -host coop_vidar -login Host -coop` (окно, `-skipintro -quickstartup`); `-Role client [-Ip <ipv4>]` запускает `-client -login Guest -ip <Ip> -coop` и авто-находит не-loopback IPv4, если -Ip не задан. **НЕ выставляет FC3COOP_SHIM**, поэтому co-op шим грузится inert (`coop_shim.cpp:524` возвращает до install_hooks при enable=0) и не мешает dev-сессии. Прокси-лоадер всё равно грузится (exe импортирует его), но прозрачен.
+
+**Рецепт теста (руки владельца; 2 окна + наблюдение за UI):** хост биндит UDP 9000 на ПЕРВОМ адаптере, клиент 9001; у клиента -Ip должен быть IPv4 того адаптера (loopback может им не быть - у Bantila первый адаптер был VirtualBox 192.168.56.1). Ожидание по Bantila: хост грузит coop_vidar, клиент заходит, затем, возможно, оба замирают на пустой тёмной панели. Если повторится, следующий шаг - RE заморозки главного потока (примеры адресов Bantila 0x10338ad4 / 0x102f1b1d / 0x103e07db / 0x1040aaa3 / 0x10327bbd), найти, чего ждёт co-op-лобби. **Открытый риск:** Ubisoft Connect DRM может отказать в прямом запуске `farcry3_d3d11.exe` (Bantila был на Steam 1.05); первый запуск покажет, стартует ли движок вообще отдельно.
+
+Внутренние пути Ubisoft остаются ЛОКАЛЬНЫМИ; метод Bantila цитируется по его публичному репо.
+
+
