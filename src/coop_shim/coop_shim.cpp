@@ -74,16 +74,24 @@ enum {
 // Online-enable global read by FUN_11245090 ("return DAT_11f07e48"). Setting it to 1 lets the gate precondition pass.
 #define RVA_online_flag_global 0x01f07e48
 
+// Provider-factory probe site (NOTES 28ar): inside host_handler FUN_11275d90, the session provider is dispatched
+// polymorphically via 'mov edx,[esi]; mov edx,[edx+0x14]; call edx'. Hook the 'call edx' site to log the provider
+// object 'esi' + its vtable so the RV (and later LAN) provider class vtable can be identified.
+#define RVA_provider_factory_site 0x01275e7e // VA 0x11275e7e: 'FF D2' = call edx
+#define RVA_provider_factory_back 0x01275e86 // resume after displaced 'call edx' + 'mov ecx,[ebp-0x128]'
+
 // The gate out-struct is a classic sockaddr_in (NOTES 28af): family@+0 u16, port@+2 network order
 // (FUN_11232ef0 reads it via ntohs(*(p+2))), IPv4 addr@+4 network order (FUN_11232e20 via ntohl/inet_ntoa).
 
 // ------------------------------------------------------------------ shim config (set by your loader / env / file)
 struct ShimConfig { uint32_t lan_ip; uint16_t lan_port; char shared_secret[64]; int enable; };
 static ShimConfig g_cfg = { 0x7f000001u /*127.0.0.1*/, 9000, "fc3coop", 0 }; // enable=0 => inert until configured
+static int g_hook_provider = 0; // env FC3COOP_HOOK_PROVIDER=1 -> run the REAL host path (no host short-circuit) and probe the provider vtable
 static void load_config(void) {
   char buf[64];
   if (GetEnvironmentVariableA("FC3COOP_SHIM", buf, sizeof(buf)) > 0) g_cfg.enable = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_SECRET", buf, sizeof(buf)) > 0) { strncpy(g_cfg.shared_secret, buf, sizeof(g_cfg.shared_secret)-1); }
+  if (GetEnvironmentVariableA("FC3COOP_HOOK_PROVIDER", buf, sizeof(buf)) > 0) g_hook_provider = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -223,6 +231,51 @@ static void* hk_ticket_prepare(void* a,void* b,void* c,void* d,void* e,void* f) 
 }
 
 // ------------------------------------------------------------------ install
+// ---- call-site provider-factory probe (NOTES 28ar) ----
+// Hook the 'call edx' (vtable[+0x14] provider dispatch) inside host_handler. The trampoline logs the provider
+// object + vtable, performs the ORIGINAL call edx with the exact same registers/stack, replays the displaced
+// 'mov ecx,[ebp-0x128]', then resumes at base+RVA_provider_factory_back. All sites assume module md5 46bcc097.
+static uintptr_t g_provider_jmpback = 0;
+static void __cdecl log_provider_factory(void* thisp, void* method) {
+  __try {
+    uintptr_t vtbl = *(volatile uintptr_t*)thisp;
+    uintptr_t slot = *(volatile uintptr_t*)(vtbl + 0x14);
+    LOGF("shim: provider_factory: this=%p vtable=%p slot+0x14=%p (edx=%p) mod=0x%08x",
+         thisp, (void*)vtbl, (void*)slot, method, (uint32_t)g_mod);
+    LOGF("shim:   vtbl_rva=0x%08x slot_rva=0x%08x", (uint32_t)(vtbl - g_mod), (uint32_t)(slot - g_mod));
+    LOGF("shim:   vtable[0..7]= %p %p %p %p %p %p %p %p",
+      *(void**)(vtbl), *(void**)(vtbl+0x04), *(void**)(vtbl+0x08), *(void**)(vtbl+0x0C),
+      *(void**)(vtbl+0x10), *(void**)(vtbl+0x14), *(void**)(vtbl+0x18), *(void**)(vtbl+0x1C));
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: provider_factory read fault (caught)"); }
+}
+__declspec(naked) static void hk_provider_factory(void) {
+  __asm {
+    pushad
+    push edx
+    push esi
+    call log_provider_factory
+    add  esp, 8
+    popad
+    call edx                                // original vtable[+0x14] dispatch (ecx=this, edx=method, stack intact)
+    mov  ecx, dword ptr [ebp - 0x128]       // displaced instruction originally at the hook site
+    jmp  dword ptr [g_provider_jmpback]      // resume at base + RVA_provider_factory_back (ASLR-safe)
+  }
+}
+static int patch_provider_factory(void) {
+  void* site = (void*)VA(RVA_provider_factory_site);
+  uint8_t* t = (uint8_t*)site;
+  if (!(t[0] == 0xFF && t[1] == 0xD2)) { LOGF("shim: provider_factory site bytes mismatch @%p (%02x %02x) - skip", site, t[0], t[1]); return -1; }
+  if (!(t[2] == 0x8B && t[3] == 0x8D)) { LOGF("shim: provider_factory displaced bytes unexpected (%02x %02x) - skip", t[2], t[3]); return -1; }
+  g_provider_jmpback = VA(RVA_provider_factory_back);
+  DWORD old; VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old);
+  uint8_t jmp = 0xE9; int32_t rel = (int32_t)((uint8_t*)hk_provider_factory - ((uint8_t*)site + 5));
+  memcpy(t, &jmp, 1); memcpy(t + 1, &rel, 4);
+  VirtualProtect(site, 5, old, &old);
+  FlushInstructionCache(GetCurrentProcess(), site, 5);
+  LOGF("shim: patch provider_factory @0x%08x -> back 0x%08x", (uint32_t)(uintptr_t)site, (uint32_t)g_provider_jmpback);
+  return 0;
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -235,10 +288,12 @@ static void install_hooks(void) {
     { RVA_rv_connected,    (void*)hk_rv_connected,     "rv_connected" },
   };
   for (unsigned i = 0; i < sizeof(tbl)/sizeof(tbl[0]); ++i) {
+    if (g_hook_provider && tbl[i].rva == RVA_host_handler) { LOGF("shim: SKIP host_handler short-circuit (provider probe: run real host)\n"); continue; }
     void* tgt = (void*)VA((uint32_t)tbl[i].rva);
     LOGF("shim: patch %s @0x%08x\n", tbl[i].name, (uint32_t)(uintptr_t)tgt);
     patch_5(tgt, tbl[i].detour); // TODO: per-hook saved bytes + trampoline; currently shares g_hooks[0].saved
   }
+  if (g_hook_provider) patch_provider_factory();
 }
 
 // ------------------------------------------------------------------ init

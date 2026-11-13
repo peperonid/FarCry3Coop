@@ -53,6 +53,8 @@ rem ---- launcher with the env stub (edit FC3COOP_SECRET before the join test; %
   echo rem tune the online-fake return values without rebuilding - uncomment to override - defaults DONE=1 - RESULT=0
   echo rem set FC3COOP_FAKE_DONE=1
   echo rem set FC3COOP_FAKE_RESULT=0
+  echo rem provider-vtable probe - NOTES 28as - uncomment to run the REAL host path and log the session provider vtable
+  echo rem set FC3COOP_HOOK_PROVIDER=1
   echo set FC3COOP_SECRET=change-me-same-on-all-peers
   echo start "FC3" "%EXE%" %%*
 )

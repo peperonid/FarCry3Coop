@@ -4138,3 +4138,19 @@ uplay_api.log (вся сессия, 75 вызовов, текущий pid): co-o
 
 Стоппер для точного детура: RTTI в этой сборке вырезана (нет имён `.?AV...`), поэтому переключатель конструирования провайдера (где контроллер выбирает базу против `_RdV` по `NetEngineType`) недостижим по xref имени. Лучший следующий шаг - рантайм-лог-детур на виртуальной фабрике провайдера (`this->vtable[+0x14]`, то есть `call edx` в `0x11275e7e`) и/или дамп vtable `esi` на Host, чтобы (a) снять vtable RV-провайдера, (b) найти vtable базы/LAN-провайдера (сравнить с базой `CSessionCreateOperation`), и (c) форсом переписать указатель vtable `esi` на LAN-провайдер. Это правка шима + один прогон Host (UI владельца).
 
+
+
+### Сессия 28as - в шим добавлен site-пробник фабрики провайдера (FC3COOP_HOOK_PROVIDER); гоняем реальный host-путь чтобы снять vtable провайдера
+
+Реализован следующий шаг 28ar в `src/coop_shim/coop_shim.cpp`: CALL-SITE хук на полиморфной диспетчеризации провайдера внутри host_handler.
+
+- Сайт: `RVA_provider_factory_site` = 0x01275e7e (`FF D2` = `call edx`, т.е. `edx = *(this->vtable + 0x14)`), возврат в `RVA_provider_factory_back` = 0x01275e86.
+- Env `FC3COOP_HOOK_PROVIDER=1`: (a) ПРОПУСКАЕТ уcечение `host_handler`, чтобы реальный host-путь дошёл до диспетчера, (b) ставит `patch_provider_factory()`.
+- Детур - голый trampoline: `pushad` -> `log_provider_factory(esi=this, edx=method)` -> `popad` -> выполнить ОРИГИНАЛЬНЫЙ `call edx` (те же регистры/стек) -> повторить смещённый `mov ecx,[ebp-0x128]` -> `jmp dword ptr [g_provider_jmpback]` (g_provider_jmpback = g_mod + back, ASLR-безопасно). 5-байтовый патч покрывает 2-байтовый `call edx` + первые 3 байта идущего `mov ecx,[ebp-0x128]`; мы перескакиваем на +8 и повторяем весь 6-байтовый mov из trampoline.
+- Безопасность: перед патчем проверяются байты сайта `FF D2` и смещённые байты `8B 8D`, иначе лог и пропуск (чужой модуль -> без краша). `log_provider_factory` защищает чтения через SEH `__try`.
+- Вывод в лог: `this`, указатель vtable провайдера, `vtable+0x14`, слоты vtable [0..7] и их RVA относительно базы модуля -> даёт идентифицировать vtable RV-класса провайдера и сравнить со статической не-RdV `CSessionCreateOperation`.
+
+Проверено: `build_x86.bat` -> `BUILD_DONE 0`, `coop_shim.dll` 131072 B; байты trampoline присутствуют в бинаре (`FF D2 8B 8D D8 FE FF FF FF 25`, ровно одно вхождение). Лаунчер `scripts/deploy_coop_shim.bat` теперь печатает закомментированный `rem set FC3COOP_HOOK_PROVIDER=1`. Всё ещё НЕ деплоилось.
+
+Как снять: в `run_coop_shim.bat` расскомментировать `set FC3COOP_HOOK_PROVIDER=1`, задеплоить + запустить + зайти в Co-op -> Host. Игра ВСЁ РАВНО закончится «службой недоступна» (ожидаемо - host-путь реальный и RV-закрытый), но в `bin/coop_shim.log` будут строки `provider_factory: this=... vtable=... vtbl_rva=... slot_rva=...` -> этот RVA есть vtable RV-провайдера. Сравнить с базой `CSessionCreateOperation` (статически ~0x11523fa8), чтобы найти vtable LAN-провайдера для форса.
+

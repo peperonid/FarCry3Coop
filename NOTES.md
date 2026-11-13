@@ -4439,3 +4439,19 @@ Verdict on B': feasible in PRINCIPLE but NOT a flag flip. The netcode has a non-
 
 Blocker for the exact detour: RTTI is stripped in this build (no `.?AV...` names), so the provider-construction switch (where the controller chooses base vs `_RdV`, driven by `NetEngineType`) is not reachable by name xref. Best next step is a runtime logging detour on the provider virtual factory (`this->vtable[+0x14]`, i.e. the `call edx` at `0x11275e7e`) and/or dumping `esi`'s vtable at Host, to (a) capture the RV provider vtable, (b) find the base/LAN provider vtable (compare to the `CSessionCreateOperation` base), and (c) force-rewrite `esi`'s vtable pointer to the LAN provider. That is a shim change + one Host run (owner UI).
 
+
+
+### Session 28as - shim provider-factory call-site probe added (FC3COOP_HOOK_PROVIDER); run the real host path to capture the provider vtable
+
+Implemented the 28ar next-step in `src/coop_shim/coop_shim.cpp`: a CALL-SITE hook on the polymorphic provider dispatch inside host_handler.
+
+- Site: `RVA_provider_factory_site` = 0x01275e7e (`FF D2` = `call edx`, i.e. `edx = *(this->vtable + 0x14)`), resume at `RVA_provider_factory_back` = 0x01275e86.
+- Env `FC3COOP_HOOK_PROVIDER=1`: (a) SKIPS the `host_handler` short-circuit so the REAL host path runs and reaches the dispatch, (b) installs `patch_provider_factory()`.
+- The detour is a naked trampoline: `pushad` -> `log_provider_factory(esi=this, edx=method)` -> `popad` -> re-execute the ORIGINAL `call edx` (same regs/stack) -> replay the displaced `mov ecx,[ebp-0x128]` -> `jmp dword ptr [g_provider_jmpback]` (g_provider_jmpback = g_mod + back, so ASLR-safe). The 5-byte patch covers the 2-byte `call edx` + the first 3 bytes of the following `mov ecx,[ebp-0x128]`; we skip back to +8 and re-run the whole 6-byte mov from the trampoline.
+- Safety: before patching, verifies the site bytes are `FF D2` and the displaced bytes `8B 8D`, else logs and skips (wrong module -> no crash). `log_provider_factory` wraps reads in SEH `__try`.
+- Log output: `this`, the provider vtable pointer, `vtable+0x14`, the vtable slots [0..7], and their RVAs vs module base -> lets the RV provider class vtable be identified and compared with the static non-RdV `CSessionCreateOperation`.
+
+Verified: `build_x86.bat` -> `BUILD_DONE 0`, `coop_shim.dll` 131072 B; the trampoline bytes are present in the binary (`FF D2 8B 8D D8 FE FF FF FF 25`, exactly one occurrence). `scripts/deploy_coop_shim.bat` launcher now prints a commented `rem set FC3COOP_HOOK_PROVIDER=1`. Still NOT deployed.
+
+How to capture: in `run_coop_shim.bat` uncomment `set FC3COOP_HOOK_PROVIDER=1`, deploy + run + go to Co-op -> Host. The game will STILL end at "service unavailable" (expected - the host path is real and RV-gated), but `bin/coop_shim.log` will contain `provider_factory: this=... vtable=... vtbl_rva=... slot_rva=...` -> that RVA is the RV provider vtable. Compare to the base `CSessionCreateOperation` (static 0x11523fa8 area) to locate the LAN provider vtable to force.
+
