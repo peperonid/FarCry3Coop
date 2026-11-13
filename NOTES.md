@@ -4728,3 +4728,20 @@ NEXT EXPERIMENT on THIS build (no 1.05 needed, no dev switches): with mod 262 in
 State: engine stopped; TestFC3_105 running mod-262 DLLs + our extra party-loop+mutex patches (.orig backups kept); proxy uplay_r1_loader.dll (our online-fake, now also flag-file driven) deployed; flags coop_fakeonline.flag + coop_fakeparty.flag present; run_coop_shim.bat SAFE; upc launch args currently set to the (ignored) dev switches -> clear them for normal/mod-262 play. Internal Ubisoft paths LOCAL; mod 262 + Bantila cited by name.
 
 
+
+
+### Session 28bj - mod 262 fully verified intact, but co-op still crashes in the game CRT; Ubisoft Connect has AUTO-UPDATED (its DLLs 2026-11-08) long after mod 262's patched DLLs (2024-02-27) -> the mod's Ubisoft-Connect-side patch (uplay_r14.dll) most likely broke against the new upc. This is the classic "launcher self-updated and broke the mod". Robust fix = genuine Steam 1.05 (bypasses Ubisoft Connect entirely; also honours dev switches), or downgrade/hold Ubisoft Connect to the version mod 262 targets.
+
+Owner reported the offline co-op "worked before" and now crashes on host. Crash signature (identical across our loader/DLL swaps): farcry3_d3d11.exe, faulting module MSVCR100.dll, offset 0x000026df, exception 0xc0000005 (access violation - a CRT string/mem call on a bad pointer) at co-op start. Deterministic -> not our random state.
+
+Read-only verification that mod 262 is 100% correctly installed (so our earlier proxy/patches are NOT the cause):
+- Ubisoft Game Launcher dir (C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher)\uplay_r14.dll = mod 262's byte-for-byte (SHA-256 DC6EA7E6...0F3, 4,808,512 B, 2024-02-27). NOT missing, NOT overwritten. (Owner guessed it was missing; it is present and identical.)
+- TestFC3_105\data_win32\patch.dat (212,002,032 B SHA 8797F533...) and patch.fat (8,652 B SHA C75A04DB...) = mod 262's byte-for-byte -> the co-op content (menu + levels) IS installed.
+- After reverting, TestFC3_105\bin FC3.dll/FC3_d3d11.dll + uplay_r1_loader.dll + ubiorbitapi_r2_loader.dll = mod 262's (sizes match the mod). So a fully-correct mod 262 still crashes -> cause is external/version.
+- Ubisoft Connect runtime DLLs in the launcher dir are dated 2026-11-08 (auto-update); mod 262's are 2024. uplay_r14.dll patches the upc runtime; if the upc API changed, the offline-coop hook fails -> co-op init dereferences garbage -> CRT AV.
+
+DECISION REINFORCED: obtain a genuine **Steam 1.05** (DepotDownloader depot 220241). On Steam 1.05 (Bantila's setup) the offline co-op + dev-switch host+client do NOT depend on Ubisoft Connect, so upc auto-updates cannot break them; this also restores the dev-switch path our 1.06-family build ignores. Alternative: downgrade/hold Ubisoft Connect to the build mod 262 was made for (messy, on C:, upc resists downgrade). mod 262's own newer releases may also fix new-upc support (check the Nexus page).
+
+State / reversibility: TestFC3_105\bin now = pure mod 262 (FC3 DLLs + both loaders) after reverting our proxy (our proxy kept as .bak-<stamp>; FC3 .orig = mod262 too). coop_shim not loaded (mod262 loader). single-instance mutex is back in bin (need to re-apply our mutex NOP if we later run 2 instances on this build). upc dev-switch launch args should be cleared. Everything reversible; internal Ubisoft paths LOCAL; mod 262 + Bantila cited by name.
+
+
