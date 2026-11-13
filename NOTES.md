@@ -4601,3 +4601,21 @@ Both are multi-day reverse/emulation efforts, not hooks. Also note our current h
 Recorded for future; NOT building A/D now. Recommend confirming with Bantila which layer his "1.05 LAN" actually operates at before choosing A vs D. Deploy unchanged; launcher currently probe mode (should revert to safe).
 
 
+
+
+### Session 28bd - RV guest-login probe LIVE result: co-op Host DOES send the RV/UbiAuth guest login and the async callback FIRES -> the emulation boundary is the RV/GATOR session service (route A), not the socket layer (D)
+
+Built+ran the 28bc login probe (FC3COOP_PROBE_LOGIN=1; host/join short-circuits skipped so the real co-op op runs; internet ON). Owner navigated Co-op -> Host. coop_shim.log sequence:
+- `gate -> success (LAN 127.0.0.1:9000)` (gate hook passed),
+- **`RVLOGIN-SEND this=...`** = FUN_11246b90 executed -> the RV guest login (dummy creds UbiDummyPwd) was actually SENT, i.e. the op got past the 0x80030064/0x80030065 pre-checks and issued a real network login,
+- **`RVLOGIN-CB this=...`** = FUN_11253890 (the async login-result callback) FIRED -> a RESPONSE came back (the login round-tripped over the network).
+Then the game crashed (process gone) AFTER the callback.
+
+Interpretation (A vs D discriminator, answered): the campaign co-op Host path genuinely performs a RendezVous/UbiAuthentication login exchange with the service and receives a callback -> the flow reaches and talks to the UbiAuth/RV network layer. So the right emulation target is the **RV/GATOR session service** (route A), not full socket-layer emulation (D). The crash is AFTER the callback, i.e. downstream (deeper RV session ops and/or our other hooks ticket_*/gate), NOT the login itself.
+Not yet known: whether the callback reported ACCEPT (status>=0 -> proceed to RV session ops, which is consistent with the downstream crash) or REJECT (status<0 -> 0x8001000b error, no crash). The crash (not a clean error) is weak evidence the login PROCEEDED past reject (accept), but must be confirmed.
+
+NEXT (refine, not yet done): (1) capture the RVLOGIN status = the return of FUN_11210df0 inside the callback (log eax scoped to the CB), to get accept-vs-reject definitively; (2) isolate the crash: run the probe with the other hooks (ticket_validate/ticket_prepare) DISABLED to see if the post-callback crash is our hook interference vs the game's own RV session op. Both are small shim changes.
+
+Probe build = coop_shim.dll 134656B (src/coop_shim/coop_shim.cpp) with env FC3COOP_PROBE_LOGIN + patch_entry_n (6-byte entry displacement). Deployed to TestFC3_105/bin; launcher currently PROBE_LOGIN mode. Game not running. Internal Ubisoft addresses stay LOCAL.
+
+
