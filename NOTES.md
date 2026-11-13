@@ -4635,3 +4635,31 @@ DECISION / recommendation to owner: (1) PAUSE the crash-chasing micro-probes (th
 Shim: build coop_shim.dll 136192B (src/coop_shim/coop_shim.cpp) adds FC3COOP_NO_TICKET + RVLOGIN-STATUS call-site capture (E8 site 0x112538bc -> re-call FUN_11210df0, log eax, resume). Launcher reverted to SAFE (FC3COOP_SHIM=1 only) at end of session; game not running.
 
 
+
+
+### Session 28bf - PIVOT from PR #1: Bantila's method is command-line dev-launch switches (session type 3, no Ubisoft) + patch_dll.py, and it reaches join but freezes at the co-op lobby - the SAME downstream wall we hit. This is a far cheaper route than GATOR emulation; the project target shifts to the local dev-session path + solving the frozen lobby.
+
+Checked PR #1: Bantila has not replied (0 comments/reviews from him; his last repo activity 2026-10-25). But his own last commit documents the whole method, so no need to wait - read it from his public repo.
+
+HIS METHOD (from Bantila/FarCry3Coop NOTES.md 2026-10-25 + scripts/launch_105.ps1 + scripts/patch_dll.py):
+- Dev quick-launch parsed by FUN_10652061 (1.05; caller 0x10652215): `-host` -> FUN_106518ba, `-client` -> FUN_10651d10, also `-wait -quickmatch`.
+- Host needs `-login <name>`; reads `-host <map>`, mode flag `-coop` (also -deathmatch/-domination/...), `-sessionuid`, `-dedicated`, etc. **Session type = 3 without `-online` (the same LOCAL type as the "Local Coop" playlist); 2 with `-online`.** This is the local, no-Ubisub-services path my menu-driven static analysis (join_handler/host_handler) never reached.
+- Client needs `-login <name>` and `-ip <address>`; `-online` adds `-password`.
+- Launch the ENGINE directly: `farcry3_d3d11.exe -host coop_vidar -login Host -coop` / `farcry3_d3d11.exe -client -login Guest -ip <adapter-IP> -coop` (bypasses the Uplay DRM launcher that hands off to the engine). Co-op maps: coop_vidar/skadi/freyja/huginn/sleipnir/fenrir.
+- patch_dll.py (applies to 1.05 AND 1.06; his selftest asserts the sites exist on the 1.06 install): (1) NOP the "insufficient players" end-session fn (located via loc-id table 167676/167677/167678 = ..._END_OF_GAME_INSUFFICIENT_PLAYERS); (2) skip the Uplay party-member loop (`UPLAY_PARTY_GetFullMemberList` is dead on modern Ubisoft Connect -> reads garbage; patch `jbe`->`jmp` 0x76->0xEB); (3) remove the single-instance mutex (`OpenMutexA` `jnz`->6 NOPs) so two copies run.
+- Host binds UDP **9000** on the first adapter; client **9001**.
+
+HIS RESULT (as far as it got): host loads coop_vidar, client joins, then **both show an empty dark panel, picture freezes, input dead** (not a hang - threads keep running). He did NOT reach playable co-op either. His suspects: a lobby screen waiting on missing online services; test-only multimain.feu from mod 262 breaking the net menu; needs RE of the main-thread stack (sample addresses 0x10338ad4, 0x102f1b1d, 0x103e07db, 0x1040aaa3, 0x10327bbd).
+
+READ-ONLY VERIFY on OUR 1.06 (TestFC3_105/bin, via scripts/patch_dll finders; local/scratch/probe_bantila_sites.py):
+- party-loop `jbe` present: FC3.dll 0x10622c7a, FC3_d3d11.dll 0x1077e1df (NOT yet patched in our copy).
+- instance-mutex `jnz` present: FC3.dll 0x100041bb, FC3_d3d11.dll 0x10004092 (NOT yet patched).
+- end-session call sites = **0** in our copy -> already NOPed (the solo262 loader already applied that patch), i.e. the "insufficient players" end is already neutralized here.
+
+STRATEGIC CONSEQUENCE: the GATOR-emulation plan (docs/coop-gator-emulation-plan.md) is the hard way to do something there may be a shortcut for. Bantila's dev-launch local session (type 3) bypasses RV/GATOR entirely and uses the engine's own storm::echo. The remaining wall for BOTH efforts is now concrete and identical: **the frozen co-op lobby after a successful local join**, probably a lobby/menu screen waiting for an online-service callback that never arrives. NEW TARGET = reproduce that on 1.06 and RE why the lobby blocks (and whether it is UI-wait vs a missing result-event).
+
+NEXT (planned): (1) make a patched 1.06 DLL copy (party-loop jbe->jmp + mutex jnz NOP; end-session already done) in the working copy, keep originals; (2) reproduce Bantila's recipe on 1.06 by launching farcry3_d3d11.exe directly with the dev switches (risk: Ubisoft Connect DRM may refuse a direct engine launch - differs from Bantila's Steam 1.05); (3) if it freezes like his, RE the main-thread freeze addresses to find what the lobby waits on. This needs the owner's hands for the two-instance UI observation.
+
+Internal Ubisoft paths stay LOCAL; Bantila's method is cited to his public repo with attribution.
+
+
