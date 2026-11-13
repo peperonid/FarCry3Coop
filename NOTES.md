@@ -4511,3 +4511,20 @@ Cost assessment for the two offline shapes:
 CONCLUSION / PARK: static architecture of the FC3 1.06 PC online/co-op layer is COMPLETE and documented (28av/28aw). Offline campaign co-op is architecturally hard-gated on a live or fully-emulated Ubisoft online session-manager; no LAN path exists. The decision to invest in (A)/(A'') is a cost call for the owner, and the cheapest information is Bantila's answer to the posted PR #1 question (comment 6851368690): if he stubs this exact gate, his stub reveals the MINIMAL manager interface to fake and collapses the search. Recommendation: WAIT for that reply before spending on emulation. Deployment unchanged; launcher still has FC3COOP_HOOK_PROVIDER=1 (deploy resets to commented). No further changes made.
 
 
+
+
+### Session 28ax - path A'' survey tool: online-session-manager vtable tracer built (FC3COOP_TRACE_MGR) + deployed; offline run procedure documented
+
+Owner chose to evaluate path A'' (minimal fake online session-manager). Since the gate `[0x11e42c90]` (RVA `0x1E42C90`) is NULL offline, its methods are never called there, so the survey must run during a NORMAL Ubisoft online login (FC3COOP_FAKE_ONLINE OFF) when the real manager is created and used.
+
+Built a runtime vtable tracer in the shim (env `FC3COOP_TRACE_MGR=1`):
+- `mgr_tracer_thread` polls `*(base+0x1E42C90)` (only memory reads + Sleep) until the manager + its vptr are stable across two polls (~500ms apart, up to ~30 min).
+- Reads the vtable and, for each slot whose value is a code pointer inside the module ([base, base+SizeOfImage)), replaces it with a generated stub: `pushad; push imm8 i; call mgr_log_slot; add esp,4; popad; jmp dword ptr [&g_mgr_orig[i]]`. This is stack-neutral and thiscall-`ecx`-preserving (tail call to the original), so the game keeps working while it is observed.
+- `mgr_log_slot(i)` increments a per-slot counter and logs `MGR slot[+0x<off>] hit#<n> (method_rva=0x...)` for the first 3 hits of each slot. The SET of slot offsets that get hit = the set of manager methods the game actually calls = the minimal interface a fake manager must implement (path A'').
+- vtable page made RW via VirtualProtect only for the patch window, then restored; stubs live in a VirtualAlloc RWX pool. Guarded by __try for the manager/vptr reads. Image size captured from the PE header at init.
+
+Build: coop_shim.dll x86 BUILD_DONE 0, 133632 B (src/coop_shim/coop_shim.cpp). Deployed to `H:\FarCryCoop\TestFC3_105\bin` via deploy_coop_shim.bat (timestamped backups). Launcher `run_coop_shim.bat` rewritten to TRACER mode: `FC3COOP_SHIM=1 FC3COOP_TRACE_MGR=1`, FAKE_ONLINE/HOOK_PROVIDER commented (FAKE_ONLINE MUST stay off so the real login creates the manager).
+
+RUN (owner): (1) make sure Ubisoft Connect is logged in; (2) run run_coop_shim.bat; (3) at the main menu online features initialize (the manager should appear -> the tracer logs `mgr=... vtable=... patched N slots`); (4) play a minute and go Co-op -> Host to force the co-op code to touch the manager too; (5) close the game and read `bin\coop_shim.log` lines `MGR slot[+0x..] hit#..` -> send to agent. Expected outcomes: (a) `patched N slots` + a spread of hits => we get the concrete manager interface to size the fake; (b) `manager never created (offline/no login)` => confirms even the game's own session-manager requires the live Ubisoft login (strengthens the 28av hard-gate conclusion). This is read/observe-only; no faking yet.
+
+

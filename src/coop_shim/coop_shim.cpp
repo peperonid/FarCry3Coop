@@ -74,6 +74,12 @@ enum {
 // Online-enable global read by FUN_11245090 ("return DAT_11f07e48"). Setting it to 1 lets the gate precondition pass.
 #define RVA_online_flag_global 0x01f07e48
 
+// Master gate (NOTES 28av/28aw): the game-wide online session-manager singleton, abs 0x11e42c90, read ~250x and the
+// first thing the co-op Host action 0x10443663 checks (bails if null). Offline it stays null. The path A'' tracer
+// (FC3COOP_TRACE_MGR) waits for it to be populated during a NORMAL online login, then instruments its vtable to
+// record which methods (slot offsets) the game actually calls -> the minimal interface a fake manager must implement.
+#define RVA_online_mgr_global 0x01e42c90
+
 // Provider-factory probe site (NOTES 28ar): inside host_handler FUN_11275d90, the session provider is dispatched
 // polymorphically via 'mov edx,[esi]; mov edx,[edx+0x14]; call edx'. Hook the 'call edx' site to log the provider
 // object 'esi' + its vtable so the RV (and later LAN) provider class vtable can be identified.
@@ -87,11 +93,16 @@ enum {
 struct ShimConfig { uint32_t lan_ip; uint16_t lan_port; char shared_secret[64]; int enable; };
 static ShimConfig g_cfg = { 0x7f000001u /*127.0.0.1*/, 9000, "fc3coop", 0 }; // enable=0 => inert until configured
 static int g_hook_provider = 0; // env FC3COOP_HOOK_PROVIDER=1 -> run the REAL host path (no host short-circuit) and probe the provider vtable
+static int g_trace_mgr = 0;     // env FC3COOP_TRACE_MGR=1 -> instrument the online session-manager vtable (path A'' survey)
+static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
+static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
+static inline void logUnlock(){ InterlockedExchange(&g_logbusy,0); }
 static void load_config(void) {
   char buf[64];
   if (GetEnvironmentVariableA("FC3COOP_SHIM", buf, sizeof(buf)) > 0) g_cfg.enable = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_SECRET", buf, sizeof(buf)) > 0) { strncpy(g_cfg.shared_secret, buf, sizeof(g_cfg.shared_secret)-1); }
   if (GetEnvironmentVariableA("FC3COOP_HOOK_PROVIDER", buf, sizeof(buf)) > 0) g_hook_provider = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_TRACE_MGR", buf, sizeof(buf)) > 0) g_trace_mgr = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -276,6 +287,73 @@ static int patch_provider_factory(void) {
   return 0;
 }
 
+// ------------------------------------------------------------------ path A'' online-session-manager vtable tracer (NOTES 28ax)
+// The gate [0x11e42c90] is the manager. Offline it is null, so the survey must run during a NORMAL online login
+// (do NOT set FC3COOP_FAKE_ONLINE). Once the manager is stable, each vtable slot that is a code pointer is replaced
+// by a generated stub: pushad; push i; call mgr_log_slot; add esp,4; popad; jmp [g_mgr_orig[i]] (tail-call, stack
+// neutral, thiscall ecx preserved). We log the slot byte-offset + hit count -> the set of methods actually invoked
+// is the minimal interface a fake manager must implement.
+#define MAX_MGR_SLOTS 96
+static volatile LONG g_mgr_hits[MAX_MGR_SLOTS];
+static uintptr_t g_mgr_orig[MAX_MGR_SLOTS];
+static uintptr_t g_imgsize = 0;
+static unsigned char* g_stub_pool = 0;
+
+static void __cdecl mgr_log_slot(uintptr_t i) {
+  if (i >= MAX_MGR_SLOTS) return;
+  LONG c = InterlockedIncrement(&g_mgr_hits[i]);
+  if (c <= 3) {
+    logLock();
+    LOGF("shim: MGR slot[+0x%02x] hit#%ld (method_rva=0x%08x)", (unsigned)(i*4), (long)c,
+         g_mgr_orig[i] ? (uint32_t)(g_mgr_orig[i] - g_mod) : 0u);
+    logUnlock();
+  }
+}
+
+static DWORD WINAPI mgr_tracer_thread(LPVOID p) {
+  (void)p;
+  int seen = 0;
+  for (int iter = 0; iter < 3600; ++iter) {        // poll up to ~30 min; only memory reads + Sleep before mgr found
+    uintptr_t mgr = *(volatile uintptr_t*)VA(RVA_online_mgr_global);
+    uintptr_t vptr = 0;
+    if (mgr) { __try { vptr = *(volatile uintptr_t*)mgr; } __except (EXCEPTION_EXECUTE_HANDLER) { vptr = 0; } }
+    if (mgr && vptr) { if (++seen >= 2) break; } else seen = 0;
+    Sleep(500);
+  }
+  uintptr_t mgr = *(volatile uintptr_t*)VA(RVA_online_mgr_global);
+  if (!mgr) { logLock(); LOGF("shim: MGR tracer: manager never created (offline/no login) - nothing surveyed"); logUnlock(); return 0; }
+  uintptr_t vptr = 0;
+  __try { vptr = *(volatile uintptr_t*)mgr; } __except (EXCEPTION_EXECUTE_HANDLER) {}
+  if (!vptr) { LOGF("shim: MGR tracer: manager null vptr"); return 0; }
+  logLock(); LOGF("shim: MGR tracer: mgr=%p vtable=%p (vtable_rva=0x%08x) imgsize=0x%x", (void*)mgr, (void*)vptr, (uint32_t)(vptr - g_mod), (unsigned)g_imgsize); logUnlock();
+  g_stub_pool = (unsigned char*)VirtualAlloc(0, MAX_MGR_SLOTS * 24, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+  if (!g_stub_pool) { LOGF("shim: MGR tracer: VirtualAlloc failed"); return 0; }
+  DWORD old; VirtualProtect((void*)vptr, MAX_MGR_SLOTS * 4, PAGE_READWRITE, &old);
+  int n = 0;
+  for (int i = 0; i < MAX_MGR_SLOTS; ++i) {
+    uintptr_t fn = 0;
+    __try { fn = *(volatile uintptr_t*)(vptr + (uintptr_t)i * 4); } __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+    if (fn < g_mod || fn >= g_mod + g_imgsize) break;   // not a code pointer -> treat as end of this vtable
+    g_mgr_orig[i] = fn;
+    unsigned char* s = g_stub_pool + (size_t)i * 24; int off = 0;
+    s[off++] = 0x60;                                     // pushad
+    s[off++] = 0x6A; s[off++] = (unsigned char)i;        // push imm8 i
+    s[off++] = 0xE8;                                     // call rel32 -> mgr_log_slot
+    int32_t rel = (int32_t)((uintptr_t)&mgr_log_slot - (uintptr_t)(s + off + 4));
+    memcpy(s + off, &rel, 4); off += 4;
+    s[off++] = 0x83; s[off++] = 0xC4; s[off++] = 0x04;   // add esp,4
+    s[off++] = 0x61;                                     // popad
+    s[off++] = 0xFF; s[off++] = 0x25;                    // jmp dword ptr [&g_mgr_orig[i]]
+    { uintptr_t pp = (uintptr_t)&g_mgr_orig[i]; memcpy(s + off, &pp, 4); off += 4; }
+    FlushInstructionCache(GetCurrentProcess(), s, off);
+    *(volatile uintptr_t*)(vptr + (uintptr_t)i * 4) = (uintptr_t)s;
+    n++;
+  }
+  VirtualProtect((void*)vptr, MAX_MGR_SLOTS * 4, old, &old);
+  logLock(); LOGF("shim: MGR tracer: patched %d slots; now play online a bit + try Co-op Host, then read the log", n); logUnlock();
+  return 0;
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -301,6 +379,11 @@ static void init(void) {
   logOpen();
   HMODULE m = GetModuleHandleA("FC3_d3d11.dll");
   g_mod = (uintptr_t)(m ? m : (HMODULE)FC3_BASE_DEFAULT);
+  __try {
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)g_mod;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((unsigned char*)g_mod + dos->e_lfanew);
+    g_imgsize = nt->OptionalHeader.SizeOfImage;
+  } __except (EXCEPTION_EXECUTE_HANDLER) { g_imgsize = 0x2000000; }
   load_config();
   LOGF("shim: FC3_d3d11 base=0x%08x enable=%d\n", (uint32_t)g_mod, g_cfg.enable);
   if (!g_cfg.enable) { LOGF("shim: inert (set FC3COOP_SHIM=1 to enable)\n"); return; }
@@ -310,6 +393,10 @@ static void init(void) {
   LOGF("shim: online global DAT_11f07e48=1\n");
   install_hooks();
   LOGF("shim: hooks installed (SCAFFOLD - untested)\n");
+  if (g_trace_mgr) {
+    HANDLE h = CreateThread(0, 0, mgr_tracer_thread, 0, 0, 0);
+    LOGF("shim: MGR tracer thread started h=%p (set FC3COOP_FAKE_ONLINE OFF; just play online + try Co-op Host)", (void*)h);
+  }
 }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r) {
