@@ -4455,3 +4455,13 @@ Verified: `build_x86.bat` -> `BUILD_DONE 0`, `coop_shim.dll` 131072 B; the tramp
 
 How to capture: in `run_coop_shim.bat` uncomment `set FC3COOP_HOOK_PROVIDER=1`, deploy + run + go to Co-op -> Host. The game will STILL end at "service unavailable" (expected - the host path is real and RV-gated), but `bin/coop_shim.log` will contain `provider_factory: this=... vtable=... vtbl_rva=... slot_rva=...` -> that RVA is the RV provider vtable. Compare to the base `CSessionCreateOperation` (static 0x11523fa8 area) to locate the LAN provider vtable to force.
 
+
+
+### Session 28at - provider probe armed+installed but never fired: offline Host aborts at the GATOR login wall BEFORE FC3 host_handler; the RV-vs-LAN decision is UPSTREAM of host_handler
+
+Owner ran the FC3COOP_HOOK_PROVIDER=1 capture (pid 20892, base 0x79640000). coop_shim.log shows the probe installed correctly (`SKIP host_handler short-circuit` + `patch provider_factory @0x7a8b5e7e`) but NO `provider_factory:` lines -> the `call edx` inside host_handler `FUN_11275d90` was never reached. `uplay_api.log` for the run: only the normal startup burst (Init/PARTY_Init/GetCredentials/GetCdKeys/IsConnected polls/ACH) then `UPLAY_Quit`/`UPLAY_Release`; the Host click produced NO new party/session/storm calls.
+
+Conclusion (refines 28as): offline, the Co-op -> Host action is aborted by the Uplay online-service login wall (GATOR, 28ao) BEFORE control reaches the FC3 host/session-provider code. `host_handler` `FUN_11275d90` (and `join_handler`) themselves BUILD RendezVous objects - they ARE the online host path, and the menu never reaches them when the online pre-check fails. So swapping the provider at `host_handler` is unreachable without first passing the online login (Route A), and the probe cannot capture the vtable via the Host button offline.
+
+Corrected route: the real RV-vs-LAN decision is UPSTREAM of host_handler - at the co-op Host menu/FCX code that on Host-click first checks online state and picks the RendezVous path (which then leads to host_handler / the GATOR call). That upstream predicate/branch is the lever to force LAN (or to bypass the online pre-check), NOT host_handler. Next static step: find that Host-click decision point (callers leading to FUN_11275d90's wrapper 0x11275f40, and the online-state check that raises GATOR SERVICE_UNAVAILABLE on the co-op path) and identify where a non-RdV/base provider could be selected before the RV pre-check. Probe build stays (harmless; env-gated). NOT deployed further.
+
