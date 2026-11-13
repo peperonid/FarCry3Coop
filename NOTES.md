@@ -4581,3 +4581,23 @@ The ONLY realistic remaining engineering path = IN-GAME BRIDGE at the STORM::ECH
 DEPLOY STATE: launcher reverted to safe (FC3COOP_SHIM=1, no fake/trace). Shim 134144B in bin. Game NOT running.
 
 
+
+
+### Session 28bc - op-bridge hunt: campaign co-op join op is HARDWIRED to UbiAuth-login + RV (no engine-type parameter); "force NetEngineType=LAN" is not a thing here
+
+Tried to find a "force storm::echo LAN" switch on the real co-op path (owner asked). Chain: join_handler FUN_1127a1d0 -> precondition FUN_1127a0d0 (0x1127a221) -> joinservice via FUN_11210af0 ("RendezVousGuestBackEndServices") -> **FUN_11279f90 = the join-op factory** (called 0x1127a293), then the op is started via virtual `vtable[+4]` at 0x1127a2a6.
+
+Disassembly of FUN_11279f90 shows the op is built for RV/UbiAuth with NO engine/net-type parameter to flip:
+- string `'h7fyctiuucf'` (0x116ced8c) = the RendezVous application/gateway key used for the auth,
+- login with DUMMY credentials `'DummyUbiUser@quazal.com'` (0x116ceda4) / `'UbiDummyPwd'` (0x116ced98),
+- the op sets `[esi]=0x116cf86c` (its active vtable) and `[ebp-0x14]='JobUbiAuthenticationLogin::PrepareLogin'` (0x116cee88), then starts via FUN_1121c8f0.
+So the co-op join op's FIRST step is a **UbiAuthentication Login job** (with placeholder creds), then a RendezVous join. There is no NetEngineType/param[0xe] branch inside this op that selects LAN vs Online - the op is RV/UbiAuth by construction. The storm::echo LAN session ops (base CSessionCreateOperation / CSessionSearchIPOperation) are a SEPARATE op family the co-op menu never builds.
+
+Implication: a one-field "force LAN" hook does not exist on this path. Options to get LAN/Ubisoft-free co-op, all large:
+(A) Keep the real path but rely on real UbiAuth (the dummy creds suggest UbiAuthentication may accept a guest login) + then the only live dependency is the RV/GATOR session service -> focus a fake/redirect on JUST GATOR.
+(D) In-game bridge at the SOCKET layer: the RV stack is statically linked (BerkeleySocketDriver, 28au); intercept/redirect its sockets to a local relay or a fake RV/GATOR server so the RV op-cascade completes against us instead of Ubisoft.
+Both are multi-day reverse/emulation efforts, not hooks. Also note our current hk_join short-circuits join_handler (returns 1, builds NO op) so no session forms at all - correct for probing, wrong for shipping.
+
+Recorded for future; NOT building A/D now. Recommend confirming with Bantila which layer his "1.05 LAN" actually operates at before choosing A vs D. Deploy unchanged; launcher currently probe mode (should revert to safe).
+
+
