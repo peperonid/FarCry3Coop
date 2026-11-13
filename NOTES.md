@@ -4528,3 +4528,17 @@ Build: coop_shim.dll x86 BUILD_DONE 0, 133632 B (src/coop_shim/coop_shim.cpp). D
 RUN (owner): (1) make sure Ubisoft Connect is logged in; (2) run run_coop_shim.bat; (3) at the main menu online features initialize (the manager should appear -> the tracer logs `mgr=... vtable=... patched N slots`); (4) play a minute and go Co-op -> Host to force the co-op code to touch the manager too; (5) close the game and read `bin\coop_shim.log` lines `MGR slot[+0x..] hit#..` -> send to agent. Expected outcomes: (a) `patched N slots` + a spread of hits => we get the concrete manager interface to size the fake; (b) `manager never created (offline/no login)` => confirms even the game's own session-manager requires the live Ubisoft login (strengthens the 28av hard-gate conclusion). This is read/observe-only; no faking yet.
 
 
+
+
+### Session 28ay - A'' survey RESULT: manager interface = only 16 called slots (many trivial accessors); co-op Host uses join_handler not host_handler; only hard gate is [0x11e42c90]!=0 -> try fake-zeroed manager (FC3COOP_FAKE_MGR)
+
+Ran the 28ax tracer live (real Ubisoft login, FC3COOP_FAKE_ONLINE off). Manager created: `mgr=488748C0 vtable_rva=0x01527870` (an RV object, near CSessionCreateOperation_RdV 0x11527a78), **46 vtable slots**. Owner navigated online menu + Co-op -> Host.
+
+Survey result - exactly **16 distinct slots are ever called** (capped 3 hits each):
+`+0x0c,+0x1c,+0x24,+0x28,+0x2c,+0x30,+0x48,+0x4c,+0x50,+0x54,+0x70,+0x8c,+0x90,+0x94,+0x98,+0xa0`. Disassembly of several shows MANY are trivial accessors: `+0x28`(+0x4c) = `mov al,1; ret`; `+0x48` = `xor al,al; ret`; `+0x0c` = `return (ecx? &this+0x280 : 0)`; `+0x24`(0x1044a600) = `mov eax,[ecx+0x2b0]; ret`; `+0xa0`(0x1044a607) = `mov al,[ecx+0x2d5]; ret`. Only a couple (e.g. `+0x1c` 0x10449fe2) contain real logic (calls into this->+0x280 sub-object). So the manager is a large object (~0x2d8+ bytes with sub-objects at +0x110,+0x280,+0x2b0) but the co-op/menu hot path mostly hits cheap field getters.
+
+NEW FACT: the shim `host_handler` hook (RVA 0x1275d90) NEVER fired, while `gate` fired 4x and `join_handler` (0x127a1d0) fired 4x. So the real Co-op -> Host menu path goes through the JOIN-side gate+handler (FUN_1127a1d0 / join_online flavor), NOT host_handler FUN_11275d90. (Corrects the 28ar/28as focus on host_handler as the host entry.)
+
+STRATEGIC SYNTHESIS: with a real login the manager exists and the co-op action passes its `cmp [0x11e42c90],0` gate and reaches our hooks (gate/join fired). Offline it dies ONLY because the manager is null. Therefore the tractable A'' experiment is a FAKE manager: allocate a zeroed ~0x400-byte object + a vtable whose slots return benign values (safest: copy the real vtable's 46 original pointers - the cheap getters then just read the zeroed fields; override the few that would deref null sub-objects), and set `[0x11e42c90] = &fake_mgr` (env `FC3COOP_FAKE_MGR=1`). If the gate then passes and our existing LAN hooks (gate/host/join/ticket) carry the session, campaign co-op may form over loopback storm::echo WITHOUT any Ubisoft server. Risk: the non-trivial slots (+0x1c etc.) deref sub-pointers that are null -> may need stubbing per-crash (iterate). This is the next build. Game pid 1860 was left running for the owner.
+
+
