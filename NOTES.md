@@ -4482,3 +4482,16 @@ REALISTIC remaining route = the "in-game bridge" pattern (hub playbook in-game-b
 
 NEXT staged step: locate `CFCXGatorLoginCheckOperation`'s vtable/execute (first op in the cascade) as the earliest fakeable point, and inspect what result-event it must post. NOT deployed further; probe build (28as) stays env-gated.
 
+
+
+### Session 28av - master gate identified: online session-manager singleton 0x11e42c90 gates ALL online incl. co-op; null offline; online-layer static RE is COMPLETE
+
+Host-action `0x10443663` (co-op Host) has a single caller `0x10442046`. Its first gate is `cmp [0x11e42c90],0; je bail` (28au). `0x11e42c90` is read 271x across `.text` (a1/8b 0d/8b 3d forms) = the game-wide ONLINE SESSION MANAGER singleton, the master gate for every online feature (solo-online + co-op host/join all read it).
+
+Where it is created (write site): `0x10420a77` does `mov ecx,[0x11e42a90]; call 0x10418a3d; mov edx,[eax]; call [edx+4]; mov [0x11e42c90],eax` - i.e. the manager = the result of a POLYMORPHIC vtable[+4] call on the object held in global `0x11e42a90`, performed during online initialization. Offline the online backend is not connected, that call yields nothing usable, `0x11e42c90` stays null, and every online path (co-op host action included) short-circuits to its bail - which is exactly the observed behaviour (no session/party calls on Host, provider probe never fires).
+
+This is the hard DRM/online boundary: to run campaign co-op offline you must make `[0x11e42c90]` a VALID, initialized online session-manager. Two shapes: (A) make the real online manager initialize = complete a real/emulated Uplay+RendezVous login (28ao credential-payload wall); (A'') synthesize a fake manager object implementing the full vtable surface that the 271 call sites expect (very large, brittle). There is NO LAN/online co-op entry upstream of this gate (28aq/28au: RV-only backends, no LAN backend). All cheap levers are exhausted and the online-layer static analysis is complete: FC3 1.06 PC campaign co-op is architecturally hard-gated on a live/emulated Ubisoft online session-manager, with no LAN path.
+
+DECISION FORK for the owner (agent cannot decide cost): (1) invest in (A)/(A'') heavy emulation; (2) Bantila reality-check - if his "1.05 LAN" campaign co-op truly works, either his build differs from 1.06 PC or he patched this exact `[0x11e42c90]` gate to a stub manager; ask him precisely which, that answer likely collapses the search; (3) pause. No further deployment; probe build (28as) stays env-gated, launcher still has FC3COOP_HOOK_PROVIDER=1 (deploy resets to commented).
+
+
