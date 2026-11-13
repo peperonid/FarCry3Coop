@@ -4682,3 +4682,25 @@ These patches are benign for normal single-player / normal play (party-loop + en
 Internal Ubisoft paths stay LOCAL; Bantila's method cited to his public repo.
 
 
+
+
+### Session 28bh - Bantila dev-switch route test on OUR build: FAKE_ONLINE makes the game boot cleanly to the main menu (no more "Far Cry 3 service unavailable"), BUT `-host coop_vidar -coop` is IGNORED - the game goes to the normal menu, not a co-op host session. This reproduces the hub's 2026-11-01 finding "the 1.06 retail build does not honour custom command lines"; the dev-switch shortcut needs a GENUINE Steam 1.05 (depot 220241) which this PC does not have. Version identity of TestFC3_105 is UNRESOLVED: its DLLs do not match the hub's recorded 1.05 OR 1.06 hashes.
+
+Live tests (owner observed the windows):
+- Direct `farcry3_d3d11.exe -host coop_vidar -login Host -coop -skipintro -quickstartup` (proxy loaded, online-fake OFF): game shows modal **"ОШИБКА: Служба Far Cry 3 недоступна"** (the engine's own Uplay/RV init needs the dead Far Cry 3 service). The coop shim did NOT load (no coop_shim header) because the proxy only LoadLibrarys coop_shim when FC3COOP_SHIM=1 (uplay_proxy.cpp:124); FC3_d3d11.dll DOES import uplay_r1_loader.dll (26 UPLAY_*), so the proxy itself is active.
+- Same but **FC3COOP_FAKE_ONLINE=1** (proxy online-fake on, shim left OFF): the service error is GONE - the game boots to the **normal main menu** (news feed / "Play online / Co-op offline / Intro"), RAM ~539MB, Responding. So the proxy's fake of the Uplay online-service overlapped op (slots 18/19) is enough to get past the boot check -> the game is now launchable offline to menu. BUT the **dev co-op switches did nothing** - no host session, no coop_vidar load.
+
+VERSION IDENTITY (unresolved, flag):
+- TestFC3_105 bin\FC3_d3d11.dll.orig = 30,057,832 B, SHA-256 14FC98FC3CCB401C8A9FDCD2..., MD5 46BCC0975905088D1FA4DF94B57B703D. bin\FC3.dll.orig = 29,994,856 B, MD5 5FF0453315573CE7B64D9D23FDE46F5F.
+- The hub (coop-anything/games/far-cry-3/README.md) records Ubisoft Connect 1.06 FC3_d3d11.dll = SHA-256 e541594e... (40,869,416 B) and FC3.dll 40,720,424 B; and 1.05 FC3.dll 40,720,424 B. Our ~30MB files match NEITHER. In-game banner shows "V1.05". Our Bantila patch-site addresses (mutex 0x100041bb/0x10004092, party-loop, end-session loc-id table) DO match Bantila's 1.05 notes exactly, BUT the hub notes 1.05/1.06 share the early start-up code, so address match does not prove 1.05.
+- CONCLUSION: the folder name + banner + Bantila address-match suggest 1.05, but the file size/hash and the OBSERVED switch-ignoring behaviour match the hub's "1.06 retail ignores command lines." Do NOT label this build confidently; the decisive behaviour is: **custom command-line switches are not honoured on this install.**
+
+WHY BANTILA'S DEV SWITCHES DON'T WORK HERE: the hub measured (2026-11-01/02) that the 1.06 retail build does not honour custom command lines, and that the re-exec that would forward `-host/-client` is done by the launcher (farcry3.exe) and is blocked in retail 1.06; the game DLLs keep the switch-handler code but the retail build does not act on them. Our live test confirms: passing the switches to farcry3_d3d11.exe directly produced only the normal menu. Bantila got the host to load coop_vidar because he runs a **genuine Steam 1.05** (DepotDownloader depot 220241, manifest 7362101836779063707), built by his build_testgame.ps1.
+
+CONSEQUENCE / decision point for the owner: to actually exercise Bantila's dev-session route we must obtain a **real 1.05** (Steam depot 220241) - a download the owner has to run (hub scripts/build_testgame.ps1 -Version 1.05 documents it); this PC has no 1.05. Alternative (cheaper, uncertain): patch THIS build so the retail launcher re-exec / switch handling is honoured (the hub already mapped the 1.06 launcher plumbing) - but the hub measured retail 1.06 deliberately ignores them, so this is reverse-engineering the gate-out, not just relaunching.
+
+POSITIVE CARRIED OVER: FC3COOP_FAKE_ONLINE=1 now lets the Ubisoft Connect build boot to the main menu offline (no service error) - a reusable capability (offline single-player works; the RV/GATOR co-op wall is unchanged).
+
+State: engine stopped; TestFC3_105 DLLs patched (party-loop+mutex, .orig backups); run_coop_shim.bat SAFE; new H:\FarCryCoop\TestFC3_105\run_dev_host_fake.bat (dev args + FAKE_ONLINE). Giant uplay_api.log removed to free disk. Internal Ubisoft paths stay LOCAL; Bantila method cited to his public repo.
+
+
