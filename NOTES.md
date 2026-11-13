@@ -4704,3 +4704,27 @@ POSITIVE CARRIED OVER: FC3COOP_FAKE_ONLINE=1 now lets the Ubisoft Connect build 
 State: engine stopped; TestFC3_105 DLLs patched (party-loop+mutex, .orig backups); run_coop_shim.bat SAFE; new H:\FarCryCoop\TestFC3_105\run_dev_host_fake.bat (dev args + FAKE_ONLINE). Giant uplay_api.log removed to free disk. Internal Ubisoft paths stay LOCAL; Bantila method cited to his public repo.
 
 
+
+
+### Session 28bi - Synthesis: the offline co-op the owner already runs IS Nexus "mod 262 Solo Offline Coop"; mod 262 = patched loaders (the very Uplay layer our proxy reimplements) + content + end-session NOP, and it only makes co-op startable ALONE (solo). So the host/offline-session capability already exists on this build; the genuinely unsolved frontier is getting a SECOND human to JOIN a local/private co-op session over LAN - exactly where Bantila froze. Multi-human offline join is what nobody has solved.
+
+Owner pointed at H:\FarCryCoop\Downloads\patch_solo_offline_coop_vanilla-262 (a Nexus mod). Its contents:
+- bin\FC3.dll, FC3_d3d11.dll, ubiorbitapi_r2_loader.dll, uplay_r1_loader.dll (PATCHED loaders + game DLLs).
+- data_win32\patch.dat, patch.fat (content: adds the "start co-op alone / offline" menu + 10s countdown + coop playlists).
+- READ.MD feature list: "Able to start alone in Private Session (Coop Game)"; "Able to play alone in Coop game mode (Private Session & Public Session)"; **"Able to start & play alone in Coop game mode (Local Session)"**; "10 second countdown before game started". Dependencies: Increase Memory Limit + The Dependencies (ubiorbitapi_r2_loader.dll, uplay_r1_loader.dll). Mod is "based on version 1.05 patch".
+
+WHY THIS EXPLAINS OUR OBSERVATIONS:
+- Our bin\FC3.dll had end-session call sites = 0 (already NOPed) but party-loop still 0x76 (unpatched) -> that is EXACTLY mod 262's DLL (mod 262 NOPs end-session; the party-loop jbe->jmp and single-instance mutex removal are Bantila's ADDITIONS on top, per patch_dll.py selftest). So the running DLLs on this PC are mod 262's.
+- The "offline co-op / игра вне сети" menu the owner sees = mod 262's content patch, NOT a native feature.
+- mod 262's loader patch (uplay_r1_loader.dll + ubiorbitapi_r2_loader.dll) is the SAME idea as our uplay_proxy (fake the Uplay/RV online service so the co-op init proceeds offline). Our proxy + FAKE_ONLINE + party/mutex patches are effectively reimplementing mod 262's approach for our build.
+- The on-screen "V1.05" banner is consistent with mod 262 being a 1.05-targeted mod whose DLLs are in use.
+
+REFRAMED FRONTIER: mod 262 (and our proxy) already get a co-op session to START offline - but only for ONE (solo). Two things remain, and only the second is unsolved:
+1. (Solved by mod 262) Start a co-op session offline / local session, solo.
+2. (UNSOLVED - the real target) Get 2-4 HUMAN players to join that local/private co-op session over LAN. This is precisely Bantila's host+client test that froze on the empty co-op lobby. The mod author only ever made it solo.
+
+NEXT EXPERIMENT on THIS build (no 1.05 needed, no dev switches): with mod 262 installed, start a co-op game as HOST from the menu (Private/Local session), then launch a SECOND game instance and try to JOIN it over LAN. Characterize where it stops (never reaches lobby? lobby present but join fails? the Bantila freeze?). That tells us whether this build behaves like Bantila's clean 1.05 (host+client reach a frozen lobby) or differently, and is the actual multi-human problem. To run a 2nd instance we already NOPed the single-instance mutex; the client needs an IP the host bound (UDP 9000 on first adapter).
+
+State: engine stopped; TestFC3_105 running mod-262 DLLs + our extra party-loop+mutex patches (.orig backups kept); proxy uplay_r1_loader.dll (our online-fake, now also flag-file driven) deployed; flags coop_fakeonline.flag + coop_fakeparty.flag present; run_coop_shim.bat SAFE; upc launch args currently set to the (ignored) dev switches -> clear them for normal/mod-262 play. Internal Ubisoft paths LOCAL; mod 262 + Bantila cited by name.
+
+

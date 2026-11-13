@@ -1186,6 +1186,11 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         char* b = strrchr(exe, 92); if (b) strcpy(g_exe, b + 1);
         char self[MAX_PATH]; GetModuleFileNameA(h, self, MAX_PATH);
         lstrcpynA(g_dir, self, MAX_PATH); { char* d = strrchr(g_dir, 92); if (d) d[1] = 0; }
+        // Flag-file fallbacks so the fake modes work even when the env var does not propagate through
+        // the Ubisoft Connect launcher (upc started before setx keeps a stale child environment).
+        // Files live next to the proxy (bin); absence -> normal online behaviour (reversible by deleting).
+        if (!g_fakeonline) { char fl[MAX_PATH]; lstrcpynA(fl, g_dir, MAX_PATH); lstrcpynA(fl + strlen(g_dir), "coop_fakeonline.flag", MAX_PATH - (int)strlen(g_dir)); if (GetFileAttributesA(fl) != INVALID_FILE_ATTRIBUTES) g_fakeonline = 1; }
+        if (!g_fake)       { char fl[MAX_PATH]; lstrcpynA(fl, g_dir, MAX_PATH); lstrcpynA(fl + strlen(g_dir), "coop_fakeparty.flag",  MAX_PATH - (int)strlen(g_dir)); if (GetFileAttributesA(fl) != INVALID_FILE_ATTRIBUTES) g_fake = 1; }
         char* s = strrchr(self, 92);
         if (s) sprintf(s + 1, "real%suplay_r1_loader.dll", BSB);
         g_real = LoadLibraryExA(self, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);

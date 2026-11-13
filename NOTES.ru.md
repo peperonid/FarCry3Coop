@@ -4403,3 +4403,27 @@ READ-ONLY ПРОВЕРКА на НАШЕМ 1.06 (TestFC3_105/bin, через fin
 Состояние: движок остановлен; DLL TestFC3_105 пропатчены (party-loop+mutex, бэкапы .orig); run_coop_shim.bat в SAFE; новый H:\FarCryCoop\TestFC3_105\run_dev_host_fake.bat (dev-арги + FAKE_ONLINE). Гигантский uplay_api.log удалён для места. Внутренние пути Ubisoft остаются ЛОКАЛЬНЫМИ; метод Bantila цитируется по его публичному репо.
 
 
+
+
+### Сессия 28bi - Синтез: офлайн-кооп, который владелец уже запускает, - это Nexus "mod 262 Solo Offline Coop"; mod 262 = патченые лоадеры (тот самый слой Uplay, что наш прокси переимплементирует) + контент + NOP end-session, и он делает кооп запускаемым ЛИШЬ ОДНОМУ (solo). Значит возможность поднять офлайн-сессию уже есть на этой сборке; по-настоящему нерешённый рубеж - заставить ВТОРОГО человека ПРИСОЕДИНИТЬСЯ к локальной/приватной ко-оп-сессии по LAN, - ровно там, где застыл Bantila. Мульти-игроковый офлайн-join не решил никто.
+
+Владелец указал на H:\FarCryCoop\Downloads\patch_solo_offline_coop_vanilla-262 (Nexus-мод). Содержимое:
+- bin\FC3.dll, FC3_d3d11.dll, ubiorbitapi_r2_loader.dll, uplay_r1_loader.dll (ПАТЧЕНЫЕ лоадеры + DLL игры).
+- data_win32\patch.dat, patch.fat (контент: добавляет меню "запустить кооп одному / офлайн" + 10-сек отсчёт + ко-оп плейлисты).
+- Фичи из READ.MD: "Able to start alone in Private Session (Coop Game)"; "Able to play alone in Coop game mode (Private Session & Public Session)"; **"Able to start & play alone in Coop game mode (Local Session)"**; "10 second countdown before game started". Зависимости: Increase Memory Limit + The Dependencies (ubiorbitapi_r2_loader.dll, uplay_r1_loader.dll). Мод "based on version 1.05 patch".
+
+ПОЧЕМУ ЭТО ОБЪЯСНЯЕТ НАШИ НАБЛЮДЕНИЯ:
+- В нашем bin\FC3.dll end-session вызовов = 0 (уже NOP), но party-loop всё ещё 0x76 (не патчен) -> это В ТОЧНОСТИ DLL от mod 262 (mod 262 делает NOP end-session; правки party-loop jbe->jmp и снятие single-instance mutex - это ДОБАВКИ Bantila поверх, по patch_dll.py selftest). Значит рабочие DLL на этом ПК - от mod 262.
+- Меню "офлайн кооп / игра вне сети", которое видит владелец, = контент-патч mod 262, НЕ нативная функция.
+- Патч лоадера mod 262 (uplay_r1_loader.dll + ubiorbitapi_r2_loader.dll) - та же идея, что наш uplay_proxy (фейк Uplay/RV online-сервиса, чтобы ко-оп-инициализация шла офлайн). Наш прокси + FAKE_ONLINE + патчи party/mutex по сути переимплементируют подход mod 262 под нашу сборку.
+- Баннер "V1.05" согласуется с тем, что mod 262 - 1.05-мод, чьи DLL используются.
+
+ПЕРЕСМОТРЕННЫЙ РУБЕЖ: mod 262 (и наш прокси) уже заставляют ко-оп-сессию СТАРТОВАТЬ офлайн - но только ОДНОГО игрока (solo). Остаётся два, и только второе нерешено:
+1. (Решено mod 262) Запустить ко-оп-сессию офлайн / local session, соло.
+2. (НЕ РЕШЕНО - настоящая цель) Заставить 2-4 ЧЕЛОВЕКА присоединиться к этой локальной/приватной ко-оп-сессии по LAN. Это ровно host+client тест Bantila, застывший на пустом co-op-лобби. Автор мода сделал только соло.
+
+СЛЕДУЮЩИЙ ЭКСПЕРИМЕНТ на ЭТОЙ сборке (без 1.05, без dev-флагов): с установленным mod 262 запустить ко-оп-игру как ХОСТ из меню (Private/Local session), затем запустить ВТОРОЙ инстанс игры и попробовать ПРИСОЕДИНИТЬСЯ по LAN. Описать, где останавливается (не достигает лобби? лобби есть, но join падает? завис Bantila?). Это покажет, ведёт ли эта сборка себя как чистый 1.05 Bantila (host+client достигают замороженного лобби) или иначе, и это и есть реальная мульти-игроковая проблема. Для 2-го инстанса мы уже сняли single-instance mutex; клиенту нужен IP, который забиндил хост (UDP 9000 на первом адаптере).
+
+Состояние: движок остановлен; TestFC3_105 запускает DLL от mod 262 + наши доп. патчи party-loop+mutex (бэкапы .orig); прокси uplay_r1_loader.dll (наш онлайн-фейк, теперь ещё и по файлу-флагу) задеплоен; флаги coop_fakeonline.flag + coop_fakeparty.flag на месте; run_coop_shim.bat в SAFE; launch-арги upc сейчас выставлены в (игнорируемые) dev-флаги -> очистить их для обычной/mod-262 игры. Внутренние пути Ubisoft ЛОКАЛЬНЫ; mod 262 и Bantila указаны по имени.
+
+
