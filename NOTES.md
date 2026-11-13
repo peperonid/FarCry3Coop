@@ -4559,3 +4559,12 @@ OFFLINE TEST CAVEAT: on this always-online PC the fake path is only exercised wh
 NEXT fork (owner cost call): (1) run the offline FAKE_MGR probe to validate the fake-manager survives and see the next wall; (2) pivot to the higher-value op-level work (redirect the session-create provider to storm::echo LAN + wire the gate's sockaddr to loopback - the actual bridge); (3) wait for Bantila. Deployment: shim 134144B (tracer + fake_mgr) in TestFC3_105/bin; launcher currently FAKE_MGR mode.
 
 
+
+
+### Session 28ba - FC3 1.06 PC will NOT boot at all while offline; offline FAKE_MGR probe is impossible on this always-online PC -> run the force-fake probe ONLINE instead (FAKE_MGR=2)
+
+Attempted the offline FAKE_MGR test: owner disabled the internet, launched run_coop_shim.bat (FC3COOP_FAKE_MGR). farcry3.exe is the Ubisoft DRM launcher: it starts upc (Ubisoft Connect), which after a real login hands off to farcry3_d3d11.exe (the process that loads FC3_d3d11.dll and thus the proxy+shim). Offline, upc never completes login and never launches farcry3_d3d11 -> no game process, no coop_shim.log. Confirmed: FC3 1.06 PC cannot even start without a working Ubisoft online login (further evidence of the hard online gate, 28av).
+
+Therefore the offline FAKE_MGR route is not exercisable on this PC (game never reaches the engine). Correct probe on this machine = FC3COOP_FAKE_MGR=2 (force): the game boots normally WITH internet (upc logs in), and the shim force-installs the zeroed fake manager over the real one at runtime (watchdog overrides unconditionally). This tests whether the engine survives on the fake manager and where co-op then fails, without needing network isolation. Requires internet ON (owner re-enabled). Stuck offline UbisoftGameLauncher processes were killed; upc client left running. Next: relaunch run_coop_shim.bat (FAKE_MGR=2) with internet back on, then owner navigates Co-op -> Host, then read coop_shim.log for FAKE_MGR + gate lines + how far it gets (or crash slot).
+
+
