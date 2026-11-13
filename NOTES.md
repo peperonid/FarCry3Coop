@@ -4495,3 +4495,19 @@ This is the hard DRM/online boundary: to run campaign co-op offline you must mak
 DECISION FORK for the owner (agent cannot decide cost): (1) invest in (A)/(A'') heavy emulation; (2) Bantila reality-check - if his "1.05 LAN" campaign co-op truly works, either his build differs from 1.06 PC or he patched this exact `[0x11e42c90]` gate to a stub manager; ask him precisely which, that answer likely collapses the search; (3) pause. No further deployment; probe build (28as) stays env-gated, launcher still has FC3COOP_HOOK_PROVIDER=1 (deploy resets to commented).
 
 
+
+
+### Session 28aw - manager-creation chain mapped; path A'' cost assessment; PARK pending Bantila
+
+Fully traced the master-gate creation chain (28av):
+- Online container singleton global `0x11e42a90` (RVA `0x1E42A90`), size 0x10, LAZY-created by factory at `0x100bc087` (`new(0x10)` via `0x10088f04` + ctor `0x104189f3`; single write site `0x100bc0a1`). Created on first access regardless of online status (it is just a container).
+- Container field `+0x8` = the "session backend" object; trivial getter `0x10418a3d` = `mov eax,[ecx+8]; ret`.
+- The master-gate singleton `[0x11e42c90]` (the online session manager) = `backend->vtable[+4]()` at `0x10420a77` (`mov ecx,[0x11e42a90]; call 0x10418a3d; mov edx,[eax]; call [edx+4]; mov [0x11e42c90],eax`). It is populated when online login succeeds; offline the backend returns nothing usable and it stays null -> every online path (incl. campaign co-op Host `0x10443663`) bails.
+
+Cost assessment for the two offline shapes:
+- (A) real/emulated Uplay+RendezVous login so the real backend yields a real session-manager: hits the credential out-pointer payload wall (28ao); needs the RV/GATOR protocol + login payload. Heavy.
+- (A'') synthesize a fake session-manager object: must implement the manager's FULL interface. The global is read at ~250 sites and the manager is passed as `this` to many member calls (a vtable-slot histogram is not cheaply derivable because it is stored in `this` fields and dispatched far from the load) -> the surface is large and brittle. Not a quick shim.
+
+CONCLUSION / PARK: static architecture of the FC3 1.06 PC online/co-op layer is COMPLETE and documented (28av/28aw). Offline campaign co-op is architecturally hard-gated on a live or fully-emulated Ubisoft online session-manager; no LAN path exists. The decision to invest in (A)/(A'') is a cost call for the owner, and the cheapest information is Bantila's answer to the posted PR #1 question (comment 6851368690): if he stubs this exact gate, his stub reveals the MINIMAL manager interface to fake and collapses the search. Recommendation: WAIT for that reply before spending on emulation. Deployment unchanged; launcher still has FC3COOP_HOOK_PROVIDER=1 (deploy resets to commented). No further changes made.
+
+
