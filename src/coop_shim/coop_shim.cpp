@@ -79,6 +79,10 @@ enum {
 // (FC3COOP_TRACE_MGR) waits for it to be populated during a NORMAL online login, then instruments its vtable to
 // record which methods (slot offsets) the game actually calls -> the minimal interface a fake manager must implement.
 #define RVA_online_mgr_global 0x01e42c90
+// Online session-manager CLASS vtable (observed live NOTES 28ay; lives in .rdata so it is ASLR/login independent).
+// A fake manager object can point its vptr here so the 16 hot slots stay stack-correct (correct ret-n-bytes); the
+// cheap getters then just read the zeroed object's fields.
+#define RVA_mgr_vtable 0x01527870
 
 // Provider-factory probe site (NOTES 28ar): inside host_handler FUN_11275d90, the session provider is dispatched
 // polymorphically via 'mov edx,[esi]; mov edx,[edx+0x14]; call edx'. Hook the 'call edx' site to log the provider
@@ -94,6 +98,8 @@ struct ShimConfig { uint32_t lan_ip; uint16_t lan_port; char shared_secret[64]; 
 static ShimConfig g_cfg = { 0x7f000001u /*127.0.0.1*/, 9000, "fc3coop", 0 }; // enable=0 => inert until configured
 static int g_hook_provider = 0; // env FC3COOP_HOOK_PROVIDER=1 -> run the REAL host path (no host short-circuit) and probe the provider vtable
 static int g_trace_mgr = 0;     // env FC3COOP_TRACE_MGR=1 -> instrument the online session-manager vtable (path A'' survey)
+static int g_fake_mgr = 0;      // env FC3COOP_FAKE_MGR=1 -> install a zeroed fake manager so the [0x11e42c90]!=0 gate passes offline (path A'' experiment)
+static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
 static inline void logUnlock(){ InterlockedExchange(&g_logbusy,0); }
@@ -103,6 +109,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_SECRET", buf, sizeof(buf)) > 0) { strncpy(g_cfg.shared_secret, buf, sizeof(g_cfg.shared_secret)-1); }
   if (GetEnvironmentVariableA("FC3COOP_HOOK_PROVIDER", buf, sizeof(buf)) > 0) g_hook_provider = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_TRACE_MGR", buf, sizeof(buf)) > 0) g_trace_mgr = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR", buf, sizeof(buf)) > 0) g_fake_mgr = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -354,6 +361,33 @@ static DWORD WINAPI mgr_tracer_thread(LPVOID p) {
   return 0;
 }
 
+// ------------------------------------------------------------------ path A'' fake online-session-manager (NOTES 28ay/28az)
+// Offline [0x11e42c90] is null, which is the ONLY thing that makes the co-op Host action bail early (28ay). Install a
+// zeroed object whose vptr points at the real manager class vtable (RVA 0x1527870) so stack discipline of the 16 hot
+// slots is preserved (cheap getters read zeroed fields). A watchdog re-forces the global ONLY when the game has left
+// it null, so this never clobbers a real online manager (safe to run while online, it only helps the offline case).
+static DWORD WINAPI fake_mgr_thread(LPVOID p) {
+  (void)p;
+  uintptr_t g = VA(RVA_online_mgr_global);
+  for (int i = 0; i < 24000; ++i) {                 // ~60 min watchdog
+    if (*(volatile uintptr_t*)g == 0) *(volatile uintptr_t*)g = g_fake_obj;
+    Sleep(150);
+  }
+  return 0;
+}
+static void install_fake_mgr(void) {
+  if (!g_fake_obj) {
+    void* obj = VirtualAlloc(0, 0x600, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!obj) { LOGF("shim: FAKE_MGR VirtualAlloc failed"); return; }
+    g_fake_obj = (uintptr_t)obj;
+    *(volatile uintptr_t*)g_fake_obj = VA(RVA_mgr_vtable);
+  }
+  *(volatile uintptr_t*)VA(RVA_online_mgr_global) = g_fake_obj;
+  HANDLE h = CreateThread(0, 0, fake_mgr_thread, 0, 0, 0);
+  LOGF("shim: FAKE_MGR obj=%p vptr=vtable_rva 0x%x forced into [0x11e42c90]; watchdog h=%p", (void*)g_fake_obj,
+       (unsigned)(VA(RVA_mgr_vtable) - g_mod), (void*)h);
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -397,6 +431,7 @@ static void init(void) {
     HANDLE h = CreateThread(0, 0, mgr_tracer_thread, 0, 0, 0);
     LOGF("shim: MGR tracer thread started h=%p (set FC3COOP_FAKE_ONLINE OFF; just play online + try Co-op Host)", (void*)h);
   }
+  if (g_fake_mgr) install_fake_mgr();
 }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r) {

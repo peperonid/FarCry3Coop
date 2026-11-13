@@ -4542,3 +4542,20 @@ NEW FACT: the shim `host_handler` hook (RVA 0x1275d90) NEVER fired, while `gate`
 STRATEGIC SYNTHESIS: with a real login the manager exists and the co-op action passes its `cmp [0x11e42c90],0` gate and reaches our hooks (gate/join fired). Offline it dies ONLY because the manager is null. Therefore the tractable A'' experiment is a FAKE manager: allocate a zeroed ~0x400-byte object + a vtable whose slots return benign values (safest: copy the real vtable's 46 original pointers - the cheap getters then just read the zeroed fields; override the few that would deref null sub-objects), and set `[0x11e42c90] = &fake_mgr` (env `FC3COOP_FAKE_MGR=1`). If the gate then passes and our existing LAN hooks (gate/host/join/ticket) carry the session, campaign co-op may form over loopback storm::echo WITHOUT any Ubisoft server. Risk: the non-trivial slots (+0x1c etc.) deref sub-pointers that are null -> may need stubbing per-crash (iterate). This is the next build. Game pid 1860 was left running for the owner.
 
 
+
+
+### Session 28az - implemented FC3COOP_FAKE_MGR (path A'' experiment): zeroed fake online session-manager + watchdog; built 134144B, deployed; honest scope
+
+Added a path-A'' experiment to the shim (env `FC3COOP_FAKE_MGR=1`):
+- `install_fake_mgr()`: VirtualAlloc a zeroed 0x600-byte object; set its first dword (vptr) to `base + RVA_mgr_vtable` where `RVA_mgr_vtable = 0x1527870` (the real manager class vtable seen live in 28ay; it lives in .rdata so it is ASLR- and login-independent). Because the vptr points at the REAL vtable, the 16 hot slots keep correct stack discipline (proper `ret n`); the cheap getters (28ay: `mov al,1/0`, `mov eax,[ecx+0x2b0]`, `lea eax,[ecx+0x280]`) just read the zeroed fields.
+- Writes `[0x11e42c90] = fake` immediately and starts a watchdog (`fake_mgr_thread`) that re-forces the fake ONLY when the global is 0 - so it never clobbers a real online manager (safe to run while online; it only fills in the offline case).
+
+Build BUILD_DONE 0, 134144 B; deployed to `TestFC3_105\bin`; launcher switched to FAKE_MGR mode (FAKE_ONLINE/HOOK_PROVIDER/TRACE_MGR commented).
+
+HONEST SCOPE: this removes the FIRST and only upstream hard gate (28ay: co-op dies only on null `[0x11e42c90]`). It does NOT by itself produce working co-op: past the gate the session-create op still selects the RendezVous provider, which is the in-game-bridge work (force storm::echo LAN / stub the `_RdV` provider). The purpose of an FAKE_MGR run is to learn: (1) does the game survive long enough on the zeroed fake to pass the manager gate WITHOUT crashing in one of the ~1 non-trivial slots (+0x1c 0x10449fe2) -> if it crashes there, override that vtable slot with a benign stub; (2) where does co-op then fail next (expected: the RV session-create op).
+
+OFFLINE TEST CAVEAT: on this always-online PC the fake path is only exercised when the game cannot obtain a real manager, so the run needs Ubisoft Connect set offline / NIC disabled (owner action). If the game instead shows "must connect to Ubisoft" at launch, the fake-manager route needs the RV/Uplay endpoints black-holed another way; that is an owner-environment decision.
+
+NEXT fork (owner cost call): (1) run the offline FAKE_MGR probe to validate the fake-manager survives and see the next wall; (2) pivot to the higher-value op-level work (redirect the session-create provider to storm::echo LAN + wire the gate's sockaddr to loopback - the actual bridge); (3) wait for Bantila. Deployment: shim 134144B (tracer + fake_mgr) in TestFC3_105/bin; launcher currently FAKE_MGR mode.
+
+
