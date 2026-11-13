@@ -4619,3 +4619,19 @@ NEXT (refine, not yet done): (1) capture the RVLOGIN status = the return of FUN_
 Probe build = coop_shim.dll 134656B (src/coop_shim/coop_shim.cpp) with env FC3COOP_PROBE_LOGIN + patch_entry_n (6-byte entry displacement). Deployed to TestFC3_105/bin; launcher currently PROBE_LOGIN mode. Game not running. Internal Ubisoft addresses stay LOCAL.
 
 
+
+
+### Session 28be - Refined login probe: RVLOGIN-SEND+CB fire but RVLOGIN-STATUS never reached; crash persists with ticket hooks DISABLED -> the crash is the game's own deep RV/GATOR session handling, NOT our hooks. Static hooks are conclusively insufficient; the only viable path is emulating the RV/GATOR session service (route A), a large dedicated build.
+
+Re-ran with FC3COOP_PROBE_LOGIN=1 + FC3COOP_NO_TICKET=1 (skip ticket_validate/ticket_prepare) + host/join short-circuits skipped + internet ON. Owner: Co-op -> Host.
+- Log: `gate -> success`, `RVLOGIN-SEND` (FUN_11246b90 ran, guest login sent), `RVLOGIN-CB` (FUN_11253890 callback fired). NO `RVLOGIN-STATUS` line -> the patched status call site (0x112538bc 'call FUN_11210df0') was NEVER reached; the callback returned via its earlier guard branches (e.g. *(this+0x198)==0) or the game crashed entering/just before the status read.
+- The game STILL crashed with ticket hooks DISABLED -> our ticket_* hooks are exonerated; the crash is downstream in the game's real RV/GATOR session ops (or in online_flag/gate/rv_connected fakes putting the op in an inconsistent state that dies deeper).
+Accept-vs-reject status not captured (guards skipped the call). Confirmed facts stand: (a) co-op Host performs a real RV/UbiAuth login round-trip (route A boundary confirmed, 28bd); (b) running the real RV session flow far enough to host a session CRASHES with hook-level patching regardless of ticket hooks.
+
+CONCLUSION (strategic): hook-level / static patching cannot get past the UbiAuth/RV + GATOR session-establishment cascade. The only route that can work is to make the game talk to a LOCAL FAKE RendezVous/GATOR session service (route A) and satisfy the full op cascade's result-events + storm::echo session bringup. That is a multi-week protocol RE+build (RendezVous PRUDP application layer), matching the hub's hardest category. No cheap lever remains in this codebase (all levers now tried: gate fakes, provider swap, fake manager, online return-code fakes, force-LAN -- each falsified live).
+
+DECISION / recommendation to owner: (1) PAUSE the crash-chasing micro-probes (they have extracted the remaining signal). (2) Get Bantila's answer on PR #1 (he reports a working "1.05 LAN" co-op; only his path or a dedicated GATOR emulator is realistic) before committing weeks to GATOR emulation. (3) Revert run_coop_shim.bat to SAFE mode so the owner's game runs normally meanwhile. Internal Ubisoft addresses stay LOCAL.
+
+Shim: build coop_shim.dll 136192B (src/coop_shim/coop_shim.cpp) adds FC3COOP_NO_TICKET + RVLOGIN-STATUS call-site capture (E8 site 0x112538bc -> re-call FUN_11210df0, log eax, resume). Launcher reverted to SAFE (FC3COOP_SHIM=1 only) at end of session; game not running.
+
+
