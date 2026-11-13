@@ -4164,3 +4164,20 @@ uplay_api.log (вся сессия, 75 вызовов, текущий pid): co-o
 
 Исправленный маршрут: реальное решение RV-vs-LAN лежит ВЫШЕ host_handler - в коде меню/FCX co-op Host, который по клику Host сперва проверяет онлайн-состояние и выбирает путь RendezVous (который затем ведёт к host_handler / вызову GATOR). Этот верхний предикат/ветвление и есть рычаг для форса LAN (или обхода онлайн-препроверки), а НЕ host_handler. Следующий статический шаг: найти эту точку решения клика Host (вызывающие, ведущие к обёртке `0x11275f40` хоста, и проверку онлайн-состояния, поднимающую GATOR SERVICE_UNAVAILABLE на co-op-пути) и определить, где не-RdV/базовый провайдер может выбираться ДО RV-препроверки. Сборка-пробник остаётся (безвредна; под env). Дальше не деплоилось.
 
+
+
+### Сессия 28au - DEFINITIVE статическая карта: кампанийный ко-оп = каскад ops RendezVous/GATOR (LAN-бэкенда нет); B/B' мертвы; реалистичный маршрут = подделать каскад ops + storm::echo LAN (in-game bridge)
+
+Завершение верхнего поиска (28at). Единственный вызывающий обёртку хоста `0x11275f40` - это `0x104436c6` внутри функции `0x10443663`. Эта функция и есть действие co-op Host, и она РАННЕГО ВЫХОДА бейтит, если синглтон бэкенда `[0x11e42c90]` null (`cmp [0x11e42c90],0; je bail 0x1044372c`) либо `this[0]`/аргумент null -> офлайн она никогда не доходит до обёртки, из-за чего проба 28as и не сработала (RV-бэкенд так и не был создан, т.к. RV-логин не удался).
+
+Статическая архитектура (всё в FC3_d3d11.dll):
+- Игровые бэкенды OnlineSession - ТОЛЬКО RendezVous: `RendezVousBackEndServices_native.cpp` (`0x115265d8`), `RendezVousGuestBackEndServices_native.cpp` (`0x115268e0`). LAN/нативного co-op-бэкенда нет. Провайдеры логин-операций зарегистрированы: база `CSessionLoginOperationProvider` (`0x11526878`) + `CSessionLoginOperationProvider_RdV` (`0x11526898`).
+- Co-op онлайн - это КАСКАД ops FCX/RV (каждый - op): `CFCXGatorLoginCheckOperation` (`0x115aba50`, строка ошибки "Could not get services." `0x115abed0`) -> `CRendezVousLoginOperation` (`0x11526744`) -> `CRendezVousConfigureUPnPOperation` (`0x11528268`) / `CRendezVousInitPunchOperation` (`0x115282dc`) -> `CSessionCreateOperation_RdV` (`0x11527a78`) -> host_handler `FUN_11275d90` (строит RV `SubAccountClient`). Ошибки `E_SESSION_ERROR_RENDEZVOUS_TRANSPORT_CONNECTION_FAILURE` (`0x115e4f20`), семейство GATOR (28ap).
+- RendezVous ПОЛНОСТЬЮ статически влит в игру (`D:/Perforce/FC3/.../online/RendezVous/OnlineCore/...`, `BerkeleySocketDriver`) и ходит на серверы Ubisoft через собственные сокеты (хост `fc3-bloomberg-server.ubisoft.org` `0x11503cd4`). Не через проксируемый API `uplay_r1_loader.dll`.
+
+ВЕРДИКТ: (B) нативного LAN кампанийного ко-опа НЕТ (бэкенд только RV); (B') подмена провайдера в host_handler офлайн недостижима (закрыта за падающим RV-логином). Оба мертвы.
+
+РЕАЛИСТИЧНЫЙ оставшийся маршрут = паттерн "in-game bridge" (хабовский playbook in-game-bridge.md): подделать КАСКАД онлайн-ops RV/FCX, чтобы сессия сформировалась, а реовой трафик игры шёл через storm::echo LAN (loopback / LanMatchmaking). Конкретно, поэтапно: (1) захукать execute/completion `CFCXGatorLoginCheckOperation` и `CRendezVousLoginOperation` на постинг success result-событий; (2) захукать `CSessionCreateOperation_RdV` (+ join) чтобы создавать storm::echo LAN-сессию (NetEngineType=LAN, MatchMakingEnabled=0) вместо обращения к GATOR; (3) подставить синтетические значения в поля login-custom-data/кредов, которые читают нижестоящие билдеры. Это объёмно и итеративно (много ops + схем result-событий), и это честная форма работы. Дешёвые рычаги исчерпаны.
+
+СЛЕДУЮЩИЙ поэтапный шаг: найти vtable/execute `CFCXGatorLoginCheckOperation` (первый op каскада) как самую раннюю фейкабельную точку и разобрать, какое result-событие он должен запостить. Дальше не деплоилось; сборка-пробник (28as) остаётся под env.
+

@@ -4465,3 +4465,20 @@ Conclusion (refines 28as): offline, the Co-op -> Host action is aborted by the U
 
 Corrected route: the real RV-vs-LAN decision is UPSTREAM of host_handler - at the co-op Host menu/FCX code that on Host-click first checks online state and picks the RendezVous path (which then leads to host_handler / the GATOR call). That upstream predicate/branch is the lever to force LAN (or to bypass the online pre-check), NOT host_handler. Next static step: find that Host-click decision point (callers leading to FUN_11275d90's wrapper 0x11275f40, and the online-state check that raises GATOR SERVICE_UNAVAILABLE on the co-op path) and identify where a non-RdV/base provider could be selected before the RV pre-check. Probe build stays (harmless; env-gated). NOT deployed further.
 
+
+
+### Session 28au - DEFINITIVE static map: campaign co-op = a RendezVous/GATOR op cascade (no LAN backend); B/B' dead; realistic route = fake the op cascade + storm::echo LAN (in-game bridge)
+
+Completing the upstream hunt (28at). The single caller of the host wrapper `0x11275f40` is `0x104436c6`, inside function `0x10443663`. That function is the co-op Host action and it BAILS EARLY if the backend singleton `[0x11e42c90]` is null (`cmp [0x11e42c90],0; je bail 0x1044372c`) or `this[0]`/arg null -> offline it never reaches the wrapper, which is exactly why the 28as provider probe never fired (the RV backend was never constructed because RV login failed).
+
+Static architecture (all in FC3_d3d11.dll):
+- Game-level OnlineSession BACKENDS are RendezVous-only: `RendezVousBackEndServices_native.cpp` (`0x115265d8`), `RendezVousGuestBackEndServices_native.cpp` (`0x115268e0`). No LAN/native co-op backend exists. Login-operation providers registered base `CSessionLoginOperationProvider` (`0x11526878`) + `CSessionLoginOperationProvider_RdV` (`0x11526898`).
+- Co-op online is a FCX/RV OP CASCADE (each an op): `CFCXGatorLoginCheckOperation` (`0x115aba50`, error string "Could not get services." `0x115abed0`) -> `CRendezVousLoginOperation` (`0x11526744`) -> `CRendezVousConfigureUPnPOperation` (`0x11528268`) / `CRendezVousInitPunchOperation` (`0x115282dc`) -> `CSessionCreateOperation_RdV` (`0x11527a78`) -> host_handler `FUN_11275d90` (builds RV `SubAccountClient`). Errors `E_SESSION_ERROR_RENDEZVOUS_TRANSPORT_CONNECTION_FAILURE` (`0x115e4f20`), the GATOR family (28ap).
+- RendezVous is FULLY STATICALLY LINKED into the game (`D:/Perforce/FC3/.../online/RendezVous/OnlineCore/...`, `BerkeleySocketDriver`) and talks to Ubisoft servers over its own sockets (host `fc3-bloomberg-server.ubisoft.org` `0x11503cd4`). Not via the proxied `uplay_r1_loader.dll` API.
+
+VERDICT: (B) native LAN campaign co-op does NOT exist (backend is RV-only); (B') provider-swap at host_handler is unreachable offline (gated behind the RV login that fails). Both dead.
+
+REALISTIC remaining route = the "in-game bridge" pattern (hub playbook in-game-bridge.md): fake the RV/FCX online OP CASCADE so the session forms, and carry the actual game traffic over storm::echo LAN (loopback / LanMatchmaking). Concretely, staged: (1) hook `CFCXGatorLoginCheckOperation` and `CRendezVousLoginOperation` execute/completion to post success result events; (2) hook `CSessionCreateOperation_RdV` (+ join) to create a storm::echo LAN session (NetEngineType=LAN, MatchMakingEnabled=0) instead of contacting GATOR; (3) feed the login-custom-data/credential fields the downstream builders read with synthetic values. This is substantial and iterative (many ops + result-event schemas), and is the honest shape of the work. The cheap levers are exhausted.
+
+NEXT staged step: locate `CFCXGatorLoginCheckOperation`'s vtable/execute (first op in the cascade) as the earliest fakeable point, and inspect what result-event it must post. NOT deployed further; probe build (28as) stays env-gated.
+
