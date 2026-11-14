@@ -4745,3 +4745,24 @@ DECISION REINFORCED: obtain a genuine **Steam 1.05** (DepotDownloader depot 2202
 State / reversibility: TestFC3_105\bin now = pure mod 262 (FC3 DLLs + both loaders) after reverting our proxy (our proxy kept as .bak-<stamp>; FC3 .orig = mod262 too). coop_shim not loaded (mod262 loader). single-instance mutex is back in bin (need to re-apply our mutex NOP if we later run 2 instances on this build). upc dev-switch launch args should be cleared. Everything reversible; internal Ubisoft paths LOCAL; mod 262 + Bantila cited by name.
 
 
+
+
+### Session 28bk - OWNER FIXED the mod-262 offline co-op and gave the exact working recipe; version question RESOLVED. A dedicated operational doc was written: docs/fc3-coop-mod-setup.md (+ .ru.md).
+
+Owner's confirmed working recipe (2026-11-13), on a clean copy, in order:
+1) fresh 1.06 base via Ubisoft Connect; 2) Far CRy3 FIX Co-oP.rar (installs 1.05-version game files FC3.dll/FC3_d3d11.dll/farcry3*.exe over the 1.06 base); 3) The Dependencies-262...7z (loaders uplay_r1_loader.dll + ubiorbitapi_r2_loader.dll, and uplay_r14.dll into the Ubisoft Connect dir); 4) patch_solo_offline_coop_vanilla-262...7z (mod 262 content + bin).
+
+VERSION TRUTH (settled by comparing to the local backup _backup_106_before_solo262):
+- That backup's bin holds the genuine RETAIL 1.06 FC3 DLLs: FC3.dll 40,720,424 B SHA 71D58A7A... and FC3_d3d11.dll 40,869,416 B SHA E541594E... = the hub-recorded 1.06 hashes.
+- The working co-op copy runs 1.05-era FC3 DLLs ~30 MB (FC3.dll 29,994,856 / FC3_d3d11 30,057,832, internal dates 2022-07), installed by "Far Cry 3 FIX Co-op". Hence the V1.05 banner + why Bantila's 1.05 addresses match.
+- Conclusion: the build is a 1.06 INSTALL but 1.05 FC3 BINARIES. Label address notes by WHICH FC3 binary, not by the game patch. The 30MB-vs-40MB "mystery" is fully explained.
+
+Reference-install caveat: the Ubisoft Connect game install folder used as "reference" earlier was NOT fully correct (owner); do not restore a mod-262 state from it - rebuild from the 4 archives.
+
+upc auto-update hazard confirmed (see 28bj): mod 262's uplay_r14.dll (2024) can break when upc self-updates (2026-11-08 DLLs) -> co-op start crashes in MSVCR100; a clean re-run of the recipe fixes it.
+
+NEW LEAD: Downloads also contains "Far Cry 3 Open World Co-op (Patch 1.5)" (scubrah, ~2.7 GB) - a full OPEN-WORLD co-op mod, much closer to the campaign-coop goal than mod 262 (solo-offline). Worth analysing next for multi-human co-op.
+
+Our tooling: with mod 262 in place its own loaders must be in bin; our uplay_proxy/coop_shim are alternative Uplay-fake implementations for separate custom-bridge experiments and are NOT the working mod-262 config (mixing them caused the crash). All our files backed up (.orig/.bak). Internal + owner paths stay LOCAL (doc uses placeholders).
+
+
