@@ -4766,3 +4766,25 @@ NEW LEAD: Downloads also contains "Far Cry 3 Open World Co-op (Patch 1.5)" (scub
 Our tooling: with mod 262 in place its own loaders must be in bin; our uplay_proxy/coop_shim are alternative Uplay-fake implementations for separate custom-bridge experiments and are NOT the working mod-262 config (mixing them caused the crash). All our files backed up (.orig/.bak). Internal + owner paths stay LOCAL (doc uses placeholders).
 
 
+
+
+### Session 28bl - dev-switch (-host/-client) route TESTED LIVE on the working mod-262 build and found DEAD. The 2-instance mutex patch WORKS. Frontier confirmed again = RV/GATOR application-layer session establishment.
+
+Confirmed the working co-op install runs the exact RE-mapped binary: FC3_d3d11.dll MD5 46BCC0975905088D1FA4DF94B57B703D (1.05 FC3 binaries on a 1.06 install, see docs/fc3-coop-mod-setup.md), so every address in NOTES/PLAN is valid for it.
+
+Live results (owner drives UI, we launch detached + watch netstat/WMP):
+- Single-instance mutex NOP (FC3.dll 0x100041bb / FC3_d3d11.dll 0x10004092; via local/scratch/apply_bantila_patch.py) WORKS: two farcry3_d3d11.exe run at once (host bound UDP 9000 on the LAN adapter, client bound UDP 9001), both alive, no boot crash. Pristine mod-262 backups kept as *.dll.orig; our 2-instance build kept as *.dll.patched.
+- `-host coop_vidar -login host1 -coop`: the process stays alive and binds UDP 9000 (a plain no-switch direct launch of farcry3_d3d11.exe exits immediately), so the switch IS consumed - BUT the game just sits on the main menu; it does NOT create a hosted session/lobby. Starting the co-op game from the menu afterwards CRASHES with the known signature farcry3_d3d11.exe / MSVCR100.dll / 0xc0000005 / offset 0x26df (identical to 28bj). => `-host` only spins up the Storm socket, it does not host.
+- `-client -login client1 -coop -ip 192.168.1.8`: binds UDP 9001, no boot crash, but there is no joinable session to attach to (Storm sockets are unconnected `*:*`, so no client<->host association is visible in netstat).
+- `-offline` (the 1.05 debug main menu with "COOP Story"/"Adversarial"/"UPlay", FUN_10922ac6 in Phase 1) does NOT appear on this retail 1.05 binary - just the normal menu. The debug menu is compiled out / gated in retail.
+
+WHY multi-human cannot work in any offline path here: mod 262's menu entry "Offline coop" is the stock "Local Coop" playlist (sessionType 3) - a LOCAL/console-style session with NO network server, so a remote/LAN player has nothing to connect to (this is exactly why mod 262 is solo-only and why nobody has got 2 humans in via it). The only path that carries a real networked session is the Storm session created by the RV/GATOR front-end, and that front-end (the Ubisoft online service) is gone. The dev switches were supposed to reach that Storm session but on this retail build `-host` does not actually build the session object (menu-only / crash).
+
+Conclusion / frontier unchanged: getting 2+ humans into a networked co-op needs APPLICATION-LAYER session establishment. Options, re-ranked now that we can patch THIS binary and can run 2 instances:
+- A1 (now most attractive): stub/replace the game's `_RdV` provider answers IN-PROCESS (in the 1.05 FC3 DLL we already patch) so a "host" builds a local networked session (fake successful login/ticket/matchmaking -> local session id) and a "client" resolves the peer by address, then storm::echo carries the gameplay over UDP 9000/9001. We have the address map and the patcher; the work is RE of the `_RdV` provider vtables (login/matchmaking/invite + the session-create + address-resolve paths) to see how little must be faked. Kill-switch unknown: whether an in-process stub is enough to enter a "hosted, accepting-joins, networked" state.
+- A2: a local RendezVous/GATOR PRUDP emulator (see docs/coop-gator-emulation-plan.md), ~13-24 weeks, two kill-switch unknowns (prudps crypto, storm::echo peer mapping).
+- B: our own netcode on top of the local "Offline coop" session - hardest (would bypass the engine's session layer entirely).
+
+Next concrete step (no game needed): static RE of the 1.05 `_RdV` session-provider vtables (login op, matchmaking op, the function that creates/joins the Storm session and reads the peer address) to scope A1. Reversible state: TestFC3_105 bin restored to pristine mod 262 (MD5 46BCC097); 2-instance patch preserved as *.dll.patched.
+
+
