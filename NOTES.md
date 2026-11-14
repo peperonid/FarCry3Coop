@@ -4832,3 +4832,18 @@ SINGLE REMAINING KILL-SWITCH (decides "cheap A1" vs "must do A2/PRUDP"): does CF
 State: no game files changed (pure static RE). Scratch: DecompileA1d/e.java + run_a1d/e.py; outputs a1d_decompile.txt, a1e_decompile.txt. Class-name string VAs: CreateSession 0x1156d874, JoinSession 0x11597c50, CSessionCreate 0x116911ec, CSessionJoin 0x11691274, CSessionSearchIP 0x11691258, CFCXNetEngineStartup 0x1156d818.
 
 
+
+
+### Session 28bo - Static vtable read of the session ops is a DEAD END: the ops are dispatched by a name-based runtime reflection registry, so their execute methods are NOT statically reachable from the class singletons. The ticket-vs-IP question must be answered by the join-param field-writer or, better, EMPIRICALLY (dedicated-server live test).
+
+Evidence (scripts DecompileA1g.java/DecompileA1d.java, outputs a1g/a1d_decompile.txt):
+- The op class singletons &DAT_11853e20 (CFCXJoinSessionOperation) and &DAT_1184a118 (CFCXCreateSessionOperation) are ZERO-FILLED .bss (all dwords 0 in the file). Their vtables are installed at runtime, so there is no static vtable to walk.
+- The "factories" FUN_10658db2 / FUN_108544d6 are themselves registration wrappers: FUN_10658db2 registers base class string "CFCXGameOperation" (via FUN_11025fe9 with instance from FUN_1039c752); FUN_108544d6 registers "CSessionOperation" (FUN_11025fe9 + FUN_1024bd70). And 28bn's FUN_11026001 registered the concrete op by name. So the op system is Ubisoft script-reflection: RegisterClass(name, base) / RegisterObject(name, ctor); instances and vtables are built at runtime, dispatch is by name string.
+
+CONSEQUENCE: cannot statically prove whether CFCXJoinSessionOperation needs an RV ticket by reading a vtable slot. Two ways forward:
+- (RE, slower) find the code that FILLS the join-param struct (fields registered by FUN_11342660/FUN_11342740: SearchIdAddress+0x8, SearchSessionId+0x10, JoinSessionId+0x18, SessionRefId+0x20, SessionType+0x38, NetEngineType+0x3c) and see whether a ticket/SessionRefId fetch (RV) precedes running the join op, or only SearchIdAddress (IP) is set.
+- (EMPIRICAL, decisive & preferred) the host already binds UDP 9000 and the host handler supports -dedicated (FUN_104c0d5a). A DEDICATED server (-dedicated -host coop_vidar -login host1 -coop, session type 3) should create a headless session and ADVERTISE/listen WITHOUT the RV menu path, and a second instance `-client -login c -coop -ip 127.0.0.1` then joins via storm::echo. If the dedicated host stays alive with 9000 and the client connects (UDP assoc / packet exchange) -> join needs no RV ticket -> A1 is a bounded in-DLL patch. If the client can bind 9001 but never reaches the dedicated host, or the host dies, -> the join path is gated on RV (A2/PRUDP). This is also the first real multi-human test, the actual goal.
+
+State: no game files changed (pure static RE). All A1 RE artifacts in scratch (a1c/a1d/a1e/a1g_decompile.txt) + scripts DecompileA1c..g.java + run_a1c..g.py.
+
+

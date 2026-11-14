@@ -4531,3 +4531,18 @@ LAN-ПРИМИТИВЫ УЖЕ В ДВИЖКЕ (ободряющая находк
 Состояние: файлы игры не менялись (чистый статический RE). Черновики: DecompileA1d/e.java + run_a1d/e.py; выводы a1d_decompile.txt, a1e_decompile.txt. VA строк имён классов: CreateSession 0x1156d874, JoinSession 0x11597c50, CSessionCreate 0x116911ec, CSessionJoin 0x11691274, CSessionSearchIP 0x11691258, CFCXNetEngineStartup 0x1156d818.
 
 
+
+
+### Сессия 28bo - Статическое чтение vtable сессийных операций - ТУПИК: операции диспатчатся рефлекс-реестром по имени, их execute-методы СТАТИЧЕСКИ из синглтонов классов НЕдостижимы. Вопрос «тикет vs IP» надо закрывать либо через писателя полей join-структа, либо (лучше) ЭМПИРИЧЕСКИ (живой тест dedicated-сервером).
+
+Доказательства (скрипты DecompileA1g.java/DecompileA1d.java, выводы a1g/a1d_decompile.txt):
+- Синглтоны классов &DAT_11853e20 (CFCXJoinSessionOperation) и &DAT_1184a118 (CFCXCreateSessionOperation) - обнулённый .bss (все dword в файле = 0). Их vtable ставятся в рантайме, поэтому статической vtable для обхода нет.
+- «Фабрики» FUN_10658db2 / FUN_108544d6 сами являются обёртками регистрации: FUN_10658db2 регистрирует базовый класс со строкой "CFCXGameOperation" (через FUN_11025fe9 с инстансом из FUN_1039c752); FUN_108544d6 регистрирует "CSessionOperation" (FUN_11025fe9 + FUN_1024bd70). А из 28bn FUN_11026001 регистрировал конкретную операцию по имени. То есть система операций - это script-reflection Ubisoft: RegisterClass(имя, база) / RegisterObject(имя, ctor); инстансы и vtable собираются в рантайме, диспатч по строке имени.
+
+СЛЕДСТВИЕ: нельзя статически доказать по слоту vtable, нужен ли RV-тикет для CFCXJoinSessionOperation. Два пути:
+- (RE, дольше) найти код, КОТОРЫЙ ЗАПОЛНЯЕТ join-структ (поля зарегистрированы FUN_11342660/FUN_11342740: SearchIdAddress+0x8, SearchSessionId+0x10, JoinSessionId+0x18, SessionRefId+0x20, SessionType+0x38, NetEngineType+0x3c), и посмотреть, предшествует ли запуску join-операции получение тикета/SessionRefId (RV) или ставится только SearchIdAddress (IP).
+- (ЭМПИРИЧЕСКИ, решают и предпочтительно) хост уже занимает UDP 9000, и host-хендлер поддерживает -dedicated (FUN_104c0d5a). DEDICATED-сервер (-dedicated -host coop_vidar -login host1 -coop, тип сессии 3) должен создать headless-сессию и СЛУШАТЬ/анонсировать БЕЗ RV-меню, а второй инстанс `-client -login c -coop -ip 127.0.0.1` зайдёт через storm::echo. Если dedicated-хост живёт с 9000 и клиент подключается (UDP-ассоциация/обмен пакетами) -> join не требует RV-тикет -> A1 это ограниченный внутри-DLL патч. Если клиент вешает 9001, но до dedicated-хоста не доходит, или хост умирает -> join привязан к RV (A2/PRUDP). Это же первый реальный тест мульти-игрока - сама цель.
+
+Состояние: файлы игры не менялись (чистый статический RE). Все RE-артефакты A1 в scratch (a1c/a1d/a1e/a1g_decompile.txt) + скрипты DecompileA1c..g.java + run_a1c..g.py.
+
+
