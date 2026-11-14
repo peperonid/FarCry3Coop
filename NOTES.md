@@ -4808,3 +4808,27 @@ DECISIVE NEXT RE TARGETS: decompile FUN_1065296f (client start-connect: does it 
 State: no game files changed this session (pure static RE + scratch Ghidra scripts). FC3_105_OW project reused (read-only run, no re-analysis).
 
 
+
+
+### Session 28bn - A1 scope continued (static RE on FC3_105_OW, FC3.dll 1.05): the session layer is a named-operation registry and the LAN primitives are ALREADY IN THE ENGINE. Verdict: A1 is viable and cheaper than feared; ONE kill-switch left to verify.
+
+FUN_1065296f (the "tail call" of the client handler) is just a string-cleanup wrapper (FUN_10001cd2 assign + FUN_100057a7 free) - NOT a start-connect. So BOTH `-host` and `-client` only fill the launch record; the real create/join is executed later by a scheduler that on retail routes through the dead _RdV front-end -> that's why live both just reach the menu.
+
+OPERATION REGISTRY (found via the plain class-name strings; script DecompileA1e.java/run_a1e.py, output a1e_decompile.txt). Each session op is registered by name via FUN_11026001("<Name>", <factory/instance>) and its class singleton is a DAT pointer:
+- CFCXCreateSessionOperation -> singleton &DAT_1184a118 (reg func FUN_10684e4b; factory FUN_10658db2)
+- CFCXJoinSessionOperation  -> singleton &DAT_11853e20 (reg func FUN_107d48e0; factory FUN_10658db2)
+- CFCXNetEngineStartupOperation -> &DAT_1184a0d0 (reg func FUN_10684d9e)
+- CSessionCreateOperation   -> &DAT_11eaf308 (reg func FUN_110b127d; factory FUN_108544d6)
+- CSessionJoinOperation     -> &DAT_11eaf380 (reg func FUN_110b1359; factory FUN_108544d6)
+- CSessionSearchIPOperation -> &DAT_11eaf368 (reg func FUN_110b132d; factory FUN_108544d6)
+=> the game runs CFCX* (FC3-level) ops which wrap the lower CSession* ops; a join-by-IP op (CSessionSearchIPOperation) EXISTS as a first-class named op.
+
+LAN PRIMITIVES ALREADY IN-ENGINE (this is the hopeful discovery): FUN_106516f1 (called by BOTH host and client handlers) parses up to FOUR accounts -login/-login2/-login3/-login4 (+ -password..-password4, default online-key string "a123456"), and for each writes an account-table entry setting field +0x18 = 2. Per our own account-flag map (NOTES: Offline=1, LAN=2, Live=4) that is accountFlags = **LAN**. So the dev-launch path itself assigns LAN accounts and reserves 4 player slots; combined with the client `-ip` (+ localhost branch) and CSessionSearchIPOperation, direct LAN join is a designed-in engine capability that the retail UI just never routes to.
+
+A1 VERDICT: the heavy part (faking RV login) is unnecessary - mod 262 fake-Uplay already satisfies account/login, and the LAN account flags + IP-search op are present. Real A1 work = make the host actually EXECUTE CFCXCreateSessionOperation from its launch record (bind 9000, advertise) and drive the client through CFCXJoinSessionOperation with SearchIdAddress = host IP, so storm::echo carries gameplay.
+
+SINGLE REMAINING KILL-SWITCH (decides "cheap A1" vs "must do A2/PRUDP"): does CFCXJoinSessionOperation (&DAT_11853e20 vtable) complete with only SearchIdAddress, or does it MANDATE a SessionRefId / ticket that only the RV service issues? Answer it by either (a) next RE step: read the vtable at &DAT_11853e20 (and &DAT_1184a118 for create) and decompile the execute slots, looking for RV/ticket calls; or (b) a live experiment once we can force a host session to exist. If join needs no RV ticket -> A1 is a bounded in-DLL patch (execute existing ops + fake success). If it needs a ticket -> A2 (RendezVous/PRUDP emulator) or the CFCX-layer ticket stub is unavoidable.
+
+State: no game files changed (pure static RE). Scratch: DecompileA1d/e.java + run_a1d/e.py; outputs a1d_decompile.txt, a1e_decompile.txt. Class-name string VAs: CreateSession 0x1156d874, JoinSession 0x11597c50, CSessionCreate 0x116911ec, CSessionJoin 0x11691274, CSessionSearchIP 0x11691258, CFCXNetEngineStartup 0x1156d818.
+
+
