@@ -17,3 +17,5 @@ Steps (all from an **elevated** terminal - hosts file + port 80 need admin):
 
 Next after capture: craft canned responses (set GATOR_CANNED=<file>) to get past the "unavailable"
 gate, then tackle the Quazal RV/PRUDP UDP layer (ports 3074/9000) where the crypto lives.
+
+One-shot capture (preferred): run elevated `python -I run_capture.py` - it answers GetOnlineConfig with fc3_config.json (RV SandboxUrl -> 127.0.0.1:50000) AND sniffs the Quazal PRUDP packets to that port into gator_udp_log.txt. Edit fc3_config.json to change what we serve (e.g. the RV port).

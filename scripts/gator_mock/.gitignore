@@ -1,0 +1,6 @@
+gator_http_log.txt
+gator_udp_log.txt
+fc3_config.local.json
+hosts.backup
+__pycache__/
+*.pyc

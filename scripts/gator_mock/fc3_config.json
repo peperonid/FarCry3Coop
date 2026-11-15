@@ -1,0 +1,5 @@
+[
+  {"Name":"SandboxUrl","Values":["prudp://address=127.0.0.1;port=50000"]},
+  {"Name":"SandboxUrlWS","Values":["127.0.0.1:50000"]},
+  {"Name":"genomeId","Values":["00000000-0000-0000-0000-000000000000"]}
+]
