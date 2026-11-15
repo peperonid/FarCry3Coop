@@ -4977,3 +4977,20 @@ FC3.dll launch-switch + co-op inventory (new): switches **`-coop`** (0x1566100),
 READING: FC3 co-op is a session (CFCXCreateSessionOperation) that runs over the active session provider; the online co-op menu path still drives RV/GATOR. Two ways to a joinable session: (A) satisfy the RV/GATOR co-op session search/create for the "Play Online" menu (the A2 backend emulation, now with login passing); (B) drive a LAN session via `-coop` + Lan provider + `-loginN` LAN accounts + host, bypassing RV. Next decisive data = capture the network the co-op search/host emits NOW that login passes (is it a GATOR HTTP request we can serve, RV/PRUDP to SandboxUrl, or LAN broadcast on 9004?).
 
 
+
+
+### Session 28bw - LAN-provider shortcut is a DEAD END (re-confirmed) + root cause of the 28bv confusion + full launch-switch inventory.
+
+Why SessionProvider=Lan removed the boot/login error but co-op still failed: the PC game layer has NO LAN session provider. NOTES 2026-10-25 (line ~163) already proved every game-side online provider exists only as `_RdV` (Ubisoft RendezVous), `_UplayPC` or `_Win`; Storm's `storm::echo::lan` exists below the game layer but the FCX game code never instantiates it. The `Online` / `Lan` tokens at 0x1560650/0x1560658 are Storm-echo session-TYPE state names (IdleState/SearchState/JoinState/CreateState/SessionState/MergeState + Online/Lan/Error), not a selectable FCX provider. So `SessionProvider="Lan"` matches no registered provider factory -> it just SKIPS online provider init (hence no login/boot error) while the co-op menu (which needs a real provider) still fails. The 28bv "boot error gone" was this skip, not progress toward co-op.
+
+Why the boot error came back in 28bv's follow-up: hosts is `applied` again (gconnect/onlineconfig -> 127.0.0.1). The front-end "Connect to Far Cry 3 service" gate is checked even in Lan mode, and a broken 127.0.0.1 redirect (no proper answer) makes it fail. When hosts was restored (real Ubisoft Connect reaches the LIVE ubiservices) the front-end passed. CONCLUSION: keep hosts RESTORED for normal play; the gator_mock redirect is only for online-path capture experiments, not for playing. The RV UDP:50000 listener received nothing again (co-op never reaches RV).
+
+Full launch-switch inventory from FC3.dll (281 `-word` tokens; online/session-relevant): `-coop`, `-host`, `-client` (used in dev scripts), `-dedicated`, **`-ip`** (direct-IP join), **`-sessionuid`**, `-login` / `-login2` / `-login3` / `-login4`, `-quickmatch`, `-offline`, `-online`, `-sandbox`, `-forcevip`, `-keyonline`, `-map`, `-language`, `-skipintro`, and **`-splitscreen` / `-splitscreen4`** (split-screen co-op on ONE machine).
+
+The account-flag map (NOTES 2026-10-25 line 161) is definitive: `Offline`=1, `LAN`=2, `Live`=4, `Gator`=0x20, `Rendezvous`=0x40. `<Accounts><Account login="Host" accountFlags="2"/></Accounts>` was already tried (menus unchanged). We reverted GamerProfile.xml SessionProvider to the default empty value so the owner's working mod-262 solo-offline-coop state is preserved.
+
+STRATEGIC STATE (unchanged from 28bp, now reinforced): the offline co-op session runs locally (Offline account flags, no provider) - that is what mod 262 gives (1 human + offline slot). A SECOND HUMAN needs a session provider, and the only ones the game knows (`_RdV`) talk to dead Ubisoft RV. So the real choices are: (A1/A2) become or emulate the `_RdV` provider (Quazal RV PRUDP - crypto wall), or (B) run our own netcode on top of the working Offline co-op session and inject a remote human as a player. ONE NEW CHEAP OPTION surfaced by the switch inventory: **`-splitscreen` / `-splitscreen4`** could give 2-4 humans on a SINGLE PC (split-screen co-op) with NO network at all - untested on this build, worth a quick owner test as a same-PC multi-human fallback.
+
+Action this session: set GamerProfile SessionProvider back to "" (online default) via lan_mode.py online; owner to `hosts_patch.py restore` (admin) so normal play + mod 262 are unaffected.
+
+
