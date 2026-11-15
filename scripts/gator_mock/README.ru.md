@@ -19,3 +19,6 @@ UDP 9000 (движок Storm) + 3074 (GATOR/консоль); сессия не �
 затем браться за слой Quazal RV/PRUDP по UDP (порты 3074/9000), где живёт криптография.
 
 Одноразовый захват (предпочтительно): из админ-терминала `python -I run_capture.py` - отвечает на GetOnlineConfig файлом fc3_config.json (RV SandboxUrl -> 127.0.0.1:50000) И пишет PRUDP-пакеты на этот порт в gator_udp_log.txt. Правь fc3_config.json, чтобы менять отдаваемый конфиг (напр. RV-порт).
+
+## Эксперимент LAN co-op (28bu/28bv)
+`lan_mode.py lan|online|restore|status|find` переключает в GamerProfile.xml `<NetworkProfile SessionProvider="Lan|">` (автобэкап). В FC3 есть встроенный LAN-провайдер сессий (вещание 9004 / обнаружение 9005); если LAN-ко-оп-сессия joining офлайн, ко-оп получен без Ubisoft/RV/PRUDP. Обратимо; оригинал хранится как GamerProfile.xml.bak-<ts>.

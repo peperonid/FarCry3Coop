@@ -19,3 +19,6 @@ Next after capture: craft canned responses (set GATOR_CANNED=<file>) to get past
 gate, then tackle the Quazal RV/PRUDP UDP layer (ports 3074/9000) where the crypto lives.
 
 One-shot capture (preferred): run elevated `python -I run_capture.py` - it answers GetOnlineConfig with fc3_config.json (RV SandboxUrl -> 127.0.0.1:50000) AND sniffs the Quazal PRUDP packets to that port into gator_udp_log.txt. Edit fc3_config.json to change what we serve (e.g. the RV port).
+
+## LAN co-op experiment (28bu/28bv)
+`lan_mode.py lan|online|restore|status|find` toggles GamerProfile.xml `<NetworkProfile SessionProvider="Lan|">` (auto-backup). FC3 has an in-engine LAN session provider (broadcast 9004 / discover 9005); if a LAN co-op session is joinable offline, co-op is achieved with no Ubisoft/RV/PRUDP. Reversible; original kept as GamerProfile.xml.bak-<ts>.
