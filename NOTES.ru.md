@@ -4610,3 +4610,23 @@ A2 КОНКРЕТНЫЙ СЛЕДУЮЩИЙ ШАГ (нужен админ вла�
 Состояние: на конец захвата игра ещё работала (владелец может закрыть). Файлы игры мы за сессию не меняли. Это самый сильный аргумент, что A2 (эмулятор GATOR/gconnect) - жизнеспособный путь, и что его первый слой - открытый HTTP (перехватывается без TLS).
 
 
+
+
+### Сессия 28bs - КЛЮЧ к A2. (1) Живой выключатель онлайн-конфига подтверждён: GET GetOnlineConfig?onlineConfigID=21fc0b75f83c49f2a51726f60fd1c5f8&target=client теперь возвращает **HTTP 200 text/xml, НО НОЛЬ байт** (пусто) - именно этот пустой конфиг и заставляет FC3 показывать «сервис недоступен» (наш логгер, вернувший пустой 200, воспроизвёл ту же ошибку). (2) Единственный сетевой запрос игры в онлайне, пойманный логгером, - этот GET GetOnlineConfig (пустое тело, заголовки `Host: onlineconfigservice.ubi.com`, `Accept: */*`); до gconnect игра не доходит, пока не получит непустой конфиг. (3) СХЕМА конфига + шов редиректа RV восстановлены из Wayback.
+
+Конфиг = JSON-массив {"Name":..,"Values":[..]}. Поля, виденные у других тайтлов Ubisoft (Wayback, другие onlineConfigID; FC3-шного id в архиве нет):
+- **SandboxUrl** = `prudp://address=<RV-хост>;port=<порт>`  и **SandboxUrlWS** = `<RV-хост>:<порт>`  -> ТО самый эндпоинт Quazal RendezVous (RV), куда ходит PRUDP-клиент игры (примеры: pdc-vm-rdv05.ubisoft.com порты 23900 / 21010; mdc-mm-rdv21.ubisoft.com порт 22250).
+- **AuthenticationServer** = `lb-agora.ubisoft.com:3081` (Agora = авторизация Ubisoft). **LobbyServer** = `lb-lsg-prod.ubisoft.com:3105`.
+- Доп. клиентские: MmpTitleId (напр. 0xA004), uplay_* базовые URL. Конфиг target=server: genome_id, mmp_svc_key, mmp_title_id, pkws_url, product_id, uws_url (ubiaccountservice.ubi.com/legacy/AgoraAuthentication.asmx).
+
+АРХИТЕКТУРНЫЙ ВЫВОД (шов редиректа, крипто для шва не нужна): раз конфиг сам задаёт RV-эндпоинт как `prudp://address=...;port=...`, нам НЕ надо редиректить RV-хост через hosts - достаточно ОТДАТЬ FC3 скроенный GetOnlineConfig, у которого SandboxUrl указывает на **127.0.0.1:<наш порт>**. Тогда собственный RV-клиент Quazal игры подключится К НАШЕМУ локальному PRUDP-серверу; реализуем рукопожатие Quazal RV (PRUDP login + create/join сессии + маршрутизация пиров), а storm::echo несёт геймплей. Протокол RV - **Quazal PRUDP** (известный middleware, есть публичные реверс-материалы), значит это решаемо.
+
+КОНКРЕТНЫЕ СЛЕДУЮЩИЕ ШАГИ:
+1. Отдать FC3 скроенный GetOnlineConfig JSON через логгер (GATOR_CANNED=<fc3_config.json>) - начать с полей выше (SandboxUrl/SandboxUrlWS -> 127.0.0.1:<порт>, AuthenticationServer, LobbyServer, MmpTitleId) и итеративно: FC3 читает конкретные ключи; добавлять их, пока ошибка «недоступно» не уйдёт и игра не попытается достучаться до PRUDP-эндпоинта.
+   - Нужны ожидаемые ключи/id FC3: прочитать их из FC3.dll (грип ключи конфига, которые он парсит: SandboxUrl, SandboxUrlWS, AuthenticationServer, LobbyServer, MmpTitleId + FC3-специфичные имена) ИЛИ итеративно эмпирически.
+2. Запустить локальный UDP-слушатель на 127.0.0.1:<порт>, чтобы снять ПЕРВЫЕ PRUDP-пакеты, которые FC3 отправит, поверив нашему конфигу - заголовок/версия/login PRUDP и есть цель реверса. (scripts/gator_mock/udp_sniffer.py.)
+3. Затем реализовать ответы Quazal RV-сервера (есть публичные материалы по Quazal/RendezVous).
+
+Артефакты: доказательство пустого конфига + схема из Wayback (этот раздел). Инструменты: scripts/gator_mock/{http_logger.py,hosts_patch.py,README}. Состояние: игру владелец закрыл; hosts может всё ещё быть перенаправлен - восстановить в простое. Файлы игры не менялись.
+
+

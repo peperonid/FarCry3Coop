@@ -4911,3 +4911,23 @@ A2 CONCRETE NEXT STEP (needs owner admin for the hosts file, which is a C:\Windo
 State: game was still running at capture end (owner can close). No game files changed by us this session. This is the strongest evidence yet that A2 (GATOR/gconnect emulator) is the viable path and that its first layer is plaintext HTTP (interceptable without TLS).
 
 
+
+
+### Session 28bs - MAJOR UNLOCK for A2. (1) The live online-config kill switch is confirmed: GET GetOnlineConfig?onlineConfigID=21fc0b75f83c49f2a51726f60fd1c5f8&target=client now returns **HTTP 200 text/xml but ZERO bytes** (empty) - that empty config is exactly what makes FC3 show "service unavailable" (our logger returning empty 200 reproduced the same error). (2) The FC3 game's ONLY online request captured is that GetOnlineConfig GET (empty body, headers `Host: onlineconfigservice.ubi.com`, `Accept: */*`); it does NOT reach gconnect until it gets a non-empty config. (3) The config SCHEMA + the RV redirect seam are recovered from Wayback.
+
+Config = a JSON array of {"Name":..,"Values":[..]}. Fields seen for other Ubisoft titles (Wayback, other onlineConfigIDs; FC3's id not archived):
+- **SandboxUrl** = `prudp://address=<RV host>;port=<port>`  and **SandboxUrlWS** = `<RV host>:<port>`  -> THE Quazal RendezVous (RV) endpoint the game's PRUDP client dials (examples: pdc-vm-rdv05.ubisoft.com ports 23900 / 21010; mdc-mm-rdv21.ubisoft.com port 22250).
+- **AuthenticationServer** = `lb-agora.ubisoft.com:3081` (Agora = Ubisoft auth). **LobbyServer** = `lb-lsg-prod.ubisoft.com:3105`.
+- Client extras: MmpTitleId (e.g. 0xA004), uplay_* base URLs. Server-target config: genome_id, mmp_svc_key, mmp_title_id, pkws_url, product_id, uws_url (ubiaccountservice.ubi.com/legacy/AgoraAuthentication.asmx).
+
+ARCHITECTURAL CONCLUSION (redirect seam, no crypto needed for the seam): because the config supplies the RV endpoint as `prudp://address=...;port=...`, we do NOT have to hosts-redirect the RV host - we just SERVE FC3 a crafted GetOnlineConfig whose SandboxUrl points at **127.0.0.1:<our port>**. Then FC3's own Quazal RV client connects to OUR local PRUDP server; we implement the Quazal RV handshake (PRUDP login + create/join session + peer routing) and storm::echo carries gameplay. The RV protocol is **Quazal PRUDP** (known middleware; public reverse-engineering exists), so this is tractable.
+
+CONCRETE NEXT STEPS:
+1. Serve FC3 a crafted GetOnlineConfig JSON via the logger (set GATOR_CANNED=<fc3_config.json>) - start with the fields above (SandboxUrl/SandboxUrlWS -> 127.0.0.1:<port>, AuthenticationServer, LobbyServer, MmpTitleId) and iterate: FC3 reads specific keys; add them until the "unavailable" error clears and the game tries to dial the PRUDP endpoint.
+   - Need FC3's expected keys/ids: read them from FC3.dll (grep the config keys it parses: SandboxUrl, SandboxUrlWS, AuthenticationServer, LobbyServer, MmpTitleId, plus any FC3-specific names) OR iterate empirically.
+2. Run a local UDP listener on 127.0.0.1:<port> to CAPTURE the first PRUDP packets FC3 sends once it trusts our config - the PRUDP header/version/login is the reverse target. (scripts/gator_mock/udp_sniffer.py.)
+3. Then implement the Quazal RV server responses (there are public Quazal/RendezVous references).
+
+Artifacts: live empty-config proof + Wayback schema (this section). Tools: scripts/gator_mock/{http_logger.py,hosts_patch.py,README}. State: game closed by owner; hosts may still be redirected - restore when idle. No game files changed.
+
+
