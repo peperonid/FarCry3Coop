@@ -4994,3 +4994,14 @@ STRATEGIC STATE (unchanged from 28bp, now reinforced): the offline co-op session
 Action this session: set GamerProfile SessionProvider back to "" (online default) via lan_mode.py online; owner to `hosts_patch.py restore` (admin) so normal play + mod 262 are unaffected.
 
 
+
+
+### Session 28bx - split-screen switch test result: args did NOT reach the game via the farcry3.exe launcher.
+
+Owner ran scripts/fc3_splitscreen_coop.bat (launches bin\\farcry3.exe with `-splitscreen`/`-splitscreen4 -coop -skipintro -quickstartup`, upc running). Result: the game still showed "Служба Far Cry 3 недоступна" / behaved as ordinary single-player - the split-screen switches were **dropped/ignored** (matches NOTES 263-267: the upc-relaunched farcry3_d3d11.exe receives only `-language`, extra args stripped). So the primary (safe) path cannot deliver `-splitscreen` to the process on this build.
+
+The ONLY way to hand the switch to farcry3_d3d11.exe is a direct launch outside upc via the loader proxy with FC3COOP_FAKE_ONLINE=1 (NOTES 28bh proved FAKE_ONLINE boots to menu). That also decides whether split-screen co-op exists at all on the PC build (the strings exist but the PC game layer has no LAN/splitscreen provider, 2026-10-25; co-op is _RdV-only). Deploying the proxy overwrites bin\\uplay_r1_loader.dll (real Ubisoft loader, 294400 B) and needs the real one moved to bin\\real\\ for forwarding - reversible via backups but can break boot if the proxy can't fully fake. DECISION for owner: one fair proxy-based `-splitscreen` test, or accept PC co-op is online-_RdV-only and pivot to plan B.
+
+State: GamerProfile SessionProvider reverted to empty; hosts restored (clean); bin = pristine mod262; launcher committed. No game files changed this session.
+
+
