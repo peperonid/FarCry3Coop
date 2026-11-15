@@ -4868,3 +4868,28 @@ Next concrete step for A2: inventory exactly which RV/online endpoints + handsha
 State: TestFC3_105 bin restored to pristine mod 262 (MD5 46BCC097); no game crash left behind; 2-instance build kept as *.dll.patched. All dev-launch empirical results now recorded (28bl menu-only, 28bp type-2 exits).
 
 
+
+
+### Session 28bq - A2 surface scoped via static URL/hostname harvest + DNS/TCP liveness (no admin, no C: writes). Key result: Ubisoft's OnlineConfig service is STILL ONLINE, but the FC3 session/RV host is DEAD. So A2 must emulate the RendezVous/session server; the config bootstrap may be reusable.
+
+Static harvest (Python string scan of FC3.dll / FC3_d3d11.dll / uplay_r14.dll / ubiorbitapi loader):
+- RV/online endpoints embedded in FC3.dll: `onlineconfigservice.ubi.com` (+ `cert-`/`uat-` variants) -> `OnlineConfigService.svc` (SOAP, GetOnlineConfig, path `/OnlineConfig`); **`fc3-bloomberg-server.ubisoft.org`** = the FC3 online/session backend host; `UbiAccountService.svc` with a DEV URL `http://localhost/Ubisoft.UbiAccount.Services/UbiAccountService.svc` (a built-in localhost seam). Quazal is compiled into the FC3 binary: tokens `Rendezvous / RendezVous / GATOR / Matchmaking / STUN / punchtraversal / NATTraversal / Passport / orbitapi`. => the RV (Quazal RendezVous) client lives in FC3.dll itself, not in the Ubisoft Connect libs (uplay_r14.dll is the modded Uplay stub referencing uplay_r1.dll).
+- Non-service noise ignored (digicert/symantec CRL/ocsp, wikipedia, macromedia, steampowered app id 220240, shop.ubi.com).
+
+DNS + TCP liveness (2026-11-14):
+- `onlineconfigservice.ubi.com` RESOLVES (CNAME lb-ne1z03-p-vh-ws.ubisoft.com -> 216.98.50.240) and **TCP/443 CONNECTS (OPEN)**. So the online-config bootstrap host is still up and reachable from this PC. (cert- 216.98.51.39, uat- 216.98.53.179 also resolve.)
+- **`fc3-bloomberg-server.ubisoft.org` NXDOMAIN** (dead). This is the FC3 session/RV backend.
+- ubi.com resolves (AWS 18.210.19.179 etc.); ubisoft.org has an empty A record.
+
+WHY `-dedicated -host ... -online` exits in ~1 s (28bp) - refined hypothesis: the game reaches OnlineConfig (up), obtains the session/RV endpoint (which points at the now-dead bloomberg host / an RV service), and the RV connect fails instantly (NXDOMAIN -> immediate abort), so the type-2 session bootstrap dies before opening a game socket (consistent with zero sockets/DNS seen in 28bp's tight poll). NOT yet confirmed which exact host the co-op path dials (needs the menu private-coop path, where the game stays alive, to capture the live RV host).
+
+A2 SCOPE (concrete):
+- The ONLINE-CONFIG bootstrap is reachable -> we may NOT need to emulate it; the game may fetch real config, then just fail to reach the RV/session host. Two sub-options: (a) hosts-file redirect `fc3-bloomberg-server.ubisoft.org` (and any other dead RV host the menu path reveals) to 127.0.0.1 and run a local Quazal RendezVous emulator there; (b) if config itself must be intercepted, emulate OnlineConfigService.svc (SOAP) too.
+- The hard part stays: implementing the Quazal **RendezVous PRUDP** server the game speaks (login + create/join session + peer routing) with correct session semantics, then storm::echo carries gameplay between the host and client that RV wired together.
+- The `http://localhost/.../UbiAccountService.svc` dev URL is a lead: FC3 shipped with a localhost account-service seam; if a config/registry switch enables it, account/auth could be satisfied locally without touching Ubisoft.
+
+DECISIVE NEXT PROBE (cheap, needs owner to click, no admin): run a background poller of Get-DnsClientCache + Get-NetTCPConnection/Get-NetUDPEndpoint and have the owner, in a NORMAL upc launch, open Multiplayer -> Co-op -> create a PRIVATE session; capture which host(s) the game dials and whether they are alive. That pins the exact RV/session endpoint(s) to emulate (or reveals one is still live). Record the result, then either redirect+emulate (A2) or, if a co-op RV endpoint is somehow still alive, test the real path.
+
+State: no game files changed; game not running. Harvest + liveness are the artifact (this section).
+
+
