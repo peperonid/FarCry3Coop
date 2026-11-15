@@ -4665,3 +4665,14 @@ A2 КОНКРЕТНЫЙ СЛЕДУЮЩИЙ ШАГ (нужен админ вла�
 Артефакты: прочитан NetworkProfile из GamerProfile.xml. ДАЛЬШЕ: помощник lan_mode.py для бэкапа + переключения SessionProvider=Lan в профиле (путь через аргумент/glob, без жёсткого имени юзера); процедура LAN-теста в два инстанса; при неудаче - xref SessionProvider в Ghidra ради таблицы фабрик провайдера и точного принятого токена.
 
 
+
+
+### Сессия 28bv - результат ЭКСПЕРИМЕНТА с LAN-провайдером + инвентарь стартовых ключей.
+
+Владелец применил SessionProvider="Lan" (через lan_mode.py; игра НЕ перезаписала GamerProfile.xml - mtime не изменился, значение осталось "Lan", т.е. игра его ЗАГРУЗИЛА). Живой эффект: ошибка «сеть» при запуске/логине ИСЧЕЗЛА (наш конфиг + Lan-провайдер сняли гейт онлайн-проверки - большой шаг). Но меню **«ИГРА ОНЛАЙН» по-прежнему ищет чуть дольше и даёт «Служба Far Cry 3 недоступна»** - т.е. ко-оп-меню всё ещё идёт в RV/GATOR-поиск сессий и падает. Значит Lan-провайдер помог логину, но поиск/хост ко-оп-сессии всё ещё требует бэкенд (либо Lan нужны LAN-аккаунты, `<Accounts/>` пуст).
+
+Инвентарь ключей запуска + ко-опа в FC3.dll (новое): ключи **`-coop`** (0x1566100), **`-login` и `-login2 / -login3 / -login4`** (0x1566050/058/098/0a0/0a8) = точка LAN-мульти-аккаунта (совпадает с FUN_106516f1, ставящим accountFlags=2 до 4 аккаунтов, 28bn), `-online` (0x1566058), `-offline` (0x150912c), `-dedicated`, `-host`, `-sandbox`. Слой ко-оп-сессии: `CFCXCreateSessionOperation`/`CFCXCreateSessionOpCtn` (0x156c074), `CCreateSessionParam`/`CCreateGameSessionParam` (0x168f638/0x168f248), `CSessionCreateGameOperation`, `CreateSession` (0x1742fa7), `PrivateCoopPlaylist` (0x15564e0), `CQuickMatchStateCreateSession`, UI лобби ко-опа `ui\multiplayer\menu\mpcooplobby.feu`, `CFCXFireCoopLobbyUI`. Карты ко-опа подтверждены: coop_vidar/skadi/freyja/huginn/sleipnir/fenrir. Кандидаты атрибутов `<Account>`: Name, Type, Id/AccountId, UserId, Login, Password, Email, Token (точная схема ещё уточняется).
+
+ПРОЧИТАНИЕ: ко-оп FC3 - это сессия (CFCXCreateSessionOperation) поверх активного провайдера сессий; путь онлайн-ко-оп-меню по-прежнему ведёт в RV/GATOR. Два способа к joining-сессии: (A) удовлетворить RV/GATOR поиск/создание ко-оп-сессии для меню «Игра онлайн» (эмуляция бэкенда A2, теперь с проходящим логином); (B) завести LAN-сессию через `-coop` + Lan-провайдер + LAN-аккаунты `-loginN` + хост, в обход RV. Следующие решающие данные = снять сеть, которую поиск/хост ко-опа выпускает СЕЙЧАС, когда логин проходит (это GATOR-HTTP, который можно отдать? RV/PRUDP на SandboxUrl? или LAN-вещание на 9004?).
+
+

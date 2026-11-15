@@ -4966,3 +4966,14 @@ HYPOTHESIS TO TEST (reversible config edit + backup): GamerProfile.xml `<Network
 Artifacts: GamerProfile.xml NetworkProfile read. NEXT: helper lan_mode.py to backup + toggle SessionProvider=Lan in the profile (path via arg/glob, no hardcoded user); LAN two-instance test procedure; on failure, Ghidra xref of SessionProvider to get the provider factory map and the exact accepted token.
 
 
+
+
+### Session 28bv - LAN provider EXPERIMENT result + launch-switch inventory.
+
+Owner applied SessionProvider="Lan" (via lan_mode.py; the game did NOT rewrite GamerProfile.xml - mtime unchanged, value still "Lan", so the game LOADED it). LIVE effect: the boot/login "network error" is GONE (our served config + Lan provider cleared the online-check gate - big step forward). But the **"ИГРА ОНЛАЙН" (Play Online) co-op menu still searches a bit longer then shows "Служба Far Cry 3 недоступна"** - i.e. the co-op menu still reaches the RV/GATOR session search and fails. So Lan provider helped login but the co-op session search/host still needs the backend (or Lan needs LAN accounts present, `<Accounts/>` is empty).
+
+FC3.dll launch-switch + co-op inventory (new): switches **`-coop`** (0x1566100), **`-login` and `-login2 / -login3 / -login4`** (0x1566050/058/098/0a0/0a8) = the LAN multi-account entry (matches FUN_106516f1 setting accountFlags=2 for up to 4 accounts, 28bn), `-online` (0x1566058), `-offline` (0x150912c), `-dedicated`, `-host`, `-sandbox`. Co-op session layer: `CFCXCreateSessionOperation`/`CFCXCreateSessionOpCtn` (0x156c074), `CCreateSessionParam`/`CCreateGameSessionParam` (0x168f638/0x168f248), `CSessionCreateGameOperation`, `CreateSession` (0x1742fa7), `PrivateCoopPlaylist` (0x15564e0), `CQuickMatchStateCreateSession`, co-op lobby UI `ui\multiplayer\menu\mpcooplobby.feu`, `CFCXFireCoopLobbyUI`. Coop maps confirmed: coop_vidar/skadi/freyja/huginn/sleipnir/fenrir. `<Account>` candidate attrs seen: Name, Type, Id/AccountId, UserId, Login, Password, Email, Token (exact schema still to confirm).
+
+READING: FC3 co-op is a session (CFCXCreateSessionOperation) that runs over the active session provider; the online co-op menu path still drives RV/GATOR. Two ways to a joinable session: (A) satisfy the RV/GATOR co-op session search/create for the "Play Online" menu (the A2 backend emulation, now with login passing); (B) drive a LAN session via `-coop` + Lan provider + `-loginN` LAN accounts + host, bypassing RV. Next decisive data = capture the network the co-op search/host emits NOW that login passes (is it a GATOR HTTP request we can serve, RV/PRUDP to SandboxUrl, or LAN broadcast on 9004?).
+
+
