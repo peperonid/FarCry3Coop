@@ -4,3 +4,4 @@ fc3_config.local.json
 hosts.backup
 __pycache__/
 *.pyc
+netwatch_log.txt
