@@ -4652,3 +4652,16 @@ A2 КОНКРЕТНЫЙ СЛЕДУЮЩИЙ ШАГ (нужен админ вла�
 3. Эксперимент storm::echo LAN-loopback: найти, откуда грузятся EchoStartupParamsWin32 / LanMatchmaking*, и попробовать LanMatchmakingDiscoveryOnLoopbackEnable=1 + LanMatchmakingReuseAddress=1 + MatchMakingEnabled=1 с локальным хостом, без RV.
 
 
+
+
+### Сессия 28bu - НАЙДЕН ПЕРЕКЛЮЧАТЕЛЬ LAN-CO-OP в пишемом профиле игры (владелец разрешил читать Documents\My Games\Far Cry 3 только на чтение).
+
+Файл лога онлайн/gator не пишется (только GamerProfile.xml + TutorialProfile.xml). **`<NetworkProfile>` в `GamerProfile.xml`** - это разбораемый сетевой конфиг движка, содержит ровно те ключи, что найдены в FC3.dll как схема настроек (с человеческими описаниями в бинаре): `OnlineEnginePort=9000`, `OnlineServicePort=9001`, `FileTransferHostPort/ClientPort=9002/9003`, **`LanHostBroadcastPort=9004`**, **`LanClientBroadcastPort=9005`**, `ScanFreePorts=1`, `ScanPortStart=9000`, `ScanPortRange=1000`, `CustomMapMaxUploadRateInBitsOnline/Lan`, **`SessionProvider=""` (ПУСТО)** и `<Accounts />` (дочерний элемент `Account`).
+
+РЕШАЮЩЕЕ: в FC3.dll есть явные режимы сессии/провайдера **"Online" vs "Lan"** - таблица имён состояний `IdleState/SearchState/JoinState/CreateState/SessionState/MergeState`, сразу за которой идут токены **`Online` / `Lan` / `LAN`** (0x1560650/0x1560658/0x1597410); плюс токены `None/Local/Offline/Null/RdV` и регистрации RV-провайдера (много `RdV`). Значение конфига `SessionProvider` - строка выбора провайдера; ПУСТО сейчас по умолчанию даёт онлайн/RdV-бэкенд (потому все попытки шли в RV и вставали на логине). **Значение `SessionProvider="Lan"` должно переключить FC3 на LAN-провайдер сессий** (хост вещает на LanHostBroadcastPort 9004, клиенты обнаруживают на LanClientBroadcastPort 9005) - локальная joining-сессия 2-4 игрока **БЕЗ серверов Ubisoft и БЕЗ крипто Quazal PRUDPS**. Это совпадает с 28bn (LAN-флаги аккаунтов=2, до 4 аккаунтов через `-loginN`) и объясняет 28bp (`-dedicated -host` занял порты, но joining-сессии не было, т.к. SessionProvider был пуст/online).
+
+ГИПОТЕЗА ДЛЯ ПРОВЕРКИ (обратимая правка конфига + бэкап): в GamerProfile.xml `<NetworkProfile ... SessionProvider="Lan">`; запустить хост (создать ко-оп) + второй инстанс (пропатченный 2-инстансный DLL) для входа через LAN-обнаружение. Если LAN-вход заработает офлайн, ко-оп получен **БЕЗ всякой эмуляции RV/GATOR/PRUDP**. Если "Lan" отклоняется/игнорируется - прочитать xref парсера строки провайдера (SessionProvider 0x14ee1b8 -> таблица фабрик) ради точного принятого значения, либо заполнить `<Accounts><Account .../></Accounts>`.
+
+Артефакты: прочитан NetworkProfile из GamerProfile.xml. ДАЛЬШЕ: помощник lan_mode.py для бэкапа + переключения SessionProvider=Lan в профиле (путь через аргумент/glob, без жёсткого имени юзера); процедура LAN-теста в два инстанса; при неудаче - xref SessionProvider в Ghidra ради таблицы фабрик провайдера и точного принятого токена.
+
+

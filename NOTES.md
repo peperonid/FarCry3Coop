@@ -4953,3 +4953,16 @@ NEXT EXPERIMENTS:
 3. Storm::echo LAN-loopback experiment: find where EchoStartupParamsWin32 / LanMatchmaking* are loaded (config file or registry) and try LanMatchmakingDiscoveryOnLoopbackEnable=1 + LanMatchmakingReuseAddress=1 + MatchMakingEnabled=1 with a local host, no RV.
 
 
+
+
+### Session 28bu - LAN-CO-OP CONTROL SURFACE FOUND in the writable game profile (owner consented to read Documents\My Games\Far Cry 3 read-only).
+
+No online/gator log file is written (only GamerProfile.xml + TutorialProfile.xml). The **`GamerProfile.xml` `<NetworkProfile>`** is the engine's parsed net config and contains the exact keys found in FC3.dll as a settings schema (with human descriptions in-binary): `OnlineEnginePort=9000`, `OnlineServicePort=9001`, `FileTransferHostPort/ClientPort=9002/9003`, **`LanHostBroadcastPort=9004`**, **`LanClientBroadcastPort=9005`**, `ScanFreePorts=1`, `ScanPortStart=9000`, `ScanPortRange=1000`, `CustomMapMaxUploadRateInBitsOnline/Lan`, **`SessionProvider=""` (EMPTY)**, and `<Accounts />` (child element `Account`).
+
+DECISIVE: FC3.dll has explicit **session/provider modes "Online" vs "Lan"** - a state-name table `IdleState/SearchState/JoinState/CreateState/SessionState/MergeState` immediately followed by the tokens **`Online` / `Lan` / `LAN`** (0x1560650/0x1560658/0x1597410); plus `None/Local/Offline/Null/RdV` tokens and the RV provider registrations (many `RdV`). The config `SessionProvider` value is a string that selects the provider; EMPTY currently defaults to the online/RdV backend (which is why every attempt tried RV and stalled at login). **Setting `SessionProvider="Lan"` should switch FC3 to the LAN session provider** (host broadcasts on LanHostBroadcastPort 9004, clients discover on LanClientBroadcastPort 9005), giving a joinable local 2-4 player session with **NO Ubisoft servers and NO Quazal PRUDPS crypto**. This matches 28bn (LAN account flags=2, up to 4 accounts via `-loginN`) and explains 28bp (`-dedicated -host` bound ports but no joinable session because SessionProvider was empty/online).
+
+HYPOTHESIS TO TEST (reversible config edit + backup): GamerProfile.xml `<NetworkProfile ... SessionProvider="Lan">`; launch host (create co-op) + a second instance (patched 2-instance DLL) to join via LAN discovery. If a LAN join works offline, co-op is achieved WITHOUT any RV/GATOR/PRUDP emulation. If "Lan" is rejected/ignored, read the provider-string parser xref (SessionProvider 0x14ee1b8 -> factory map) for the exact accepted value, or populate `<Accounts><Account .../></Accounts>`.
+
+Artifacts: GamerProfile.xml NetworkProfile read. NEXT: helper lan_mode.py to backup + toggle SessionProvider=Lan in the profile (path via arg/glob, no hardcoded user); LAN two-instance test procedure; on failure, Ghidra xref of SessionProvider to get the provider factory map and the exact accepted token.
+
+
