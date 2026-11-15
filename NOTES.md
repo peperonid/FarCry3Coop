@@ -4847,3 +4847,24 @@ CONSEQUENCE: cannot statically prove whether CFCXJoinSessionOperation needs an R
 State: no game files changed (pure static RE). All A1 RE artifacts in scratch (a1c/a1d/a1e/a1g_decompile.txt) + scripts DecompileA1c..g.java + run_a1c..g.py.
 
 
+
+
+### Session 28bp - DECISIVE EMPIRICAL TEST of the dev-launch / dedicated path: a JOINABLE NETWORKED co-op session on PC cannot start without the Ubisoft online/RV service. This closes the "cheap A1" hope and points to A2 (local RendezVous/GATOR emulator) as the realistic path. Ran on the working build with the 2-instance (.patched) DLLs, then restored pristine (MD5 46BCC097).
+
+Results (owner read the screens; we launched detached + watched netstat/WMP):
+- 2 instances coexist (mutex patch) and no crash - confirmed again.
+- `-dedicated -host coop_vidar -login host1 -coop` (session TYPE 3, local): the dedicated host STAYS ALIVE and binds UDP 9000 on 127.0.0.1 (loopback). But it does NOT create a joinable session: launching `-client -login client1 -coop -ip 127.0.0.1` gives two processes that BOTH just sit on the MAIN MENU; the client never binds 9001 / never reaches a connect; no join. Type 3 is the LOCAL/console session -> nothing on the wire to join. (Matches 28bn: dev switches only fill a launch-record.)
+- `-dedicated -host coop_vidar -login host1 -coop -online` (session TYPE 2, the NETWORKED kind a remote player could join): the process EXITS within ~5 s (procs=0, NO crash event). The online/networked session bootstrap aborts immediately because the Ubisoft online/RV service it requires at startup is gone.
+
+CONCLUSION (empirical, strong): the ONLY session type that supports remote join (type 2 / online) cannot even START on this build now (instant exit, needs the online service); the only type that starts offline (type 3 / local) has no network to join. So no combination of stock dev switches yields a joinable co-op session. Bantila's frozen lobby and mod 262's solo-only are the same wall, now reproduced on our stable base.
+
+IMPLICATION FOR THE CHOSEN ROUTE:
+- A1 (stub the _RdV providers IN-PROCESS and run the existing ops) is NOT cheap after all: the type-2 online bootstrap aborts before any op runs, so we would first have to fake the online-service startup itself (make the game believe RV is reachable at init) before host/join ops could even execute - and the op layer is opaque script-reflection (28bo). Effectively A1 must recreate what the online service provides anyway.
+- A2 (local RendezVous/GATOR PRUDP emulator; docs/coop-gator-emulation-plan.md) is the path that makes the game's OWN online flow boot and drive create/join: we redirect the RV service hosts to a local emulator that answers the login/session bootstrap, the game runs its normal "private co-op session" menu (type 2), and storm::echo carries gameplay. The game drives the ops (we don't fight the reflection layer); we only answer RV. Two kill-switches remain (PRUDP crypto, storm::echo peer mapping) but the architecture fits.
+- B (own netcode over the local type-3 session) remains the hardest (replace the engine session layer).
+
+Next concrete step for A2: inventory exactly which RV/online endpoints + handshake the game contacts during the (now-aborting) `-online` boot and during a menu "create private co-op" - i.e. capture the outbound UDP/PRUDP + HTTPS to onlineconfigservice.ubi.com / rendezvous hosts, so the local emulator's minimum surface is known. (Needs a packet capture during an `-online` launch / menu attempt.)
+
+State: TestFC3_105 bin restored to pristine mod 262 (MD5 46BCC097); no game crash left behind; 2-instance build kept as *.dll.patched. All dev-launch empirical results now recorded (28bl menu-only, 28bp type-2 exits).
+
+
