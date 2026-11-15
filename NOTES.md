@@ -4931,3 +4931,25 @@ CONCRETE NEXT STEPS:
 Artifacts: live empty-config proof + Wayback schema (this section). Tools: scripts/gator_mock/{http_logger.py,hosts_patch.py,README}. State: game closed by owner; hosts may still be redirected - restore when idle. No game files changed.
 
 
+
+
+### Session 28bt - FC3 online architecture fully mapped from FC3.dll strings + first live A2 capture results.
+
+LIVE capture result (run_capture.py served fc3_config.json = non-empty, 212 bytes): the game fetched GetOnlineConfig once, then **made NO other HTTP request and never dialled the RV SandboxUrl (127.0.0.1:50000)** - netwatch showed the game resolving the LIVE modern UbiServices stack (public-ubiservices.ubi.com -> 3.173.11.203 AWS; public-ws-ubiservices.ubi.com -> 166.117.137.155/173) - those go through Ubisoft Connect (upc.exe), not the game PID - and the game UDP-bound 192.168.1.8:9000 (Storm) + :52212 (peer). So after config the game halts at the LOGIN step and never reaches RV session dial.
+
+FC3.dll string map (the whole online core):
+- **Login state machine** enum order: Invalid -> NotLoggedIn -> NotLoggedInAborted -> **FetchOnlineConfig -> FetchOnlineConfigRdy -> LoggingIn(Rdy) -> LoggingInFinalizing -> LoggedIn -> LoggedInUplayServices...** ; plus `CFCXGatorLoginCheckOperation` = the GATOR login check inside LoggingIn.
+- **Everything online is the Quazal RendezVous (RV) provider set**: `CGame{Matchmaking,Friend,Location,QueueService,Messaging,Privilege,OnlineData,Intel,TitleStorage,UserStorage,Tracking,Invite,FrontendService}_Provider_RdV` and `CSession{Create,Join,Search,SearchSessionId,Start,End,Delete,Update,Login,Logout,FinalizeLogin,PlayerAdd/Remove,SetupConnectivityToUsers,SendMessage,MigrateHost,...}Operation_RdV` driven by `CSessionManagerImp_RdV`. Config switch `UseRdV` toggles it.
+- **RV connection is ENCRYPTED PRUDPS**: URI template `prudps:/address=%s;port=%d;stream=%d;sid=%d;PID=%d;CID=1;type=%d` (and `prudp:/address=`) built in `JobBackEndServicesLoginWithData.cpp` which reads **`SandboxUrl`** from the online config. So SandboxUrl is consumed at BACK-END LOGIN (JobBackEndServicesLoginWithData), and the transport is PRUDPS (Quazal secure PRUDP) -> this is the crypto wall (PRUDP handshake + RC4/signature).
+- **GATOR is the RV backend's service name**: a full error enum `E_SESSION_ERROR_GATOR_*` includes `SERVICE_UNAVAILABLE`, `INVALID_TICKET/EXPIRED_TICKET/INVALID_TOKEN/INVALID_AUTH_TOKEN/COULD_NOT_RETRIEVE_NP_TICKET`, `CRYPT_FAILURE`, `NOT_SIGNED_IN`, `NO_PRIVILEGE`, `HTTP_*` -> login needs a valid Uplay NP ticket/token; `CFCXGatorLoginCheckOperation` + `GATOR_NOT_SIGNED_IN/COULD_NOT_RETRIEVE_NP_TICKET` is the likely abort point (no ticket -> stop before RV).
+- **`fc3-bloomberg-server.ubisoft.org` is NOT the session host** - it is telemetry/crash (`CBloombergConfig`, `bloomberg.reporter.crash.exe`, `bloomberg.listener.crash.exe`, `-bloombergstats`). The RV host is only `SandboxUrl` (not present in the dead bloomberg path).
+- **LAN-matchmaking shortcut strings** (storm::echo net-engine startup params table, with human descriptions): `LanMatchmakingDiscoveryOnLoopbackEnable`, `LanMatchmakingReuseAddress`, `ForceRouting`, `DisableRouting`, `DetectUploadBandwidth`, alongside `EchoStartupParamsWin32`, `MatchMakingEnabled`, `MaxMatchmakingTime`, `MaxJoinAttempts`, `PingPeriod`, `SearchPeriod`, `Weight*`. These are engine net settings (not the online config); enabling loopback LAN discovery may let sessions be discovered/joined locally. There is also a `-sandbox` cmdline switch and a `Software\Quazal` registry key, and `MatchMakingEnabled`.
+
+CONCLUSION: A2 needs TWO things in order: (1) satisfy the GATOR login check (needs a valid Ubisoft NP ticket/token - probably obtainable via a running, logged-in Ubisoft Connect since UbiServices is LIVE, OR forge one), (2) implement the Quazal **PRUDPS** RV server (the crypto wall) and the CSession*Operation_RdV create/join flow. The cheapest possible shortcut is the storm::echo **LAN-matchmaking-over-loopback** settings + LAN account flags (28bn), which may bypass RV/GATOR entirely for a LAN-style 2-4 player session - worth an experiment.
+
+NEXT EXPERIMENTS:
+1. Confirm current in-game behaviour with the served config (did "service unavailable" change to a sign-in error?). If sign-in error -> ticket/token is the wall; check whether launching through a logged-in Ubisoft Connect gives FC3 a ticket.
+2. Look for FC3's own online log (it writes to %USERPROFILE%\Documents\My Games\Far Cry 3 on C: - needs owner consent to read) to capture the exact E_SESSION_ERROR_GATOR_* code at the abort.
+3. Storm::echo LAN-loopback experiment: find where EchoStartupParamsWin32 / LanMatchmaking* are loaded (config file or registry) and try LanMatchmakingDiscoveryOnLoopbackEnable=1 + LanMatchmakingReuseAddress=1 + MatchMakingEnabled=1 with a local host, no RV.
+
+

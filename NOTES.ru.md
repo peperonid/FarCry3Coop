@@ -4630,3 +4630,25 @@ A2 КОНКРЕТНЫЙ СЛЕДУЮЩИЙ ШАГ (нужен админ вла�
 Артефакты: доказательство пустого конфига + схема из Wayback (этот раздел). Инструменты: scripts/gator_mock/{http_logger.py,hosts_patch.py,README}. Состояние: игру владелец закрыл; hosts может всё ещё быть перенаправлен - восстановить в простое. Файлы игры не менялись.
 
 
+
+
+### Сессия 28bt - Архитектура онлайна FC3 полностью снята со строк FC3.dll + первые живые результаты A2-захвата.
+
+Результат живого захвата (run_capture.py отдал fc3_config.json = непустой, 212 байт): игра один раз забрала GetOnlineConfig, затем **не сделала НИ ОДНОГО другого HTTP-запроса и так и не постучалась на RV SandboxUrl (127.0.0.1:50000)** - netwatch показал, что игра резолвит ЖИВОЙ современный стек UbiServices (public-ubiservices.ubi.com -> 3.173.11.203 AWS; public-ws-ubiservices.ubi.com -> 166.117.137.155/173) - это идёт через Ubisoft Connect (upc.exe), а не через PID игры - и игра заняла UDP 192.168.1.8:9000 (Storm) + :52212 (пир). Значит после конфига игра встаёт на ШАГЕ ЛОГИНА и до RV-диала не доходит.
+
+Карта FC3.dll (всё онлайн-ядро):
+- **Машина состояний логина** (порядок enum): Invalid -> NotLoggedIn -> NotLoggedInAborted -> **FetchOnlineConfig -> FetchOnlineConfigRdy -> LoggingIn(Rdy) -> LoggingInFinalizing -> LoggedIn -> LoggedInUplayServices...** ; плюс `CFCXGatorLoginCheckOperation` = проверка логина GATOR внутри LoggingIn.
+- **Весь онлайн - это набор провайдеров Quazal RendezVous (RV)**: `CGame{Matchmaking,Friend,Location,QueueService,Messaging,Privilege,OnlineData,Intel,TitleStorage,UserStorage,Tracking,Invite,FrontendService}_Provider_RdV` и `CSession{Create,Join,Search,SearchSessionId,Start,End,Delete,Update,Login,Logout,FinalizeLogin,PlayerAdd/Remove,SetupConnectivityToUsers,SendMessage,MigrateHost,...}Operation_RdV` под управлением `CSessionManagerImp_RdV`. Переключатель конфига `UseRdV`.
+- **RV-подключение ЗАШИФРОВАНО (PRUDPS)**: шаблон URI `prudps:/address=%s;port=%d;stream=%d;sid=%d;PID=%d;CID=1;type=%d` (и `prudp:/address=`) строится в `JobBackEndServicesLoginWithData.cpp`, который читает **`SandboxUrl`** из онлайн-конфига. То есть SandboxUrl используется при ЛОГИНЕ В БЭКЕНД (JobBackEndServicesLoginWithData), транспорт - PRUDPS (защищённый PRUDP Quazal) -> это крипто-стена (рукопожатие PRUDP + RC4/подпись).
+- **GATOR - имя сервиса RV-бэкенда**: полный enum ошибок `E_SESSION_ERROR_GATOR_*`, включающий `SERVICE_UNAVAILABLE`, `INVALID_TICKET/EXPIRED_TICKET/INVALID_TOKEN/INVALID_AUTH_TOKEN/COULD_NOT_RETRIEVE_NP_TICKET`, `CRYPT_FAILURE`, `NOT_SIGNED_IN`, `NO_PRIVILEGE`, `HTTP_*` -> логину нужен валидный NP-тикет/токен Ubisoft; `CFCXGatorLoginCheckOperation` + `GATOR_NOT_SIGNED_IN/COULD_NOT_RETRIEVE_NP_TICKET` - вероятная точка отказа (нет тикета -> стоп до RV).
+- **`fc3-bloomberg-server.ubisoft.org` - НЕ сессионный хост** - это телеметрия/краши (`CBloombergConfig`, `bloomberg.reporter.crash.exe`, `bloomberg.listener.crash.exe`, `-bloombergstats`). RV-хост - только `SandboxUrl` (в мёртвом bloomberg-пути его нет).
+- **Строки LAN-шортката** (таблица стартовых параметров движка storm::echo, с человеческими описаниями): `LanMatchmakingDiscoveryOnLoopbackEnable`, `LanMatchmakingReuseAddress`, `ForceRouting`, `DisableRouting`, `DetectUploadBandwidth` рядом с `EchoStartupParamsWin32`, `MatchMakingEnabled`, `MaxMatchmakingTime`, `MaxJoinAttempts`, `PingPeriod`, `SearchPeriod`, `Weight*`. Это настройки сетевого движка (не онлайн-конфиг); включение loopback-LAN-обнаружения может позволить находить/входить в сессии локально. Ещё есть ключ `-sandbox` и реестр `Software\Quazal`, и `MatchMakingEnabled`.
+
+ВЫВОД: A2 требует двух вещей по порядку: (1) пройти проверку логина GATOR (нужен валидный NP-тикет/токен Ubisoft - вероятно достижим через запущенный и залогиненный Ubisoft Connect, раз UbiServices ЖИВ, либо подделать), (2) реализовать сервер Quazal **PRUDPS** RV (крипто-стена) и флоу create/join CSession*Operation_RdV. Самый дешёвый шорткат - настройки storm::echo **LAN-matchmaking поверх loopback** + LAN-флаги аккаунтов (28bn), что может полностью обойти RV/GATOR для LAN-подобной сессии 2-4 игрока - стоит проверить.
+
+СЛЕДУЮЩИЕ ЭКСПЕРИМЕНТЫ:
+1. Подтвердить текущее поведение в игре с отданным конфигом (ошибка «сервис недоступен» сменилась на ошибку входа?). Если ошибка входа -> стена это тикет/токен; проверить, даёт ли FC3 тикет запуск через залогиненный Ubisoft Connect.
+2. Найти собственный онлайн-лог FC3 (пишется в %USERPROFILE%\Documents\My Games\Far Cry 3 на C: - нужно согласие владельца на чтение), чтобы снять точный код E_SESSION_ERROR_GATOR_* в точке отказа.
+3. Эксперимент storm::echo LAN-loopback: найти, откуда грузятся EchoStartupParamsWin32 / LanMatchmaking*, и попробовать LanMatchmakingDiscoveryOnLoopbackEnable=1 + LanMatchmakingReuseAddress=1 + MatchMakingEnabled=1 с локальным хостом, без RV.
+
+
