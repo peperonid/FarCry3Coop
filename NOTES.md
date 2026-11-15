@@ -4893,3 +4893,21 @@ DECISIVE NEXT PROBE (cheap, needs owner to click, no admin): run a background po
 State: no game files changed; game not running. Harvest + liveness are the artifact (this section).
 
 
+
+
+### Session 28br - Live menu-path network capture pins the FIRST gate of the online path: FC3 calls gconnect.ubi.com over PLAIN HTTP/80 and the host is ALIVE but returns a "service unavailable" state (server-side kill switch), which is why the UI shows "Far Cry 3 service is not available. Please try again later." (loc id 145556 XLSP_DOWN). Emulation target = GATOR/gconnect, and layer 1 is plaintext HTTP (trivial to intercept - no TLS).
+
+Owner launched the game normally (upc), opened Multiplayer->Co-op->private host; UI showed the error (screenshot). Our poller (by process name, no admin) captured for the whole attempt:
+- TCP: the game connected **216.98.50.240:80 (HTTP, plaintext)** then state CloseWait (server answered and closed). reverse-DNS of 216.98.50.240 = **gconnect.ubi.com** (same IP as onlineconfigservice.ubi.com's LB). So the online status/login service is **gconnect.ubi.com** = Ubisoft **GATOR / Gconnect**, reachable, HTTP/80.
+- UDP binds by the game: **0.0.0.0:3074** (the GATOR/console port) and **192.168.1.8:9000** (Storm OnlineEnginePort on the LAN adapter) - so the game opens the data-plane ports but the session never forms because the gconnect status/login returns "down" first.
+- No new DNS cache entries (gconnect/onlineconfig were already cached), and **fc3-bloomberg-server.ubisoft.org was NOT resolved** -> the game aborts at the gconnect "service unavailable" check before ever dialing the RV/session backend. Confirms the order: gconnect status/login (HTTP) FIRST, and that gate fails with a server-returned "down".
+
+KEY DE-RISK FOR A2:
+- The first layer is **PLAIN HTTP on port 80** to gconnect.ubi.com (no TLS) -> a local logging HTTP server + a hosts-file redirect of gconnect.ubi.com (and the onlineconfig aliases) to 127.0.0.1 lets us capture the EXACT request(s) the game sends and replay/answer them to get past the "service unavailable" gate. This is the cheapest, highest-value next A2 step and needs no crypto.
+- After that gate, the game will proceed to the RV/PRUDP (Quazal) layer and open UDP 3074/9000; those later layers still carry the known PRUDP-crypto kill-switch, but we can reach them once gconnect answers OK.
+
+A2 CONCRETE NEXT STEP (needs owner admin for the hosts file, which is a C:\Windows system file): (1) append to hosts: 127.0.0.1 gconnect.ubi.com, onlineconfigservice.ubi.com, cert-/uat- aliases; (2) run a tiny local HTTP-80 logger (Python http.server subclass that logs method/path/headers/body and returns a placeholder 200) to record what the game requests when trying to go online; (3) relaunch + navigate online, then read the logged requests to learn the gconnect protocol the game expects. Keep the original hosts file backed up. The game also uses port 3074 UDP - note for later PRUDP work.
+
+State: game was still running at capture end (owner can close). No game files changed by us this session. This is the strongest evidence yet that A2 (GATOR/gconnect emulator) is the viable path and that its first layer is plaintext HTTP (interceptable without TLS).
+
+
