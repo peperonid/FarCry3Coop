@@ -5013,3 +5013,16 @@ Ubisoft Connect устанавливается в `C:\Program Files (x86)\Ubisof
 Тулчейн подходит: наш uplay_proxy уже экспортирует вводимые игрой точки UPLAY (сейчас форвардит в настоящий uplay_r14); расширить эти обработчики локальным реестром party/сессий + насосом событий. Без RV/PRUDP, без чтения C:.
 
 
+
+
+### Сессия 28ct - ко-оп экспорты uplay_r14.dll это тонкие STL-форвардеры к неанализированным внутренним синглтонам, поэтому статическая декомпиляция не даёт раскладок структур; поворот к (1) публичным заголовкам Uplay SDK v1.x `uplay.h` и (2) эмпирическому live-трассирову фактической последовательности вызовов UPLAY_* игрой в UI хостинга/входа в ко-оп - это истина в последней инстанции для контракта прокси.
+
+Запущен Ghidra -noanalysis импорт uplay_r14.dll (проект FC3_uplay) + UpartyDe.java (H:/FarCryCoop/scratch/ghidra/uplay_party_de.txt). Каждая целевая функция (UPLAY_GetNextEvent, PARTY_GetFullMemberList, PARTY_GetInGameMemberList, FRIENDS_GetFriendList, SetGameSession, PARTY_Init, PARTY_InvitePartyToGame, PARTY_InviteToParty) - тонкая обёртка: проверка TLS, затем единственный вызов внутренней функции с глобалом-синглтоном модуля (UNK_103cf2b4 для полного списка участников, UNK_103cd0f4 для списка друзей, UNK_103d0ee8 для SetGameSession и т.д.) плюс параметры, затем освобождение счётчика ссылок. При -noanalysis внутренние функции не проанализированы, поэтому поля структур участника/друга/события не видны. Глубокий анализ 4.8 МБ бинарника медленный и всё равно косвенный.
+
+РЕШЕНИЕ ПО СТРАТЕГИИ:
+1. СТРУКТУРЫ ИЗ ПУБЛИЧНЫХ ЗАГОЛОВКОВ: импортируемые игрой имена в точности совпадают с публичным Ubisoft Uplay SDK v1.x `uplay.h` (UPLAY_PARTY_*, UPLAY_SetGameSession(data,numbytes), UPLAY_GetNextEvent, UPLAY_Friend_t, UPLAY_PartyMember_t, UPLAY_Event_t + enum UPLAY_EventType, joinability UPLAY_GameSession). Реализовывать прокси по этим опубликованным структурам, а не по угаданным смещениям. Сверить размеры с поведением экспортов uplay_r14 от мода в рантайме.
+2. ЭМПИРИЧЕСКИЙ LIVE-ТРАССИР (истина): расширить наш прокси uplay_r1_loader логировать каждый вызов ко-оп-поверхности (UPLAY_Init/Update/GetNextEvent, USER_IsConnected/GetCredentials, FRIENDS_Init/GetFriendList, PARTY_Init/IsPartyLeader/GetFullMemberList/SetGuest/SetUserData/InvitePartyToGame, SetGameSession/ClearGameSession, HasOverlappedOperationCompleted/GetOverlappedOperationResult, GetLastError) - функцию, аргументы (указатели/размеры/известные int) и возврат - пока владелец ведёт Multiplayer -> Co-op -> Host (затем 2-й инстанс -> Join). Это вскроет ТОЧНЫЙ порядок вызовов и то, какие данные игра читает прежде чем показать/набрать доступную сессию, без полного знания внутренностей структур заранее.
+
+ДАЛЬШЕ: добавить перехватчик логирования (FC3COOP_TRACE_UPPLAY=1) в src/uplay_proxy для поверхности UPLAY_*; прогнать хост + 2-й инстанс клиента через ко-оп UI; прочитать лог, чтобы зафиксировать минимальный контракт и наблюдаемые формы структур/событий. Затем реализовать локальный реестр party/сессий + насос событий в прокси (сборка A3a). Без C:, без RV.
+
+

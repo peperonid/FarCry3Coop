@@ -5314,3 +5314,16 @@ OPEN QUESTION (next RE): exact struct layouts the game consumes - UPLAY_Event_t 
 Toolchain fits: our existing uplay_proxy already exports the UPLAY entry points the game imports (it currently forwards to real uplay_r14); extend those handlers with the local party/session registry + event pump. No RV/PRUDP, no C: reads required.
 
 
+
+
+### Session 28ct - uplay_r14.dll co-op exports are thin STL forwarders to unanalyzed internal singletons, so static decompile does not yield the struct layouts; pivot to (1) public Uplay SDK v1.x `uplay.h` struct definitions and (2) an empirical live-trace of the game's actual UPLAY_* call sequence during the co-op host/join UI, which is the ground truth for the proxy contract.
+
+Ran Ghidra -noanalysis import of uplay_r14.dll (project FC3_uplay) + UpartyDe.java (H:/FarCryCoop/scratch/ghidra/uplay_party_de.txt). Every target export (UPLAY_GetNextEvent, PARTY_GetFullMemberList, PARTY_GetInGameMemberList, FRIENDS_GetFriendList, SetGameSession, PARTY_Init, PARTY_InvitePartyToGame, PARTY_InviteToParty) is a thin wrapper: TLS guard, then a single call to an internal function with a module-singleton global (UNK_103cf2b4 for the full-member list, UNK_103cd0f4 for the friend list, UNK_103d0ee8 for SetGameSession, etc.) plus the params, then refcount release. Under -noanalysis the internal funcs are not analyzed, so the member/friend/event struct fields are not visible. Deeper analysis of a 4.8 MB binary is slow and still indirect.
+
+STRATEGY DECISION:
+1. STRUCTS FROM PUBLIC HEADERS: the game's imported names match the public Ubisoft Uplay SDK v1.x `uplay.h` exactly (UPLAY_PARTY_*, UPLAY_SetGameSession(data,numbytes), UPLAY_GetNextEvent, UPLAY_Friend_t, UPLAY_PartyMember_t, UPLAY_Event_t + UPLAY_EventType enum, UPLAY_GameSession joinability). Implement the proxy against those published structs, not guessed offsets. Cross-check sizes against the mod's uplay_r14 export behaviour at runtime.
+2. EMPIRICAL LIVE TRACE (ground truth): extend our uplay_r1_loader proxy to LOG every call on the co-op surface (UPLAY_Init/Update/GetNextEvent, USER_IsConnected/GetCredentials, FRIENDS_Init/GetFriendList, PARTY_Init/IsPartyLeader/GetFullMemberList/SetGuest/SetUserData/InvitePartyToGame, SetGameSession/ClearGameSession, HasOverlappedOperationCompleted/GetOverlappedOperationResult, GetLastError) - function, args (pointers/sizes/known ints), and return - while the owner drives Multiplayer -> Co-op -> Host (then a second instance -> Join). This reveals the EXACT call order + which data the game reads before it will show/dial a joinable session, without needing the full struct internals up front.
+
+NEXT: add a logging interceptor (FC3COOP_TRACE_UPPLAY=1) to src/uplay_proxy for the UPLAY_* surface; run host + a 2nd client instance through the co-op UI; read the log to fix the minimal contract and the struct/event shapes actually observed. Then implement the local party/session registry + event pump in the proxy (A3a build). No C:, no RV.
+
+
