@@ -5486,3 +5486,16 @@ So the head blocker is NOT "FCX can never reach LoggingIn" - it reaches LoggingI
 Next: keep the observer live and (a) have the owner open Multiplayer -> Co-op -> Host to see if the front-end still says "service unavailable" or now proceeds; (b) make the proxy actually WRITE a credential blob into the GetCredentials out-params (needs the struct layout) to stop the LoggingOut cycle; (c) start rv_server + the SandboxUrl config seam to capture any RV dial that a sticking login triggers.
 
 
+
+
+### Session 28de - Co-op Host test result on the 28dd breakthrough: opening Multiplayer -> Co-op -> Host re-triggers a full FCX login cycle but it never sticks (always ends at code 15 = LoggingOut), so the co-op front-end does not proceed and NO RV dial / no UPLAY session call happens.
+
+Live trace after the owner opened Co-op -> Host (bin/uplay_api.log + coop_shim.log, saved to local/scratch/28dc_*):
+- Proxy log new entries (#28-#39, 17:32): ONLY UPLAY_USER_IsConnected (from FUN_1064acf3 @+0x64ad04) and an ACH_GetAchievements + overlapped-op re-poll cycle. NO SetGameSession, NO PARTY_InvitePartyToGame, NO RVCreateGameSession/RVJoinGameSession tag, NO new GetCredentials. So entering the co-op menu did not reach any session/transport call.
+- Shim FUN_107db689 observer: the login sequence repeats as three full cycles, each 3,4,5,6=LoggingIn,7,8,9=LoggingInSucceeded,13,14,15=LoggingOut (one extra handle=0x79e08600 code=3 line inside cycles B/C). Entering Co-op at 17:32 fired another such cycle that again reached 6/9 then fell to 15.
+
+Conclusion: the FCX login reaches LoggingIn + LoggingInSucceeded but is then LOGGED OUT every cycle; the online state never becomes stable, so the co-op Host gate never sees "online" and issues no RV connect. Reading FUN_107db689's own code map, 13/14 (0xd/0xe) are transition/no-op cases and the 15 (LoggingOut) is posted by the caller - so the abort happens in whatever the caller checks right after Succeeded(9). Prime suspect (consistent with 28db): the credential OUT buffers (a=011d33a0 / 011d3528) are left empty because FAKE_CREDS returns success WITHOUT writing the credential struct, so a downstream validation logs out. Secondary suspect: the entitlement-bit path FUN_10418c95/FUN_10421c46(0x40).
+
+NEXT (all H:): (1) RE the REAL uplay_r14.dll UPLAY_USER_GetCredentials/GetCdKeys to learn what they write into the two out-params (the struct layout), then have the proxy WRITE a valid fabricated credential blob so login sticks past 9; (2) if still logging out, trace the caller that posts 15 to see the exact check that fails. This is the precise, narrow frontier; it is entirely on H: (proxy output fabrication + observer), no C:.
+
+
