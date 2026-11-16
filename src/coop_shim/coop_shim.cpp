@@ -83,6 +83,9 @@ enum {
 // A fake manager object can point its vptr here so the 16 hot slots stay stack-correct (correct ret-n-bytes); the
 // cheap getters then just read the zeroed object's fields.
 #define RVA_mgr_vtable 0x01527870
+// FCX's OWN online-manager creator (NOTES 28cn): FUN_10420a77 = factory=FUN_10418a3d(); DAT_11e42c90=(factory->vtable[+4])();
+// Its sole caller is FUN_1041936b. Calling this lets FCX construct a REAL manager instead of our zeroed fake.
+#define RVA_manager_creator 0x00420a77
 
 // Provider-factory probe site (NOTES 28ar): inside host_handler FUN_11275d90, the session provider is dispatched
 // polymorphically via 'mov edx,[esi]; mov edx,[edx+0x14]; call edx'. Hook the 'call edx' site to log the provider
@@ -100,6 +103,7 @@ static int g_hook_provider = 0; // env FC3COOP_HOOK_PROVIDER=1 -> run the REAL h
 static int g_trace_mgr = 0;     // env FC3COOP_TRACE_MGR=1 -> instrument the online session-manager vtable (path A'' survey)
 static int g_fake_mgr = 0;      // env FC3COOP_FAKE_MGR=1 -> install a zeroed fake manager so the [0x11e42c90]!=0 gate passes offline (path A'' experiment)
 static int g_fake_force = 0;    // env FC3COOP_FAKE_MGR=2 -> watchdog also OVERRIDES a real manager (probe fake survivability while online)
+static int g_mgr_call = 0;      // env FC3COOP_FAKE_MGR=3 -> do NOT fake the object; CALL the game's own creator FUN_10420a77 so FCX builds a real online manager (NOTES 28cn)
 static int g_probe_login = 0;   // env FC3COOP_PROBE_LOGIN=1 -> entry-log the RV guest-login send + its async callback (A-vs-D discriminator)
 static int g_no_ticket = 0;     // env FC3COOP_NO_TICKET=1 -> skip ticket_validate/ticket_prepare hooks (isolate post-callback crash)
 static int g_fake_mgr_only = 0; // env FC3COOP_FAKE_MGR_ONLY=1 -> ONLY force the online-manager global [0x11e42c90]; do NOT write the online flag or patch any code (Stage0b: pass the FUN_10443663 '==0 -> service unavailable' gate with zero collateral code changes)
@@ -113,7 +117,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_SECRET", buf, sizeof(buf)) > 0) { strncpy(g_cfg.shared_secret, buf, sizeof(g_cfg.shared_secret)-1); }
   if (GetEnvironmentVariableA("FC3COOP_HOOK_PROVIDER", buf, sizeof(buf)) > 0) g_hook_provider = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_TRACE_MGR", buf, sizeof(buf)) > 0) g_trace_mgr = (buf[0] == '1');
-  if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR", buf, sizeof(buf)) > 0) { if (buf[0] == '2') { g_fake_mgr = 1; g_fake_force = 1; } else g_fake_mgr = (buf[0] == '1'); }
+  if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR", buf, sizeof(buf)) > 0) { if (buf[0] == '2') { g_fake_mgr = 1; g_fake_force = 1; } else if (buf[0] == '3') { g_fake_mgr = 1; g_mgr_call = 1; } else g_fake_mgr = (buf[0] == '1'); }
   if (GetEnvironmentVariableA("FC3COOP_PROBE_LOGIN", buf, sizeof(buf)) > 0) g_probe_login = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_NO_TICKET", buf, sizeof(buf)) > 0) g_no_ticket = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR_ONLY", buf, sizeof(buf)) > 0) g_fake_mgr_only = (buf[0] == '1');
@@ -382,6 +386,20 @@ static DWORD WINAPI fake_mgr_thread(LPVOID p) {
   }
   return 0;
 }
+// FC3COOP_FAKE_MGR=3 (NOTES 28cn): call the game's own manager creator so FCX builds a REAL manager.
+static DWORD WINAPI mgr_forcer_thread(LPVOID p) {
+  (void)p;
+  Sleep(20000);                       // let the game finish booting to the menu first
+  uintptr_t before = *(volatile uintptr_t*)VA(RVA_online_mgr_global);
+  logLock(); LOGF("shim: MGR_FORCER calling game creator FUN_10420a77 (global before=0x%08x)", (uint32_t)before); logUnlock();
+  __try {
+    typedef void (__cdecl *creator_t)(void);
+    ((creator_t)VA(RVA_manager_creator))();
+  } __except (EXCEPTION_EXECUTE_HANDLER) { logLock(); LOGF("shim: MGR_FORCER creator call EXC"); logUnlock(); }
+  uintptr_t after = *(volatile uintptr_t*)VA(RVA_online_mgr_global);
+  logLock(); LOGF("shim: MGR_FORCER global after=0x%08x (%s)", (uint32_t)after, after ? "REAL manager built" : "still NULL - factory needs live RV/online"); logUnlock();
+  return 0;
+}
 static void install_fake_mgr(void) {
   if (!g_fake_obj) {
     void* obj = VirtualAlloc(0, 0x600, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -528,9 +546,10 @@ static void init(void) {
   // 'service unavailable' error code 4 iff DAT_11e42c90 (online session-manager) == 0. Forcing that global to a
   // valid object is the gate; it does NOT read the online flag, so we skip the online_flag write AND all code
   // patches (which is what woke netconfig FUN_1126dc60 and crashed in 28cc/28cg). Only install_fake_mgr() runs.
-  if (g_fake_mgr_only) {
-    install_fake_mgr();
-    LOGF("shim: FAKE_MGR_ONLY active - only [0x11e42c90] forced; no online flag, no hooks. Try Co-op -> Host now.\n");
+  if (g_fake_mgr_only || g_mgr_call) {
+    // Clean mode (NOTES 28ci/28cn): no online_flag write and no code hooks (avoids the 28cg netconfig crash).
+    if (g_mgr_call) { HANDLE h = CreateThread(0,0,mgr_forcer_thread,0,0,0); LOGF("shim: FAKE_MGR=3 active - will CALL the game's creator FUN_10420a77 in ~20s; no online flag, no hooks. h=%p", (void*)h); }
+    else { install_fake_mgr(); LOGF("shim: FAKE_MGR_ONLY active - only [0x11e42c90] forced; no online flag, no hooks. Try Co-op -> Host now.\n"); }
     return;
   }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
@@ -543,7 +562,7 @@ static void init(void) {
     HANDLE h = CreateThread(0, 0, mgr_tracer_thread, 0, 0, 0);
     LOGF("shim: MGR tracer thread started h=%p (set FC3COOP_FAKE_ONLINE OFF; just play online + try Co-op Host)", (void*)h);
   }
-  if (g_fake_mgr) install_fake_mgr();
+  if (g_fake_mgr) { if (g_mgr_call) { HANDLE h = CreateThread(0,0,mgr_forcer_thread,0,0,0); LOGF("shim: FAKE_MGR=3 manager-creator call thread started h=%p (wait ~20s then try Co-op Host)", (void*)h); } else install_fake_mgr(); }
   if (g_probe_login) install_login_probe();
 }
 
