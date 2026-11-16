@@ -5113,3 +5113,17 @@ FUN_11279ba0 has exactly TWO callers, one per direction, and both feed the (addr
 REMAINING UNKNOWN before coding the handler: the exact TYPE/layout of addrOut (local_8). From the producers it is the sockaddr CONTAINER object (field [0] = sockaddr_in*, readiness +0x48) whose IP the consumers read; host_handler FUN_11275d90 forwards it to RV auth `(**(code**)(*param_1+0x14))(puVar2,local_11c,local_124)`. Next: decompile FUN_11275d90's consumption of its 2nd arg (local_8) + FUN_1127a1d0 to pin whether addrOut is a sockaddr container pointer or a std::string*, then write the shim hook on FUN_11279ba0 + rebuild. Artifacts: H:/FarCryCoop/scratch/ghidra/gate_callers.txt, endpoint_callers.txt. No game files changed; bin clean.
 
 
+
+
+### Session 28cf - addrOut feeds RV auth, so a FUN_11279ba0 getter-only hook is NOT sufficient; re-confirm 28be (hook-patching cannot cleanly pass the RV cascade).
+
+Decompiled the host_handler consumers of addrOut (local_8) + join_handler (FUN_1124e950, FUN_112536a0, FUN_1127a1d0, FUN_11210af0/11210d90/11254400).
+- host_handler FUN_11275d90 calls FUN_1124e950(addrOut) FIRST: FUN_1124e950 is thiscall on the session singleton; it lazily builds a BackEndServices client (FUN_11210af0 alloc, "RendezVous/.../Core/src/Client/BackEndServices.cpp" line 0x5b9; puVar2[5]=this; *puVar2=&PTR_FUN_116c5ae4; stored at singleton+0xa8) then FUN_1124dd00(addrOut, client). FUN_112536a0 further runs RV state (singleton+0x74/0x78/0x7c/0x80 slots) + calls FUN_11237670 (rv_connected).
+- So addrOut is consumed INSIDE the RendezVous auth path (SubAccountClient + BackEndServices + the vtable+0x14 dispatch seen in 28cd/28ce). Hooking only the endpoint getter FUN_11279ba0 to return a LAN endpoint does NOT stop host_handler/join_handler from continuing into RV auth on the fake handle. This matches NOTES 28be: hook-level patching cannot pass the RV/GATOR cascade without reproducing the auth object graph.
+
+CONSEQUENCE for the shim LAN plan: two viable directions, both more than a one-line hook:
+  (A) In-process RV-auth emulation: fake the singleton's BackEndServices/SubAccountClient graph + vtable+0x14 call outputs so RV auth "succeeds" with our LAN endpoint. This is the deep RV work resurfacing (effectively A2 but inside the process).
+  (B) Make FUN_11279ba0 / the host&join callers FAIL cleanly (return 0) so the RV path is skipped entirely, and rely on the shim's OTHER lever: force NetEngineType=LAN (field 0x3c=0) + the engine's own LAN join by IP (-ip/-client) so the session forms on the storm::echo LAN path that does NOT go through RV auth. Requires confirming the engine can host/join purely on the LAN netengine (the -ip direct-join primitive from 28bn), separate from the RV co-op menu.
+NEXT empirical step (cheap): change coop_shim so FUN_11279ba0 is hooked to a SAFE stub (do not call original -> no SandboxUrl parser crash), returning 0 (clean fail) first, and separately return 1+LAN port, and FIX patch_5 to per-hook saved bytes / ABI-safe trampolines so the shim itself never corrupts the stack; rebuild and observe which path (if any) lets the engine form a session. Artifacts: H:/FarCryCoop/scratch/ghidra/addrout_decompile.txt. bin clean, no game files changed.
+
+
