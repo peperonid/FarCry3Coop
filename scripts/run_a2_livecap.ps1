@@ -21,8 +21,8 @@ $Bin  = Join-Path $Game "bin"
 $RvDir = Join-Path $Repo "scripts\rv_server"
 $ShimSrc = Join-Path $Repo "src\coop_shim\coop_shim.dll"
 
-# 1) stop any running game
-taskkill /F /IM farcry3_d3d11.exe 2>$null | Out-Null
+# 1) stop any running game (PS-native, non-terminating even with ErrorActionPreference=Stop)
+Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
 # 2) deploy proxy + shim
