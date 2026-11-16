@@ -5431,3 +5431,20 @@ Honest status of B: the transport (PRUDP v1 codec), the handshake (SYN->CONNECT-
 So the two conditions now stand: (B) RV emulator = foundational layers built + testable, awaiting a real capture to set the crypto/option/method specifics; (A) FCX login = still the head blocker (Ubisoft Connect boot-auth, condition A), unchanged and unsolved. The next productive move is condition A, which is on drive C: (write) or a deep in-binary login-injection RE.
 
 
+
+
+### Session 28da - OWNER question answered: should we WRITE into Ubisoft Connect (upc.exe / uplay_r14.dll on C:) for condition A? Decision: NO - recommend against; the lever is on H:, not C:. Read-only RE + a new bilingual decision doc docs/coop-upc-write-decision.md (+.ru.md). No C: file touched.
+
+Read-only RE (Ghidra FC3d3d11_live; login_gate.txt), the FCX online/RV bring-up chain, all inside FC3_d3d11.dll (H:):
+- FUN_1041936b (online-init entry, thiscall): FUN_1041da2e(param_2); if param_2==0 it resolves an account via FUN_1042a2bd else uses param_2 directly, stores *(this+8); calls the manager-writer FUN_10420a77() (which sets DAT_11e42c90), stores *(this+4)=DAT_11e42c90, then calls the manager vtable+0x10 online-init op (**(code**)(**(int**)(this+4)+0x10))(out). This is where the online subsystem is kicked once an account object exists.
+- FUN_1127a0d0 (UbiAuthenticationClient.cpp): reads a pending op at manager+0x108 and requires its state field ==5 (connected) before proceeding; only then calls FUN_11237670() and on success creates the RV ServiceMaster and writes it to manager+0x110 (the exact sub-object FUN_1041f965 returns NULL for offline). So manager+0x110 is populated strictly AFTER an RV connection op reaches connected state.
+- FUN_11237670 -> FUN_112345d0 is a job/result-post helper (returns 0 only if the op was already posted, param_1[3]==1), not a passport check.
+- FUN_11275f40 -> FUN_11279ba0 (first guarded by FUN_11245090()==0 -> fail) is the co-op Host endpoint/RV path (28ci).
+
+DECISION + reasoning (why a C: write is the wrong layer): (1) auth is dummy-cred Quazal RV, no Ubisoft-signature gate (28cj/28ck); (2) the real upstream productId=46 is dead (28cv) so patching upc cannot mint a real ticket and none is needed; (3) everything upc sends arrives at our own H: pipe endpoint (uplay_r1_loader proxy); (4) the loader account-presence surface (UPLAY_USER_IsConnected=1) is already fully faked yet the game still does not advance (28cu), so it is not the gate; (5) the entire login->RV chain is Quazal job state machines in FC3_d3d11.dll on H:, none validating a Ubisoft passport signature. Therefore patching upc.exe / uplay_r14.dll on C: adds brick-risk to the owner's shared Ubisoft launcher for zero capability the H: side lacks.
+
+What to do instead (H:-only): locate the FCX predicate that enqueues the GatorLogin / moves the login enum past FetchOnlineConfigRdy->LoggingIn (specifically where FCX consumes the loader signal beyond IsConnected - the autologin / account-flags value, not the bool), and satisfy or drive that, since it lives in FC3_d3d11.dll. A C: write stays a documented last-resort plan (backup copy -> patch a disposable copy -> single reversible byte patch -> restore) and requires its own explicit owner go-ahead per AGENTS rule 2.
+
+Consent statement: as the autonomous agent I withhold consent for a C: write now; I do consent to the H:-only predicate hunt as the next step. Mod-262 solo offline coop remains the locked deliverable; condition B stays built + unit-tested, awaiting condition A.
+
+
