@@ -5005,3 +5005,20 @@ The ONLY way to hand the switch to farcry3_d3d11.exe is a direct launch outside 
 State: GamerProfile SessionProvider reverted to empty; hosts restored (clean); bin = pristine mod262; launcher committed. No game files changed this session.
 
 
+
+
+### Session 28by - PROXY/FAKE_ONLINE launch CONFIRMED WORKING, but split-screen co-op is NOT on the PC build (decisive).
+
+Deployed ONLY the loader proxy (scripts/deploy_proxy_only.py): stashed the real `bin\uplay_r1_loader.dll` (294400 B) into `bin\real\` + `.orig` backup, installed the built proxy (141312 B). Launched `farcry3_d3d11.exe -splitscreen4 -coop -skipintro -quickstartup` DIRECTLY (outside Ubisoft Connect) with `FC3COOP_FAKE_ONLINE=1`. Result + evidence:
+- `bin\uplay_api.log`: `proxy up: real=... exports=58 missing=0 fake=1 online=1` -> the proxy loaded the real loader fully (0 missing exports) and faked the online-service op. The game BOOTED TO THE MAIN MENU outside upc (menu = ИГРА / СОВМЕСТНАЯ ИГРА / ВЫЙТИ), proving FAKE_ONLINE gives an upc-free boot. Then the owner opened Co-op -> "Служба Far Cry 3 недоступна" again, then quit (log ends with UPLAY_Quit/UPLAY_Release).
+- **`-splitscreen4` had NO effect**: the menu is the normal single-player menu, no screen split, no second local player. So split-screen co-op is NOT functional on the PC 1.05-family build (switch string exists but the feature is not wired). Same for co-op: it still needs the live `_RdV` backend; FAKE_ONLINE only fakes boot/login, not the session service.
+
+Rolled back (`deploy_proxy_only.py restore`): bin loader = real 294400 again; mod-262 normal play via Ubisoft Connect unaffected. `bin\real\uplay_r1_loader.dll` left in place (harmless).
+
+STRATEGIC CONCLUSION (now fully evidence-backed): the PC build offers NO offline / LAN / split-screen multi-human co-op path in the game layer. The only co-op the engine can host over a network is the `_RdV` provider talking to Ubisoft RendezVous, which is dead. Mod 262's "offline co-op" is a single human + offline slot. To get real 2-4 humans the remaining paths are unchanged and now the only candidates:
+- **Plan B (recommended): our own netcode layered on the working Offline co-op session** - treat the local offline co-op session as the host and transport a remote human in as a player (patch the account/login + NetEngineType path). Independent of Ubisoft and of hidden switches.
+- **A2: emulate the `_RdV` / Quazal RendezVous service** so the stock Co-op menu works against a local server (hits the PRUDP/PRUDPS crypto wall).
+
+Cheap multi-human avenues (Lan provider config, `-splitscreen4`, dev-launch switches) are now all empirically closed on this build.
+
+
