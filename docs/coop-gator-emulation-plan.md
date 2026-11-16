@@ -166,3 +166,6 @@ step — if the owner chooses to invest at all — is **S0: capture a real 2-pla
 trace**, which converts most of the guesses above into facts and bounds the rest of the estimate.
 If Bantila's "1.05 LAN" co-op turns out to operate below the GATOR layer (see PR #1), it may
 bypass this entire build; confirm that before committing weeks.
+
+
+## 28cj AUTH FEASIBILITY (A2) - GREEN LIGHT (conditional). FC3 co-op auth = Quazal RendezVous "UbiAuthentication" service over PRUDP, not a bespoke Ubisoft crypto gate. Transport solved by PretendoNetwork/nex-go (Quazal compat mode, PRUDP v0/v1, RMC, Kerberos). Full RV back ends have been clean-room reimplemented (Ghostbusters TVG PS3; Splinter Cell Blacklist is the same UbiAuthentication family as FC3). Because the loader proxy fakes the client SSO blob and OUR RV server self-accepts, no Ubisoft private key is needed server-side (client already sends dummy creds, FUN_11246b90 / "UbiDummyPwd"). Residual risk: FC3 PRUDP per-connection key constants - obtain via a LIVE PRUDP Connection-Request capture (force the client to dial our host), not static string xrefs (28ca found none). Stages S1-S6 below stand; S0 (login) is de-risked.
