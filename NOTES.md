@@ -5625,3 +5625,22 @@ Consequence for the plan: BOTH multi-human goals collapse to the same missing pi
 If the owner still wants 2-player: the only realistic path is completing A2 (local RV emulator that OW15/vanilla co-op can dial) - i.e. the offline emulation, which OW15 would actually ride on. That reframes A2 as the single enabler for ANY multi-human co-op, not just offline.
 
 
+
+
+### Session 28do - RV-PROBE result (E-A2-1): on the OFFLINE-loader build, Co-op -> Host does NOT use RendezVous at all. RV-PROBE observers on ConnectToAuthenticationService (FUN_11252f70) + the RV senders (FUN_11218510 sendto, FUN_11214630 WSASendTo) stayed silent through the whole Co-op->Host + load; no DNS, no rv_server inbound, no proxy RVCreateGameSession/SetGameSession (only boot ClearGameSession). The only socket is the LAN UDP 192.168.1.8:9000 (storm::echo). The session loaded WITHOUT an error.
+
+Reframe (important, simplifies A2): the OFFLINE co-op path does NOT dial RV. With the offline uplay loader (dacd14c0) + mod-262 multi-instance dll patch, Co-op -> Host forms a LOCAL storm::echo session (UDP:9000), not a RendezVous session. So the RV/PRUDP/RendezVous reimplementation (our A2) is ONLY relevant to the Ubisoft-online path (OW15/vanilla online), whose lobby is dead. It is NOT needed for an offline/LAN route.
+
+Therefore the offline multi-human frontier is a DIFFERENT problem than A2-RV: it is storm::echo LAN session join between two game instances. Building blocks present:
+- mod-262 dll patch #1 (NOP the CreateEvent single-instance check at 0x10004092) already lets a SECOND instance run.
+- Host already binds LAN UDP:9000 (storm::echo).
+- The join path exists (FUN_1127a1d0 join handler; join precondition FUN_1127a0d0 returns 0 unless rv_connected; op param NetEngineType field 0x3c with 0=LAN).
+Unknown (the real question): does a second offline instance actually see/join the host's LAN co-op session, and does mod-262 expose a joinable session (it is branded "solo") or only single-human co-op maps.
+
+Cheapest next experiment (E-A2-LAN): on ONE PC run TWO instances of the mod-262/offline build (the multi-instance patch allows it), Host creates a co-op session on one, the other tries Co-op -> Join / LAN. Watch (shim RV_PROBE stays silent as expected; instead) netstat for UDP between 127.0.0.1:9000 (or two local IPs), and instrument the join path (join_handler FUN_1127a1d0 + rv_connected FUN_11237670) to see if a join attempt is formed. If join is attempted over UDP:9000 and 2 humans appear in-world, offline multi-human is solved WITHOUT RV. If join never forms a LAN session, mod-262 is genuinely solo-only offline and multi-human is not achievable with these mods.
+
+Note: need to confirm with owner what the current "loading" reached - playable solo co-op world vs a lobby with player slots (joinable). If there is no joinable session/lobby, mod-262 is solo-only.
+
+Operational: net-on RV_PROBE run left as-is (game alive). RV_PROBE observers are observer-only (no behaviour change). Rollback when done: stop_a2_livecap.ps1 + re-copy bin/real/uplay_r1_loader.dll if loader stuck at 141312. Ghidra scripts_live/PatchPoint.java; shim RV_PROBE in coop_shim.cpp.
+
+
