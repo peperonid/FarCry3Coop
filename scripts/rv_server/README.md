@@ -16,7 +16,11 @@ condition **B** in `docs/coop-gator-emulation-plan.md`; the head blocker is stil
   machine and a hex log of every packet (`rv_capture.log`). Echoes the client's RV options and
   injects a connection-id option so the client should accept the reply.
 - `test_prudp.py` - offline proof: codec round-trip + a synthetic PRUDP client that completes the
-  handshake against the server over UDP loopback. Prints `ALL OK`.
+  handshake AND an RMC request->response over the established channel. Prints `ALL OK`.
+- `config_server.py` - serves a crafted OnlineConfig with `SandboxUrl -> prudp://address=127.0.0.1;port=50000`
+  (the config seam) so the client, once it dials, hits rv_server.
+- `../run_a2_rvcapture.bat` - one-shot harness: starts rv_server (:50000) + config_server (:8081)
+  and prints the owner admin steps (hosts redirect + game launch).
 
 ## Run
 ```
@@ -32,9 +36,18 @@ encryption during bring-up capture.
 - Server accepts a Connection Request (SYN), replies CONNECT with a connection id, completes to
   `established`, ACKs PING and reliable DATA. Full hex capture to `rv_capture.log`.
 
+## RMC layer (scaffolding, offline-tested)
+After the handshake, reliable DATA payloads are parsed as `RMCMessage(call_type, protocol_id,
+method_id, session_id, body)` and dispatched through `RVServer.services` keyed by
+`(protocol_id, method_id)`. A synthetic client does a request->response round trip in the test.
+This layout is OUR self-consistent framing; the real Quazal-RendezVous RMC encoding and the RV
+protocol/method IDs must be confirmed from a live capture (S0) before the handlers are meaningful.
+
 ## Not yet (next stages)
 - **S0 live capture**: needs condition (A) so the real FC3 client dials us; until then the
-  synthetic client exercises the same path.
+  synthetic client exercises the same path. Harness: `../run_a2_rvcapture.bat` (rv_server +
+  config_server + hosts step). Expected result today: **zero inbound UDP** = clean proof the gate
+  is FCX login (condition A), not the socket/config layer.
 - **prudps** (RC4 + HMAC payload encryption/signature): FC3 may use it; the header checksum in
   `prudp.py` is a placeholder to be fixed against a real capture.
 - **Real RV option IDs**: the connection-id / pid / cid option numbers are the NEX-table guesses;

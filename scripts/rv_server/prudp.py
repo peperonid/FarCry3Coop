@@ -147,6 +147,35 @@ def _header_checksum(header: bytes) -> int:
     return s ^ 0xFFFF
 
 
+# ---- RMC (Remote Method Call) layer, carried in the PRUDP DATA payload ----
+# NOTE: this is a clean, self-consistent scaffolding header (our synthetic client and
+# server agree on it) so the request->response plumbing is testable OFFLINE. The exact
+# Quazal-RendezVous RMC wire encoding + protocol/method IDs for FC3 MUST be confirmed from
+# a live capture (S0, gated on condition A). Kept separate so swapping in the real layout
+# later is contained.
+RMC_REQUEST, RMC_RESPONSE, RMC_RESPONSE_ERROR = 0, 1, 2
+
+
+@dataclass
+class RMCMessage:
+    call_type: int = RMC_REQUEST
+    protocol_id: int = 0
+    method_id: int = 0
+    session_id: int = 0
+    body: bytes = b""
+
+    def encode(self) -> bytes:
+        # header: u8 call_type, u16 protocol_id, u16 method_id, u32 session_id, then body
+        return struct.pack("<BHHi", self.call_type, self.protocol_id, self.method_id, self.session_id) + self.body
+
+    @staticmethod
+    def parse(buf: bytes) -> "RMCMessage":
+        if len(buf) < 9:
+            raise ValueError("payload too short for RMC header")
+        ct, pid, mid, sid = struct.unpack_from("<BHHi", buf, 0)
+        return RMCMessage(ct, pid, mid, sid, buf[9:])
+
+
 def opt(oid: int, value: int, etype: int = OPT_UINT32) -> Option:
     """Build an integer option (size from type)."""
     if etype in (OPT_BOOL, OPT_UINT8):

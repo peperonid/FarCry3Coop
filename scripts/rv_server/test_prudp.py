@@ -58,13 +58,26 @@ def test_handshake():
     est = any(v["state"] == "established" for v in srv.conns.values())
     assert est, "server never reached established state"
     print("handshake step2 CONNECT->established: OK")
-    # 3) a DATA packet gets ACKed
-    d = PRUDPPacket(type=DATA, flags=FLAG_RELIABLE | FLAG_NEED_ACK, session_id=r.session_id,
-                    substream_id=1, sequence=1, source=0, destination=1, payload=b"\xAA\xBB")
+    # 3) RMC request over the established channel -> server ACK + RMC response
+    sess = r2.session_id
+    from prudp import RMCMessage, RMC_RESPONSE, RMC_REQUEST
+    req = RMCMessage(RMC_REQUEST, protocol_id=0x0000, method_id=0x0000, session_id=7, body=b"ping")
+    d = PRUDPPacket(type=DATA, flags=FLAG_RELIABLE | FLAG_NEED_ACK, session_id=sess,
+                    substream_id=1, sequence=1, source=0, destination=1, payload=req.encode())
     c.sendto(d.encode(), dst)
-    data, _ = c.recvfrom(65535)
-    assert PRUDPPacket.decode(data).type == DATA
-    print("data ack: OK")
+    got_resp = False
+    for _ in range(4):
+        data, _ = c.recvfrom(65535)
+        pk = PRUDPPacket.decode(data)
+        if pk.type != DATA or not pk.payload:
+            continue
+        rm = RMCMessage.parse(pk.payload)
+        assert rm.call_type == RMC_RESPONSE and rm.method_id == 0x0000, "bad RMC response"
+        assert rm.session_id == 7
+        got_resp = True
+        break
+    assert got_resp, "no RMC response received"
+    print("RMC request->response over established channel: OK")
     srv.log.close(); c.close()
 
 if __name__ == "__main__":

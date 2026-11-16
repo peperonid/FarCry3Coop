@@ -5415,3 +5415,19 @@ DECISION: do not attempt an in-process RV-dial call. The correct capture route (
 Tooling next: build the B RMC/service message layer on top of the verified handshake (fully offline-testable), and provide a single ready run harness (rv_server + config seam) so the live capture is one command once A is cracked.
 
 
+
+
+### Session 28cz - condition B advanced: RMC service layer added on top of the verified PRUDP handshake (offline-tested request->response), plus the live-capture harness (config_server + run_a2_rvcapture.bat). All new code runs and tests green with no game and no C:.
+
+Added to scripts/rv_server/:
+- prudp.py RMCMessage: encode/parse of a self-consistent RMC header (u8 call_type, u16 protocol_id, u16 method_id, i32 session_id, body) carried in the PRUDP DATA payload. RMC_REQUEST/RESPONSE/RESPONSE_ERROR. Explicitly OUR framing - the real Quazal RendezVous RMC byte layout + RV protocol/method IDs must be confirmed from a live S0 capture (gated on condition A).
+- rv_server.py: after the handshake, reliable DATA payloads are parsed as RMC and dispatched via RVServer.services keyed by (protocol_id, method_id); unknown methods get a RESPONSE_ERROR, known ones a RESPONSE. Made the run loop robust (exits cleanly on socket close).
+- test_prudp.py: now also proves an RMC request->response round trip over the established channel -> ALL OK.
+- config_server.py: HTTP server serving a crafted Ubisoft OnlineConfig with SandboxUrl/SandboxSecureUrl = prudp://address=127.0.0.1;port=<rv_port> + TitleId, so the config seam removes the wrong-host variable. build_config() verified to emit port=50000.
+- scripts/run_a2_rvcapture.bat: one-shot harness that starts rv_server (:50000) + config_server (:8081) and prints the owner admin steps (hosts redirect onlineconfigservice.ubi.com -> 127.0.0.1, launch game, inspect rv_capture.log).
+
+Honest status of B: the transport (PRUDP v1 codec), the handshake (SYN->CONNECT->established), and a scaffolded RMC request/response layer all work offline and are unit-tested. The live S0 capture harness is ready and is expected to show ZERO inbound UDP today, because the client only dials after condition A (FCX reaches LoggingIn). The remaining unknowns that only a real capture can settle: the exact prudps RC4/HMAC crypto, the true RV option IDs (connection-id/pid/cid), and the real RMC/RV service method IDs + payloads. None of those can be closed without condition A.
+
+So the two conditions now stand: (B) RV emulator = foundational layers built + testable, awaiting a real capture to set the crypto/option/method specifics; (A) FCX login = still the head blocker (Ubisoft Connect boot-auth, condition A), unchanged and unsolved. The next productive move is condition A, which is on drive C: (write) or a deep in-binary login-injection RE.
+
+

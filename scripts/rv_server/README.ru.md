@@ -16,7 +16,11 @@ rendezvous, чтобы их P2P-неткод ко-опа соединился п
   и hex- логом каждого пакета (`rv_capture.log`). Повторяет RV-опции клиента и вставляет опцию
   connection-id, чтобы клиент принял ответ.
 - `test_prudp.py` - офлайн-доказательство: round-trip кодека + синтетический PRUDP-клиент,
-  завершающий handshake против сервера по UDP loopback. Печатает `ALL OK`.
+  завершающий handshake И request->response RMC поверх established-канала. Печатает `ALL OK`.
+- `config_server.py` - отдаёт скроенный OnlineConfig с `SandboxUrl -> prudp://address=127.0.0.1;port=50000`
+  (шов конфигурации), чтобы клиент, начав набор, попал в rv_server.
+- `../run_a2_rvcapture.bat` - единый конвейер: запускает rv_server (:50000) + config_server (:8081)
+  и печатает шаги для владельца (перенаправление hosts + запуск игры).
 
 ## Запуск
 ```
@@ -32,9 +36,18 @@ python -I scripts/rv_server/rv_server.py --host 127.0.0.1 --port 50000
 - Сервер принимает Connection Request (SYN), отвечает CONNECT с connection id, доходит до
   `established`, подтверждает PING и надёжный DATA. Полный hex-захват в `rv_capture.log`.
 
+## Слой RMC (скаффолдинг, офлайн-тест)
+После handshake нагрузки надёжного DATA разбираются как `RMCMessage(call_type, protocol_id,
+method_id, session_id, body)` и диспетчеризуются через `RVServer.services` по ключу
+`(protocol_id, method_id)`. Синтетический клиент делает request->response в тесте. Это НАША
+самосогласованная рамка; реальное Quazal-RendezVous RMC-кодирование и protocol/method ID RV надо
+подтвердить живым захватом (S0), прежде чем обработчики станут осмысленными.
+
 ## Ещё нет (следующие этапы)
 - **S0 live-захват**: нужно условие (A), чтобы настоящий клиент FC3 набрал нас; пока тот же путь
-  проходит синтетический клиент.
+  проходит синтетический клиент. Конвейер: `../run_a2_rvcapture.bat` (rv_server + config_server +
+  шаг hosts). Ожидаемый результат сегодня: **ноль входящего UDP** = чистое доказательство, что
+  ворота это логин FCX (условие A), а не слой сокета/конфига.
 - **prudps** (шифрование RC4 + HMAC нагрузки/подпись): FC3 может использовать его; контрольная
   сумма заголовка в `prudp.py` - заглушка, править по реальному захвату.
 - **Реальные ID RV-опций**: номера опций connection-id / pid / cid - догадки по таблице NEX;

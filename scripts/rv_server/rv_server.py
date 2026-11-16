@@ -20,10 +20,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from prudp import (PRUDPPacket, Option, opt,
+from prudp import (PRUDPPacket, Option, opt, RMCMessage,
                    SYN, CONNECT, DATA, DISCONNECT, PING,
                    FLAG_ACK, FLAG_RELIABLE, FLAG_NEED_ACK,
-                   OPT_UINT8, OPT_UINT16, OPT_UINT32)
+                   OPT_UINT8, OPT_UINT16, OPT_UINT32,
+                   RMC_REQUEST, RMC_RESPONSE, RMC_RESPONSE_ERROR)
 
 def hexline(b: bytes, limit: int = 96) -> str:
     h = b.hex(" ")
@@ -39,6 +40,10 @@ class RVServer:
         # connection registry keyed by (ip, port)
         self.conns = {}
         self.next_connid = 0x1000
+        # RV services registry: (protocol_id, method_id) -> callable(req_body)->resp_body (or raises)
+        self.services = {
+            (0x0000, 0x0000): lambda b: b"",          # ping -> empty success (scaffolding)
+        }
         self.log.write(f"\n===== rv_server start {time.strftime('%Y-%m-%d %H:%M:%S')} on {host}:{port} =====\n")
 
     def logpkt(self, tag, addr, raw, pk=None):
@@ -96,15 +101,43 @@ class RVServer:
             self._send(pong, addr)
 
         elif pk.type == DATA:
-            # ack reliable data; payload RMC handling is a later stage
+            # ack reliable data
             if pk.has_flag(FLAG_NEED_ACK):
                 ack = PRUDPPacket(type=DATA, flags=FLAG_ACK,
                                   session_id=pk.session_id, substream_id=pk.substream_id,
                                   sequence=pk.sequence + 1, source=pk.destination, destination=pk.source)
                 self._send(ack, addr)
+            # RMC service dispatch on the established channel
+            self._handle_rmc(pk, addr)
 
         elif pk.type == DISCONNECT:
             self.log.write(f"          <<< DISCONNECT {addr}\n")
+
+    def _handle_rmc(self, pk, addr):
+        if not pk.payload:
+            return
+        try:
+            rmc = RMCMessage.parse(pk.payload)
+        except Exception:
+            return
+        self.log.write(f"          RMC req proto=0x{rmc.protocol_id:04x} method=0x{rmc.method_id:04x} "
+                       f"session={rmc.session_id} body={len(rmc.body)}b\n")
+        handler = self.services.get((rmc.protocol_id, rmc.method_id))
+        if handler is None:
+            resp = RMCMessage(RMC_RESPONSE_ERROR, rmc.protocol_id, rmc.method_id, rmc.session_id,
+                              body=b"\x00\x00\x00\x00")  # placeholder error code
+        else:
+            try:
+                rb = handler(rmc.body)
+                resp = RMCMessage(RMC_RESPONSE, rmc.protocol_id, rmc.method_id, rmc.session_id, body=rb)
+            except Exception as e:
+                self.log.write(f"          service error: {e}\n")
+                resp = RMCMessage(RMC_RESPONSE_ERROR, rmc.protocol_id, rmc.method_id, rmc.session_id, body=b"")
+        out = PRUDPPacket(type=DATA, flags=FLAG_RELIABLE | FLAG_NEED_ACK,
+                          session_id=pk.session_id, substream_id=pk.substream_id,
+                          sequence=pk.sequence + 1, source=pk.destination, destination=pk.source,
+                          payload=resp.encode())
+        self._send(out, addr)
 
     def _reply_options(self, pk, connid):
         # Echo the RV negotiation options the client offered (so it accepts them), then
@@ -126,11 +159,17 @@ class RVServer:
     def run(self):
         print(f"rv_server listening udp {self.host}:{self.port} -> log {self.log.name}")
         while True:
-            data, addr = self.sock.recvfrom(65535)
+            try:
+                data, addr = self.sock.recvfrom(65535)
+            except OSError:
+                break
             try:
                 self.handle(data, addr)
             except Exception as e:
-                self.log.write(f"handle error: {e}\n")
+                try:
+                    self.log.write(f"handle error: {e}\n")
+                except Exception:
+                    break
 
 
 def main():
