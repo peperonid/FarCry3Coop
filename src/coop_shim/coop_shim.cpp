@@ -99,6 +99,10 @@ static ShimConfig g_cfg = { 0x7f000001u /*127.0.0.1*/, 9000, "fc3coop", 0 }; // 
 static int g_hook_provider = 0; // env FC3COOP_HOOK_PROVIDER=1 -> run the REAL host path (no host short-circuit) and probe the provider vtable
 static int g_trace_mgr = 0;     // env FC3COOP_TRACE_MGR=1 -> instrument the online session-manager vtable (path A'' survey)
 static int g_fake_mgr = 0;      // env FC3COOP_FAKE_MGR=1 -> install a zeroed fake manager so the [0x11e42c90]!=0 gate passes offline (path A'' experiment)
+static int g_fake_force = 0;    // env FC3COOP_FAKE_MGR=2 -> watchdog also OVERRIDES a real manager (probe fake survivability while online)
+static int g_probe_login = 0;   // env FC3COOP_PROBE_LOGIN=1 -> entry-log the RV guest-login send + its async callback (A-vs-D discriminator)
+static int g_no_ticket = 0;     // env FC3COOP_NO_TICKET=1 -> skip ticket_validate/ticket_prepare hooks (isolate post-callback crash)
+static int g_fake_mgr_only = 0; // env FC3COOP_FAKE_MGR_ONLY=1 -> ONLY force the online-manager global [0x11e42c90]; do NOT write the online flag or patch any code (Stage0b: pass the FUN_10443663 '==0 -> service unavailable' gate with zero collateral code changes)
 static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
@@ -109,7 +113,10 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_SECRET", buf, sizeof(buf)) > 0) { strncpy(g_cfg.shared_secret, buf, sizeof(g_cfg.shared_secret)-1); }
   if (GetEnvironmentVariableA("FC3COOP_HOOK_PROVIDER", buf, sizeof(buf)) > 0) g_hook_provider = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_TRACE_MGR", buf, sizeof(buf)) > 0) g_trace_mgr = (buf[0] == '1');
-  if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR", buf, sizeof(buf)) > 0) g_fake_mgr = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR", buf, sizeof(buf)) > 0) { if (buf[0] == '2') { g_fake_mgr = 1; g_fake_force = 1; } else g_fake_mgr = (buf[0] == '1'); }
+  if (GetEnvironmentVariableA("FC3COOP_PROBE_LOGIN", buf, sizeof(buf)) > 0) g_probe_login = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_NO_TICKET", buf, sizeof(buf)) > 0) g_no_ticket = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR_ONLY", buf, sizeof(buf)) > 0) g_fake_mgr_only = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -370,7 +377,7 @@ static DWORD WINAPI fake_mgr_thread(LPVOID p) {
   (void)p;
   uintptr_t g = VA(RVA_online_mgr_global);
   for (int i = 0; i < 24000; ++i) {                 // ~60 min watchdog
-    if (*(volatile uintptr_t*)g == 0) *(volatile uintptr_t*)g = g_fake_obj;
+    if (g_fake_force || *(volatile uintptr_t*)g == 0) *(volatile uintptr_t*)g = g_fake_obj;
     Sleep(150);
   }
   return 0;
@@ -388,6 +395,100 @@ static void install_fake_mgr(void) {
        (unsigned)(VA(RVA_mgr_vtable) - g_mod), (void*)h);
 }
 
+// ------------------------------------------------------------------ RV guest-login probe (NOTES 28bc) - A-vs-D discriminator
+// The co-op join op Execute (FUN_11279d80) either posts a pre-check error (0x80030064/0x80030065, RV not ready) or
+// actually sends the RV guest login FUN_11246b90 (dummy creds UbiDummyPwd) and awaits callback FUN_11253890 (status
+// via FUN_11210df0; <0 -> 0x8001000b). Logging SEND + CB tells us whether the guest login round-trips at all.
+// Both targets need a 6-byte-aligned entry displacement (55 8B EC ..83 EC 18 / ..8B 45 14); patch_entry_n fills the
+// extra byte with int3 and the trampoline re-runs the displaced 6 bytes then jumps back. Detour is pushad-preserved
+// so the thiscall `ecx` reaches the original intact.
+#define RVA_rvlogin_send 0x01246b90
+#define RVA_rvlogin_cb   0x01253890
+#define RVA_rvlogin_status_site   0x012538bc // 'E8 xx' call FUN_11210df0 inside the callback (eax=status)
+#define RVA_rvlogin_status_resume 0x012538c1 // 'test eax,eax' right after that call
+#define RVA_rvlogin_status_callee 0x01210df0 // login status getter
+static const char g_tag_send[] = "RVLOGIN-SEND";
+static const char g_tag_cb[]   = "RVLOGIN-CB";
+static const char g_tag_status[] = "RVLOGIN-STATUS";
+static uintptr_t g_status_callee = 0, g_status_resume = 0;
+static void __cdecl log_login_status(int status, const char* tag) {
+  logLock(); LOGF("shim: %s status=0x%08x %s", tag, (uint32_t)status, status < 0 ? "REJECT" : "ACCEPT"); logUnlock();
+}
+__declspec(naked) static void hk_rvlogin_status(void) {
+  __asm {
+    call dword ptr [g_status_callee]
+    pushad
+    push eax
+    mov  eax, OFFSET g_tag_status
+    push eax
+    call log_login_status
+    add  esp, 8
+    popad
+    jmp  dword ptr [g_status_resume]
+  }
+}
+static uintptr_t g_send_tr = 0, g_cb_tr = 0;
+static void __cdecl log_login_ev(const char* tag, void* selfp) {
+  logLock(); LOGF("shim: %s this=%p mod=0x%08x", tag, selfp, (uint32_t)g_mod); logUnlock();
+}
+__declspec(naked) static void hk_rvlogin_send(void) {
+  __asm {
+    pushad
+    push ecx
+    mov  eax, OFFSET g_tag_send
+    push eax
+    call log_login_ev
+    add  esp, 8
+    popad
+    jmp  dword ptr [g_send_tr]
+  }
+}
+__declspec(naked) static void hk_rvlogin_cb(void) {
+  __asm {
+    pushad
+    push ecx
+    mov  eax, OFFSET g_tag_cb
+    push eax
+    call log_login_ev
+    add  esp, 8
+    popad
+    jmp  dword ptr [g_cb_tr]
+  }
+}
+static int patch_entry_n(uintptr_t target, int n, void* detour, uintptr_t* tr_out) {
+  uint8_t saved[16]; if (n > (int)sizeof(saved)) return -1;
+  memcpy(saved, (void*)target, n);
+  uint8_t* tr = (uint8_t*)VirtualAlloc(0, n + 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+  if (!tr) return -1;
+  memcpy(tr, saved, n);
+  tr[n] = 0xE9; int32_t rel = (int32_t)((target + n) - ((uintptr_t)(tr + n + 5)));
+  memcpy(tr + n + 1, &rel, 4);
+  *tr_out = (uintptr_t)tr;
+  DWORD old; VirtualProtect((void*)target, n, PAGE_EXECUTE_READWRITE, &old);
+  uint8_t* t = (uint8_t*)target; uint8_t jmp = 0xE9; int32_t d = (int32_t)((uintptr_t)detour - (target + 5));
+  memcpy(t, &jmp, 1); memcpy(t + 1, &d, 4);
+  for (int i = 5; i < n; ++i) t[i] = 0xCC;
+  VirtualProtect((void*)target, n, old, &old);
+  FlushInstructionCache(GetCurrentProcess(), (void*)target, n);
+  return 0;
+}
+static void install_login_probe(void) {
+  int a = patch_entry_n(VA(RVA_rvlogin_send), 6, (void*)hk_rvlogin_send, &g_send_tr);
+  int b = patch_entry_n(VA(RVA_rvlogin_cb), 6, (void*)hk_rvlogin_cb, &g_cb_tr);
+  g_status_callee = VA(RVA_rvlogin_status_callee);
+  g_status_resume = VA(RVA_rvlogin_status_resume);
+  uintptr_t site = VA(RVA_rvlogin_status_site);
+  int c = -1;
+  if (*(volatile uint8_t*)site == 0xE8) {
+    DWORD old; VirtualProtect((void*)site, 5, PAGE_EXECUTE_READWRITE, &old);
+    uint8_t* t = (uint8_t*)site; uint8_t jmp = 0xE9; int32_t d = (int32_t)((uintptr_t)hk_rvlogin_status - (site + 5));
+    t[0] = jmp; memcpy(t + 1, &d, 4);
+    VirtualProtect((void*)site, 5, old, &old); FlushInstructionCache(GetCurrentProcess(), (void*)site, 5);
+    c = 0;
+  } else { LOGF("shim: PROBE_LOGIN status site not E8 (got %02x) - skip status capture", *(volatile uint8_t*)site); }
+  LOGF("shim: PROBE_LOGIN installed send=%d cb=%d status=%d no_ticket=%d (Co-op -> Host; watch RVLOGIN-SEND/CB/STATUS)", a, b, c, g_no_ticket);
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -401,6 +502,8 @@ static void install_hooks(void) {
   };
   for (unsigned i = 0; i < sizeof(tbl)/sizeof(tbl[0]); ++i) {
     if (g_hook_provider && tbl[i].rva == RVA_host_handler) { LOGF("shim: SKIP host_handler short-circuit (provider probe: run real host)\n"); continue; }
+    if (g_probe_login && (tbl[i].rva == RVA_join_handler || tbl[i].rva == RVA_host_handler)) { LOGF("shim: SKIP %s short-circuit (login probe: run real co-op op)\n", tbl[i].name); continue; }
+    if (g_no_ticket && (tbl[i].rva == RVA_ticket_validate || tbl[i].rva == RVA_ticket_prepare)) { LOGF("shim: SKIP %s (NO_TICKET isolation)\n", tbl[i].name); continue; }
     void* tgt = (void*)VA((uint32_t)tbl[i].rva);
     LOGF("shim: patch %s @0x%08x\n", tbl[i].name, (uint32_t)(uintptr_t)tgt);
     patch_5(tgt, tbl[i].detour); // TODO: per-hook saved bytes + trampoline; currently shares g_hooks[0].saved
@@ -421,6 +524,15 @@ static void init(void) {
   load_config();
   LOGF("shim: FC3_d3d11 base=0x%08x enable=%d\n", (uint32_t)g_mod, g_cfg.enable);
   if (!g_cfg.enable) { LOGF("shim: inert (set FC3COOP_SHIM=1 to enable)\n"); return; }
+  // Stage0b (NOTES 28ci): minimal, collateral-free experiment. The co-op Host action FUN_10443663 returns the
+  // 'service unavailable' error code 4 iff DAT_11e42c90 (online session-manager) == 0. Forcing that global to a
+  // valid object is the gate; it does NOT read the online flag, so we skip the online_flag write AND all code
+  // patches (which is what woke netconfig FUN_1126dc60 and crashed in 28cc/28cg). Only install_fake_mgr() runs.
+  if (g_fake_mgr_only) {
+    install_fake_mgr();
+    LOGF("shim: FAKE_MGR_ONLY active - only [0x11e42c90] forced; no online flag, no hooks. Try Co-op -> Host now.\n");
+    return;
+  }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
   // Cheap precondition: force the online-enable global (FUN_11245090 returns DAT_11f07e48) to 1.
   *(volatile unsigned char*)VA(RVA_online_flag_global) = 1;
@@ -432,6 +544,7 @@ static void init(void) {
     LOGF("shim: MGR tracer thread started h=%p (set FC3COOP_FAKE_ONLINE OFF; just play online + try Co-op Host)", (void*)h);
   }
   if (g_fake_mgr) install_fake_mgr();
+  if (g_probe_login) install_login_probe();
 }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r) {
