@@ -1,0 +1,55 @@
+# Far Cry 3 campaign co-op - project status (locked snapshot)
+
+> Bilingual: English here - [русская версия](project-status.ru.md)
+> Snapshot date: 2026-11-14. This file records **what works today, what the frontier is, and the
+> structural wall we hit**, so any future session can resume without re-deriving anything. Private
+> local paths stay as placeholders (`<GAME_DIR>`, `<UPC_DIR>`).
+
+## 1. What works today (the shipped deliverable)
+
+**Solo offline co-op on vanilla 1.06 + mod 262 works** (owner-confirmed 2026-11-13).
+Reproduce it with the operational recipe in [fc3-coop-mod-setup.md](fc3-coop-mod-setup.md)
+(bilingual). This is a real, playable offline co-op baseline on the current build
+(1.06 install + 1.05-era FC3 binaries, `FC3_d3d11.dll` md5 `46bcc097`).
+
+## 2. The frontier we were chasing
+
+**Multi-human (2-4 players) join to a local/private co-op session** without Ubisoft services and
+without port forwarding. This needs the game's own online flow (create/join) to run against an
+emulated RendezVous (RV)/GATOR back-end (route **A2**), because every in-process shortcut was
+proven structurally fragile.
+
+## 3. The structural wall (final, traced end to end)
+
+The RV dial is **not a callable routine**:
+- The RV back-end connect (`JobBackEndServicesLogin::ConnectToAuthenticationService`) is a Quazal
+  **job-vtable method** run by the JobManager only when FCX's login state machine reaches
+  `LoggingIn`.
+- FCX reaches `LoggingIn` only when it holds valid **UbiAuth passport credentials**, which
+  **Ubisoft Connect** fetches at boot via `gconnect`/`agora`. Those strings are **not in any
+  game-folder DLL** - the code lives in the Ubisoft Connect install.
+- Our offline boot (`FC3COOP_FAKE_ONLINE`) starts the game but never authenticates, so FCX never
+  reaches `LoggingIn`, no login job is enqueued, RV is never dialled, and the online session
+  manager's RV sub-object (`manager+0x110`) stays null -> a deterministic null-deref.
+- Forcing any online gate in-process only relocates the null-deref to the next unpopulated RV
+  object (netconfig, menu-init, ServiceMaster). The boundary is **outside our binary**.
+
+Key evidence: NOTES sessions 28cg, 28ci, 28ck, 28cl, 28co, 28cq; Ghidra artifacts
+`rv_connect.txt`, `rv_trigger.txt`, `gamestartlogin.txt`, `dis_fault.txt`, `online_init.txt`.
+
+## 4. Decision (2026-11-14)
+
+1. **Lock in** the mod-262 solo offline co-op baseline above as the practical deliverable.
+2. **Open the Ubisoft Connect frontier**: reverse-engineer how Ubisoft Connect boot-auth populates
+   FCX's online credentials, to find a way to make FCX reach `LoggingIn` and dial a local RV host.
+   This is a larger, externally-gated effort (the code is not in the game folder) and needs owner
+   approval to read files under the Ubisoft Connect install location. See
+   [coop-gator-emulation-plan.md](coop-gator-emulation-plan.md) for the RV protocol design that the
+   local emulator would target.
+
+## 5. Safety state at this snapshot
+
+- Working game copy `TestFC3_105\bin` is **rolled back to a clean mod-262** install (real loaders,
+  no experiment shim). Game plays normally.
+- `hosts` is clean (no redirects). `GamerProfile.xml` session provider is default.
+- All experiments live under ignored `local/` and `scripts/` only.
