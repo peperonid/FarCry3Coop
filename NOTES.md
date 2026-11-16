@@ -5071,3 +5071,22 @@ WHAT WORKS (good signal): the loader-proxy FAKE_ONLINE boot path + hook installa
 This LAN-short-circuit-via-shim is effectively Plan B implemented in coop_shim; finishing it = days of focused C + small RE (sockaddr struct layout) in coop_shim.cpp. Rolled bin back to the real loader + removed coop_shim.dll (normal play/mod-262 unaffected). Deployed artifacts + env recipe kept (run_coop_shim_sandbox.bat) for a future attempt once the hooks are implemented.
 
 
+
+
+### Session 28cd - RE of the co-op gate address/port producers (FC3_d3d11.dll md5 46bcc097) -> exact sockaddr layout for the shim fix.
+
+Decompiled FUN_11232e20, FUN_11232ef0, FUN_112492a0, FUN_11275d90, FUN_11237670 (project FC3d3d11_live). The gate reads a standard **sockaddr_in reached via a pointer stored at `this->[0]`** (the session/connection object):
+- `FUN_11232e20` (address producer, thiscall): reads `*(u_long*)(*this + 4)` -> IPv4 at **sockaddr_in +4** in NETWORK byte order (via `inet_ntoa`); requires a readiness flag `*(byte*)(this + 0x48)` (param_1[0x12]) != 0 else it calls FUN_1122f870 (lazy init). Outputs the dotted string via FUN_11213990.
+- `FUN_11232ef0` (port producer, fastcall): reads `*(u_short*)(*this + 2)` -> port at **sockaddr_in +2** in NETWORK byte order (ntohs). Same `this->[0]` sockaddr pointer + same `this+0x48` readiness flag.
+=> the object layout to fake: `obj[0]` = pointer to `sockaddr_in{ sa_family(2)=AF_INET(2), sin_port(2)=htons(port), sin_addr(4)=inet_addr(ip), pad(8) }`, and `*(byte*)(obj+0x48)` set nonzero.
+
+`FUN_112492a0` (the rv_sandboxurl net-op the shim hooks) is actually `void(void)`: it reads config key "SandboxUrl" (FUN_11213a10), calls the string parser FUN_11249220, then a gate FUN_11233110, and on success FUN_11235be0. The shim's `hk_rv_sandboxurl(void* out)` signature is WRONG (the real fn has no out param) and returning 1 without setting up the connection object leaves `obj[0]` sockaddr unset. The 28cc crash at RVA 0x01249226 is INSIDE the SandboxUrl string parser FUN_11249220 (called with an empty/invalid config value), NOT in the hook - so the stub does not stop the parser path.
+
+REFINED FIX PLAN for coop_shim (much simpler than originally modeled): do NOT try to fill the rv_sandboxurl out-struct (there is none). Instead HOOK THE PRODUCERS directly:
+1. Patch FUN_11232e20 (address) -> our handler returns/prints our fixed LAN IP string (skip reading obj sockaddr). Or set the global connection object's `[0]` to point at a static sockaddr_in we own.
+2. Patch FUN_11232ef0 (port) -> our handler returns htons(LAN_PORT).
+3. Ensure the `this+0x48` readiness path or bypass by hooking before it reads the sockaddr.
+4. Prevent the SandboxUrl parser (FUN_11249220) from dereferencing a null/empty config: either supply a valid SandboxUrl string in fc3_config.json (e.g. "127.0.0.1:50000" style the parser accepts) so it parses cleanly, or short-circuit FUN_112492a0 earlier / provide the config.
+This is a concrete, small shim change once the readiness flag + how to reach the connection `this` are pinned (next: find callers of FUN_11232e20/FUN_11232ef0 to get the `this` object, or hook them to ignore `this`). Artifacts: H:/FarCryCoop/scratch/ghidra/sockaddr_decompile.txt. No game files changed.
+
+
