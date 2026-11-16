@@ -5181,3 +5181,16 @@ RESIDUAL RISK (the one medium item): FC3's PRUDP per-connection key / Connection
 FEASIBILITY VERDICT: A2 auth = FEASIBLE, conditional green light. Transport: low (nex-go). RV services (UbiAuthentication/SessionMaster/TicketManager): medium (public RV protocol + SC-Blacklist/Ghostbusters precedents, reconstructable by RE of FC3's RV client). Auth validation: low (we own both endpoints; server self-accepts). Residual: extract FC3 PRUDP key constants via a live Connection-Request capture. Still weeks, but the crypto wall that looked decisive in 28ba/28br is NOT a blocker.
 
 
+
+
+### Session 28ck - RV login client RE'D: FC3 UbiAuthentication login uses DUMMY Quazal credentials read from config (DummyUbiUser@quazal.com / UbiDummyPwd + config key "h7fyctiuucf"), NOT a real Ubisoft SSO token. Major A2 de-risk.
+
+Ghidra string-anchor (rv_login_client.txt): `JobUbiAuthenticationLogin::RVLogin` = FUN_11279d80 (__fastcall, the op Execute); `::PrepareLogin` = FUN_11279f90 (the op setup).
+- PrepareLogin FUN_11279f90: `FUN_11213a10("h7fyctiuucf")` (config key -> value, some id/playlist), then reads config keys `"DummyUbiUser@quazal.com"` (-> user value) and `"UbiDummyPwd"` (-> password value), sets a flag uVar4=0x20 (EAccountFlags_Gator), calls FUN_112467c0(param_4,param_5,param_7,out) then FUN_11245f60(...) which packs (gameCtx, ?, customData, ?, PWD, USER, 0x20, ...) into the login request. Then registers the async op: sets *param_1 = &PTR_FUN_116cf86c (vtable), local_20 = FUN_11279d80 (the RVLogin Execute), name "JobUbiAuthenticationLogin::PrepareLogin", FUN_1121c8f0 enqueues the op.
+- RVLogin FUN_11279d80: prechecks via FUN_11210b10 on config->rv fields; on failure returns RV precheck errors `0x80030064` / `0x80030065`; on ready path calls `FUN_11246b90(&local_5, param_1+0x58, local_10, &local_18, local_14, param_1[0x1e], param_1[0x68], 0)` = the RV UbiAuthentication LOGIN SEND (guest login with the dummy creds), then sets callback `FUN_11253890` ("JobUbiAuthenticationLogin::RVLogin" completion) and enqueues.
+
+=> The FC3 retail co-op login authenticates to the RV UbiAuthentication service with a FIXED DUMMY account whose user/password come from the online CONFIG (which we serve). There is NO Ubisoft SSO token to forge or verify. Our emulated RV server only needs to (a) accept the PRUDP connection, (b) answer the UbiAuthentication login for user "DummyUbiUser@quazal.com" with success + issue the session/ticket + GameSessionKey. FUN_11246b90 is the exact send site and FUN_11253890 the callback site to instrument for a live handshake capture.
+
+A2 FEASIBILITY NOW: auth validation risk = LOW (dummy creds, config-supplied, we own the config AND the server). Remaining = implement the Quazal RV/PRUDP protocol (login service + ticket/session + GameSessionKey) per nex-go + RV precedents, and capture FUN_11246b90's outgoing packet to learn the exact RV login message encoding. NEXT: instrument FUN_11246b90 to log the outbound login buffer, or capture the PRUDP Connection Request when the client dials our host.
+
+

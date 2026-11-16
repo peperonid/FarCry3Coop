@@ -4880,3 +4880,16 @@ RE: действие ко-оп Host FUN_10443663 = `if ( (DAT_11e42c90==0) || (*
 ВЕРДИКТ ПО РЕАЛИЗУЕМОСТИ: A2-auth = РЕАЛИЗУЕМ, условный зелёный свет. Транспорт: низкий (nex-go). RV-сервисы (UbiAuthentication/SessionMaster/TicketManager): средний (публичный RV-протокол + прецеденты SC-Blacklist/Ghostbusters, восстановимо реверсом RV-клиента FC3). Валидация auth: низкий (оба конца наши; сервер принимает сам). Остаток: извлечь константы PRUDP-ключа FC3 живым захватом Connection-Request. Всё ещё недели, но крипто-стена, казавшаяся решающей в 28ba/28br, НЕ блокирует.
 
 
+
+
+### Сессия 28ck - RE клиента RV-логина: логин UbiAuthentication FC3 использует ФИКТИВНЫЕ креды Quazal из конфига (DummyUbiUser@quazal.com / UbiDummyPwd + конфиг-ключ "h7fyctiuucf"), А НЕ настоящий SSO-токен Ubisoft. Большой de-risk для A2.
+
+Ghidra по строкам (rv_login_client.txt): `JobUbiAuthenticationLogin::RVLogin` = FUN_11279d80 (__fastcall, Execute оп-а); `::PrepareLogin` = FUN_11279f90 (настройка оп-а).
+- PrepareLogin FUN_11279f90: `FUN_11213a10("h7fyctiuucf")` (конфиг-ключ -> значение, некий id/плейлист), затем читает конфиг-ключи `"DummyUbiUser@quazal.com"` (-> значение user) и `"UbiDummyPwd"` (-> значение пароля), ставит флаг uVar4=0x20 (EAccountFlags_Gator), вызывает FUN_112467c0(param_4,param_5,param_7,out) затем FUN_11245f60(...), который пакует (gameCtx, ?, customData, ?, PWD, USER, 0x20, ...) в запрос логина. Затем регистрирует async-оп: *param_1 = &PTR_FUN_116cf86c (vtable), local_20 = FUN_11279d80 (Execute RVLogin), имя "JobUbiAuthenticationLogin::PrepareLogin", FUN_1121c8f0 ставит оп в очередь.
+- RVLogin FUN_11279d80: предпроверки FUN_11210b10 по конфиг/RV-полям; при отказе возвращает RV-предчеки `0x80030064` / `0x80030065`; на готовом пути вызывает `FUN_11246b90(&local_5, param_1+0x58, local_10, &local_18, local_14, param_1[0x1e], param_1[0x68], 0)` = ОТПРАВКА RV UbiAuthentication ЛОГИНА (guest login с фиктивными кредами), затем ставит колбэк `FUN_11253890` (завершение "JobUbiAuthenticationLogin::RVLogin") и ставит в очередь.
+
+=> Ретейл-логин ко-опа FC3 аутентифицируется в сервис RV UbiAuthentication ФИКСИРОВАННЫМ ФИКТИВНЫМ аккаунтом, чьи user/пароль берутся из онлайн-КОНФИГА (который отдаём мы). НЕТ токена SSO Ubisoft, который надо бы подделать или проверить. Нашему эмулируемому RV-серверу нужно лишь (a) принять PRUDP-соединение, (b) ответить на логин UbiAuthentication для user "DummyUbiUser@quazal.com" успехом + выдать сессию/тикет + GameSessionKey. FUN_11246b90 - точный сайт отправки, FUN_11253890 - сайт колбэка, чтобы ставить инструмент для живого захвата рукопожатия.
+
+РЕАЛИЗУЕМОСТЬ A2 СЕЙЧАС: риск валидации auth = НИЗКИЙ (фиктивные креды, из конфига, конфиг и сервер наши). Осталось = реализовать протокол Quazal RV/PRUDP (сервис логина + тикет/сессия + GameSessionKey) по nex-go + прецедентам RV, и захватить исходящий пакет FUN_11246b90 чтобы узнать точное кодирование RV login-сообщения. ДАЛЬШЕ: инструментировать FUN_11246b90 для лога исходящего буфера логина, либо захватить PRUDP Connection Request когда клиент набирает наш хост.
+
+
