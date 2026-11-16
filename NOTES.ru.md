@@ -5088,3 +5088,15 @@ A3b (эмуляция лаунчера/друзей/party) нужен лишь �
 Примечание по инструментам: два адреса RV-склейки, которые describe() прокси тежил (0x00cf6790/0x00cf6690), на деле несвязанные инициализаторы структур; истинные параметры сессии это CCreateGameSessionParam/CJoinGameSessionParam, найденные по RTTI-строкам. Стоит обновить теги describe() прокси. bin чист; на C: ничего не изменено.
 
 
+
+
+### Сессия 28cx - условие B начато: построен работающий, офлайн-протестированный кодек PRUDP v1 (RendezVous) + UDP-эмулятор RV, завершающий handshake SYN->CONNECT, с hex-захватом каждого пакета. Это этап S1 "round-trip кодека" из docs/coop-gator-emulation-plan.md, и он работает без игры и без диска C:.
+
+Новый пакет scripts/rv_server/ (README.md + README.ru.md):
+- prudp.py: кодек PRUDP v1 по спеке kinnay/NintendoClients + nex-go (little endian). Пакет = magic EA D0 + 12-байтный заголовок (version, options_len, payload_len, source, destination, type_flags=(flags<<4)|type, session_id, substream_id, sequence) + необязательная 2-байтная сигнатура заголовка + опции (id, (type<<4|size), value) + нагрузка. Типы SYN=0/CONNECT=1/DATA=2/DISCONNECT=3/PING=4. Флаги ACK/RELIABLE/NEED_ACK/HAS_SIGNATURE. Терпимый парсер хранит каждую опцию дословно, чтобы неизвестный FC3-набор RV-опций переживал decode->re-encode.
+- rv_server.py: UDP-сервер (по умолч. 127.0.0.1:50000) с машиной состояний handshake на пир: SYN -> отвечает CONNECT (повторяет RV-опции клиента + вставляет опцию connection-id) -> клиент CONNECT -> state=established + CONNECT ack -> надёжные DATA/PING подтверждаются. Каждый пакет пишется raw-hex + разобранно в rv_capture.log (артефакт захвата, когда условие A позволит настоящему клиенту набрать).
+- test_prudp.py: офлайн-доказательство - round-trip кодека + синтетический PRUDP-клиент, делающий handshake против сервера по UDP loopback. Печатает ALL OK (SYN->CONNECT->established->DATA ack). По пути исправлены три бага: формат pack имел substream_id как H а не B; поле сигнатуры всегда выдавалось как 2 нулевых байта; strftime("%f") невалиден на Windows (только в strptime).
+
+Статус по плану: S1 (офлайн кодек + handshake) ГОТОВ и протестирован юнит-тестом. S0 (live-захват из FC3) всё ещё заперт условием A (FCX должен дойти до LoggingIn, прежде чем JobConnectEndPoint наберёт SandboxUrl). Шифрование нагрузки prudps RC4/HMAC и контрольная сумма заголовка - заглушки под реальный захват; ID RV-опций (connection-id/pid/cid) - догадки по таблице NEX под подтверждение. Наведите отдаваемый OnlineConfig SandboxUrl на prudp://address=127.0.0.1;port=50000, чтобы направить клиент сюда, когда A решено. Это фундамент (B), а не финал; условие A - голова блокера.
+
+

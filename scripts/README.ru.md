@@ -161,3 +161,5 @@ scripts/fc3_accessor_thunks.py <pe> [--helper 0x10004b70] [--min-count 3] [--ran
   игры (`H:\FarCryCoop\TestFC3_105` по умолчанию; иной путь — первым аргументом), предварительно делая timestamped `.bak-<ts>` бэкап каждого,
   и пишет там же лаунчер `run_coop_shim.bat` (ставит `FC3COOP_SHIM=1`/`FC3COOP_SECRET`, запускает игру). Запускать ВРУЧНУЮ после сборки обоих
   DLL. Реальную установку `H:\Uplay\Far Cry 3` не трогает (отказывается). Пара к `src/coop_shim/RUN.md` (NOTES 28ai).
+
+- `rv_server/` - эмулятор PRUDP/RendezVous (условие B): кодек PRUDP v1 + сервер handshake SYN->CONNECT + офлайн-тесты; см. `rv_server/README.ru.md`.

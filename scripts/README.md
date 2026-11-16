@@ -214,3 +214,5 @@ already read those verified paths.
   backup of each before overwriting, and writes a `run_coop_shim.bat` launcher there (sets `FC3COOP_SHIM=1`/`FC3COOP_SECRET`, starts the
   game). Run it MANUALLY after building both DLLs. It refuses the real install `H:\Uplay\Far Cry 3`. Companion of `src/coop_shim/RUN.md`
   (NOTES 28ai).
+
+- `rv_server/` - PRUDP/RendezVous emulator (condition B): PRUDP v1 codec + SYN->CONNECT handshake server + offline tests; see `rv_server/README.md`.

@@ -5389,3 +5389,15 @@ A3b (launcher/friends/party emulation) is only needed if we want the friend-invi
 Tooling note: the two RV-glue addresses the proxy's describe() had tagged (0x00cf6790/0x00cf6690) are actually unrelated struct initializers; the true session params are CCreateGameSessionParam/CJoinGameSessionParam found via RTTI strings. Consider updating the proxy describe() tags. bin clean; nothing on C: modified.
 
 
+
+
+### Session 28cx - condition B started: built a working, offline-tested PRUDP v1 (RendezVous) codec + a UDP RV emulator that completes the SYN->CONNECT handshake, with hex capture of every packet. This is the S1 "codec round-trip" milestone of docs/coop-gator-emulation-plan.md, and it runs without the game and without drive C:.
+
+New package scripts/rv_server/ (README.md + README.ru.md):
+- prudp.py: PRUDP v1 codec per the kinnay/NintendoClients + nex-go spec (little endian). Packet = magic EA D0 + 12-byte header (version, options_len, payload_len, source, destination, type_flags=(flags<<4)|type, session_id, substream_id, sequence) + optional 2-byte header signature + options (id, (type<<4|size), value) + payload. Types SYN=0/CONNECT=1/DATA=2/DISCONNECT=3/PING=4. Flags ACK/RELIABLE/NEED_ACK/HAS_SIGNATURE. Tolerant parser keeps every option verbatim so an unknown FC3 RV option set survives decode->re-encode.
+- rv_server.py: UDP server (default 127.0.0.1:50000) with a per-peer handshake state machine: SYN -> replies CONNECT (echoes the client's RV options + injects a connection-id option) -> client CONNECT -> state=established + CONNECT ack -> reliable DATA/PING get ACKed. Every packet is logged raw-hex + parsed to rv_capture.log (the capture artifact for when condition A lets the real client dial).
+- test_prudp.py: offline proof - codec round-trip + a synthetic PRUDP client that handshakes against the server over UDP loopback. Prints ALL OK (SYN->CONNECT->established->DATA ack). Fixed three bugs en route: pack format had substream_id as H not B; the signature field was always emitted as 2 zero bytes; strftime("%f") is invalid on Windows (only valid in strptime).
+
+Status vs the plan: S1 (offline codec + handshake) DONE and unit-tested. S0 (live capture from FC3) is still gated on condition A (FCX must reach LoggingIn before JobConnectEndPoint dials SandboxUrl). The prudps RC4/HMAC payload encryption and the header checksum are placeholders to be set from a real capture; the RV option IDs (connection-id/pid/cid) are NEX-table guesses to confirm. Point the served OnlineConfig SandboxUrl at prudp://address=127.0.0.1;port=50000 to route the client here once A is solved. This is the foundation (B), not the finish; condition A remains the head blocker.
+
+
