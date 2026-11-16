@@ -5227,3 +5227,19 @@ VERDICT (consolidated, honest): A2 is feasible-in-principle at the RV/PRUDP laye
 NEXT EXPERIMENT (principled replacement for the crashed FAKE_MGR): add coop_shim mode FC3COOP_FAKE_MGR=3 that, instead of writing a zeroed object into [0x11e42c90], CALLS the game's own creator FUN_10420a77 (or its caller FUN_1041936b) once the base module is present, letting FCX construct a REAL online manager. If the factory depends only on already-present online state, the real manager materializes and the co-op gate (FUN_10443663 !=0) passes without the 28ci zeroed-object crash. If the factory itself needs rv_connected/RV up, it will still fail - which tells us the online-init is truly gated behind a live RV connection and the whole chain (config -> RV connect -> rv_connected -> manager) must be satisfied by our emulated RV before ANY menu/co-op path works. Toolchain: implementable in the existing C shim (call via function pointer VA(RVA)+0). Artifacts: H:/FarCryCoop/scratch/ghidra/online_init.txt.
 
 
+
+
+### Session 28co - Stage0c result: calling the game's creator FUN_10420a77 DOES build a REAL manager, but the game then crashes at a DETERMINISTIC site (0x449a65) because the manager's RV sub-object getter returns NULL - hard disasm proof that a live RV connection (not just a manager) is required.
+
+run_a2_stage0c.bat (FC3COOP_FAKE_MGR=3, clean mode: no online flag, no hooks). coop_shim.log: "MGR_FORCER global after=0x4ded2850 (REAL manager built)" - the __try call to FUN_10420a77 returned WITHOUT exception and [0x11e42c90] became a real non-null manager (notably 'before' was already 0x07a3fa00, so the game had itself created a manager during FAKE_ONLINE boot too). Game advanced to "performing login" then CRASHED: FC3_d3d11.dll + 0x00449a65, 0xc0000005 - the SAME address as the 28ci zeroed-manager crash.
+
+Disassembly at the fault (dis_fault.txt):
+  10449a5a MOV ECX, [0x11e42c90]   ; ECX = online session-manager (now non-null)
+  10449a60 CALL FUN_1041f965        ; ask the manager for a sub-object/ServiceMaster; returns EAX
+  10449a65 MOV EDX, [EAX]  <-- AV   ; EAX == NULL -> null-deref
+  10449a6e CALL [EDX+0x64]          ; would then dispatch a vtable method on that sub-object
+So the manager's sub-object getter FUN_1041f965 returns NULL offline. This sub-object (an RV session/account ServiceMaster) exists only once the RV client connection is live. Conclusion (now with disasm evidence): a real manager is NOT sufficient; the manager's RV-backed sub-objects are null unless the RV connection is established (rv_connected). The client goes straight to USING the RV sub-object and null-derefs it - it does not first dial/connect RV in this path. Combined with 28ch (zero UDP ever sent), FCX never actually initiates the RV client connection in our FAKE_ONLINE flow, so every online sub-object stays null and every gate we pass just moves the null-deref to the next missing RV object.
+
+NET A2 STATUS: the critical path is confirmed to be "establish the RV client connection (rv_connected) so the manager populates its RV sub-objects", and the client is NOT initiating that connection on its own in the fake-online boot. The next nut (hard, still open) is to make FCX actually START the RV NetEncoder/RendezVous connect toward our emulated host (SandboxUrl=127.0.0.1:50000). Until that connect happens, no emulated RV server has anything to answer and every manager-derived sub-object is null -> crash. Rolled bin back (game normal). This is the make-or-break unknown and is genuinely deep/uncertain.
+
+
