@@ -5401,3 +5401,17 @@ New package scripts/rv_server/ (README.md + README.ru.md):
 Status vs the plan: S1 (offline codec + handshake) DONE and unit-tested. S0 (live capture from FC3) is still gated on condition A (FCX must reach LoggingIn before JobConnectEndPoint dials SandboxUrl). The prudps RC4/HMAC payload encryption and the header checksum are placeholders to be set from a real capture; the RV option IDs (connection-id/pid/cid) are NEX-table guesses to confirm. Point the served OnlineConfig SandboxUrl at prudp://address=127.0.0.1;port=50000 to route the client here once A is solved. This is the foundation (B), not the finish; condition A remains the head blocker.
 
 
+
+
+### Session 28cy - condition A "find the dial": the RV connect-to-URL routine is located, but there is NO safe callable dial - the URI builders take many args and live under the job/op machine gated by FCX login, and the socket senders are reached only through that machine. So the "force a dial from the shim" half of A is deliberately NOT attempted (it is the same shape that null-derefs in 28cg/28ci/28co). Live capture must instead come from the config seam once FCX login (A) is actually solved.
+
+Findings (Ghidra FC3d3d11_live; find_dial.txt):
+- RV URI builders: FUN_11251fa0 and FUN_11252170 format `prudps:/address=%s;port=%d;stream=%d;sid=%d;PID=%d;CID=1;type=%d`; FUN_11252c10 / FUN_11252dc0 format `prudp:/address=` (the unencrypted scheme); FUN_112207f0 references both `prudps:/` and `prudp:/` (URL parser); FUN_11215e10 references bare `prudp`/`prudps`.
+- Socket layer (where a PRUDP SYN would actually go out): WSASendTo caller FUN_11214630; WSASocketA callers FUN_11218970 / FUN_11214540; sendto callers FUN_11218510 (and game-side FUN_10440bee/FUN_10440d95). getaddrinfo callers FUN_112fa6c0 / FUN_112f7470 / FUN_11290a80 (the 112fa6c0 also does TCP connect -> that is the back-end HTTP path, not the PRUDP UDP path).
+- The URI builders take address+port+stream+sid+PID+CID+type and merely build the target string consumed by the connection job; they are not a fire-and-forget dial. Reaching the socket senders requires the JobConnectEndPoint / RV op state machine to run, which FCX only enqueues after it reaches LoggingIn (28cq). Calling any of these from coop_shim with fabricated arguments is the exact pattern that produced the deterministic null-derefs in 28cg/28ci/28co, so it is not a viable forcing route.
+
+DECISION: do not attempt an in-process RV-dial call. The correct capture route (S0) is: serve a crafted OnlineConfig with SandboxUrl -> prudp://address=127.0.0.1;port=50000 (config seam 28bs) + run rv_server (28cx) + point hosts at the config server; if FCX login ever advances to the point of dialing, the real PRUDP SYN lands in rv_capture.log. Until condition A (FCX login / Ubisoft Connect boot-auth) is genuinely solved, the client will not dial, so the capture harness is prepared but expected to see zero UDP - which itself is the clean negative confirmation that the gate is FCX login, not the socket/config layer.
+
+Tooling next: build the B RMC/service message layer on top of the verified handshake (fully offline-testable), and provide a single ready run harness (rv_server + config seam) so the live capture is one command once A is cracked.
+
+
