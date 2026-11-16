@@ -5514,3 +5514,18 @@ Live result (TestFC3_105, run with SHIM=1 WATCH_LOGIN=1 BLOCK_LOGOUT=1 FAKE_ONLI
 Next: with login now stable, the decisive owner UI test is Multiplayer -> Co-op -> Host: if the front-end still says "service unavailable" then the co-op Host gate truly needs the real session-manager (DAT_11e42c90 populated via RV), but if it proceeds (or the client now dials RV) we capture it via rv_server + the SandboxUrl config seam. This is the fork in the road. Ghidra scripts: scripts_live/DecompLogoutPoster.java, DecompLogoutHandler.java, DecompLogoutCallers.java (in H:/FarCryCoop/scratch/ghidra).
 
 
+
+
+### Session 28dg - FORK RESOLVED (negative): a sticking FCX front-end login does NOT open the co-op Host path. The Host gate needs the real RV session-manager, not a faked login state.
+
+With FC3COOP_BLOCK_LOGOUT=1 the login is fully held (LOGIN-EV reaches 3,4,5,6=LoggingIn,7,8,9=Succeeded,13,14; code 15 leaked ZERO times). But two decisive negatives:
+- FCX spams the LogoutOperation every tick: LOGOUT-BLOCK fired 42,618 times. The engine knows there is no real online session and keeps trying to log out; we only suppress the symptom.
+- Opening Multiplayer -> Co-op -> Host produced ZERO transport/session calls in uplay_api.log (no SetGameSession, no RVCreateGameSession tag, no PARTY_InvitePartyToGame, no friends/pump, and the rv capture would see no RV dial). Only IsConnected polls fired.
+
+Conclusion: Condition A in the "make FCX dial RV / build the session manager" sense is still NOT achieved by faking the loader credential result. The front-end "logged in" analytics state (codes 3..14) is necessary but not sufficient; the co-op Host action reads the real online session-manager singleton (DAT_11e42c90), which is only populated when FCX actually connects RendezVous (manager RV sub-object *+0x110 = ServiceMaster set in ConnectionSucceeded, NOTES 28cp). So the true remaining gate = get FCX to (a) build the manager via its online-init AND (b) enqueue the RV connect, i.e. reach the JobConnectEndPoint path.
+
+NEXT LEVER (untested combination): the clean WATCH_LOGIN mode deliberately does NOT set the online-enable global DAT_11f07e48 (FUN_11245090) because the earlier bare forcing (28cg) woke netconfig FUN_1126dc60 and crashed. But that crash was before credential-success + login-advance + logout-block existed. The combination FAKE_CREDS + FAKE_ONLINE + BLOCK_LOGOUT + online-enable global (and possibly the stage0c FUN_10420a77 manager-build) may now let the online-init proceed far enough to build the manager and dial RV instead of crashing. That is the next experiment if we keep pushing the real-co-op frontier; otherwise the locked deliverable stays mod-262 solo offline co-op.
+
+Operational: killed the spinning game (42k suppress hot loop burns CPU). Deploy left in experiment config (proxy+shim) for a fast continue-run. Rollback to clean mod-262: python -I scripts/deploy_proxy_only.py restore + delete bin/coop_shim.dll. Evidence: local/scratch/28dg_uplay_api.log + 28dg_coop_shim_trimmed.log.
+
+
