@@ -5260,3 +5260,21 @@ A3b (эмуляция лаунчера/друзей/party) нужен лишь �
 Состояние: окружение ОСТАВЛЕНО в этом net-on конфиге ради теста владельца (proxy + shim задеплоены; config_server :80 + rv_server :50000 работают; запуск БЕЗ FC3COOP_FAKE_ONLINE). Откат к чистому mod-262: python -I scripts/deploy_proxy_only.py restore + удалить bin/coop_shim.dll. Доказательства: local/scratch/28di_coop_shim.log + 28di_netstat.txt.
 
 
+
+
+### Сессия 28dj - РЕШАЮЩИЙ ЖИВОЙ ЗАХВАТ Co-op -> Host при ОНЛАЙН нет-движке (стенд 28di). Результат: Host НЕ набирает RendezVous и НЕ качает OnlineConfig даже с поднятым сетевым стеком. Гейт Host - авторизованный менеджер онлайн-сессий, без изменений.
+
+Владелец сделал UI-шаг (Multiplayer -> Co-op -> Host) в net-on конфиге (без FAKE_ONLINE; shim WATCH_LOGIN+BLOCK_LOGOUT+DNS_REDIRECT; config_server :80 + rv_server :50000 подняты). Захваты:
+- DNS: НОЛЬ getaddrinfo на onlineconfigservice.ubi.com -> НЕТ fetch-а OnlineConfig; config_server.out пуст.
+- rv_server: НОЛЬ входящего UDP, нет PRUDP SYN -> НЕТ RV-набора.
+- прокси uplay_api.log: НЕТ RVCreateGameSession / RVJoin / party/session; только бут-набор + IsConnected + pump GetNextEvent/Update (по 113к).
+- сокеты игры: только LAN UDP 192.168.1.8:9000 с бута; Host не открыл нового RV/online-сокета.
+- shim: LOGOUT-BLOCK сработал 19 834 раза -> вход в Co-op заставляет движок непрерывно пытаться LogoutOperation (онлайн-сессия невалидна), подавлено.
+
+Толкование (уточняет 28di): живой нет-движок (LAN UDP:9000 + UPnP) НЕ достаточен, чтобы открыть путь Co-op Host. Вход в Co-op теперь доходит до валидатора онлайн-сессии (пытается разлогиниться, чего не было под FAKE_ONLINE), но Host всё равно требует авторизованный менеджер сессий DAT_11e42c90 (гейт FUN_10443663 возвращает 4, пока он 0), который офлайн-загрузчик заполнить не может. Значит офлайн-фронтентир для нескольких людей по-прежнему заблокирован на авторизованном слое сессий (route A3b = эмулятор авторизации Ubisoft Connect), ровно как 28dg/28cw. Прорыв 28di с нет-движком реален, но сам по себе Host не разблокирует.
+
+Возможная будущая комбинация (НЕ запускалась; высокий риск крэша): net-on + FAKE_MGR (форсить объект-менеджер в DAT_11e42c90, NOTES 28ay/28ci), чтобы попробовать провести Host через гейт по LAN; прежний голый FAKE_MGR падал на занулённой vtable менеджера, а LAN-сессии всё равно нужна storm::echo-форма, исторически гейтнутая RV. Оставлено как задокументированная опция, не исследовалась.
+
+Операционно: захват окончен; игра убита (была в хот-лупе 19к подавлений логаута, жрёт CPU), серверы сняты, окружение откачено к чистому mod-262 (loader 294400 md5 dacd14c0). ЗАМЕЧАНИЕ: deploy_proxy_only.py restore может проиграть гонку сразу после убийства игры (loader остаётся 141312 прокси); почин = скопировать bin/real/uplay_r1_loader.dll поверх bin/uplay_r1_loader.dll. Доказательства: local/scratch/28dj_coop_shim_trimmed.log + 28dj_rv_capture.log + 28dj_config_server.out. Закреплённый деливерабл остаётся mod-262 СОЛО офлайн co-op.
+
+

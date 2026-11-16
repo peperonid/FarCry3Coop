@@ -5561,3 +5561,21 @@ Owner UI step needed to advance: from this menu (game left running), open Multip
 State: env LEFT IN THIS net-on config for the owner test (proxy + shim deployed; config_server :80 + rv_server :50000 running; launch env WITHOUT FC3COOP_FAKE_ONLINE). To roll back to clean mod-262: python -I scripts/deploy_proxy_only.py restore + delete bin/coop_shim.dll. Evidence: local/scratch/28di_coop_shim.log + 28di_netstat.txt.
 
 
+
+
+### Session 28dj - DECISIVE LIVE CAPTURE result of Co-op -> Host with the net engine ONLINE (the 28di harness). Result: Host does NOT dial RendezVous and does NOT fetch OnlineConfig even with the net stack up. The Host gate is the authenticated online session-manager, unchanged.
+
+Owner performed the UI step (Multiplayer -> Co-op -> Host) in the net-on config (no FAKE_ONLINE; shim WATCH_LOGIN+BLOCK_LOGOUT+DNS_REDIRECT; config_server :80 + rv_server :50000 up). Captures:
+- DNS: ZERO getaddrinfo for onlineconfigservice.ubi.com -> NO OnlineConfig fetch; config_server.out empty.
+- rv_server: ZERO inbound UDP, no PRUDP SYN -> NO RendezVous dial.
+- proxy uplay_api.log: NO RVCreateGameSession / RVJoin / party/session call; only the boot set + IsConnected + the GetNextEvent/Update pump (113k each).
+- game sockets: only the LAN UDP 192.168.1.8:9000 from boot; Host opened no new RV/online socket.
+- shim: LOGOUT-BLOCK fired 19,834 times -> entering Co-op makes the engine continuously attempt LogoutOperation (the online session is invalid), suppressed.
+
+Interpretation (refines 28di): a live net engine (LAN UDP:9000 + UPnP discovery) is NOT sufficient to open the Co-op Host path. Entering Co-op now reaches the online-session validator (it tries to log out, which it did not do under FAKE_ONLINE), but Host still requires the authenticated online session-manager DAT_11e42c90 (gate FUN_10443663 returns 4 iff it is 0), which the offline loader cannot populate. So the offline multi-human frontier remains blocked at the authenticated session layer (route A3b = Ubisoft Connect auth emulator), exactly as 28dg/28cw. The 28di net-engine breakthrough is real but does not, by itself, unlock Host.
+
+Possible future combo (NOT run; high crash risk): net-on + FAKE_MGR (force a manager object into DAT_11e42c90, NOTES 28ay/28ci) to try to get Host past the gate over LAN; the earlier bare FAKE_MGR crashed on the zeroed manager's vtable, and a LAN session still needs storm::echo session formation that historically gated on RV. Kept as a documented option, not pursued.
+
+Operational: capture run ended; game killed (it was in the 19k logout-suppress hot loop burning CPU), servers killed, env rolled back to clean mod-262 (loader 294400 md5 dacd14c0). NOTE: deploy_proxy_only.py restore can race right after killing the game (loader stays 141312 proxy); fix = copy bin/real/uplay_r1_loader.dll over bin/uplay_r1_loader.dll. Evidence: local/scratch/28dj_coop_shim_trimmed.log + 28dj_rv_capture.log + 28dj_config_server.out. Locked practical deliverable stays mod-262 SOLO offline co-op.
+
+
