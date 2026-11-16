@@ -81,6 +81,11 @@ static int g_fo_done      = 1;    // slot 19 UPLAY_HasOverlappedOperationComplet
 static int g_fo_result    = 0;    // slot 18 UPLAY_GetOverlappedOperationResult return (0 = UPLAY success code); env FC3COOP_FAKE_RESULT
 // NOTE: slot 55 UPLAY_USER_IsConnected (th_55) ALREADY returns 1 unconditionally in this proxy, so 'connected' is already faked.
 static int g_logpump = 0;
+// NOTES 28dq E-A2-PUMP: post-call return logging via return-address swap (observer-only; gated by FC3COOP_PUMP_PROBE=1).
+static int g_postlog = 0;     // env FC3COOP_PUMP_PROBE=1 -> log the RETURN value of pump fns (GetNextEvent / GetOverlapped / HasCompleted / Update)
+static int g_force_fo = 0;    // env FC3COOP_FORCE_FO=1 -> reserved for forcing slot18/19 overlapped result in net-on (unused this round)
+// Saved real caller return addresses for the per-slot post loggers (single pump thread assumed; NOTES 28dq).
+static volatile DWORD g_orig_ret_17 = 0, g_orig_ret_18 = 0, g_orig_ret_19 = 0, g_orig_ret_57 = 0;
 
 static void logOpen(void) {
     if (g_log) return;
@@ -155,6 +160,11 @@ int __cdecl log_entry(int slot, void** argp, DWORD retaddr) {
     }
     return 0;
 }
+
+// NOTE (NOTES 28dq E-A2-PUMP): a return-address-swap post-logger for the pump fns was prototyped but REMOVED:
+// FC3 calls UPLAY_GetNextEvent re-entrantly / across threads, so a single saved original-return global is unsafe and
+// the game died on the 2nd pump call. E-A2-PUMP (return capture) is therefore ABANDONED. g_postlog is kept as a
+// no-op parse hook only. The net-on lever that WAS kept is g_force_fo (slots 18/19, force overlapped op result).
 
 // SAFE thunks for ALL exports: log on entry under pushfd/pushad (regs+flags restored), then TAIL-CALL the real export (jmp, exact ABI for any calling convention) or, for the 3 gate fakes, return 1. Never re-call the real fn with fabricated args.
 static void* g_rawp_0;
@@ -458,10 +468,13 @@ extern "C" void __declspec(naked) th_18(void){ __asm {
   add  esp, 12
   popad
   popfd
+  cmp dword ptr [g_force_fo], 0
+  jne Lforce_18
   cmp dword ptr [g_fakeonline], 0
   je  Ltail_18
+Lforce_18:
   mov eax, dword ptr [g_fo_result]
-  ret                       // plain ret (cdecl), same ABI assumption as the existing party fakes th_29/th_30/th_55
+  ret                       // force GetOverlappedOperationResult=g_fo_result; active when FORCE_FO or FAKE_ONLINE (NOTES 28dq)
 Ltail_18:
   mov eax, dword ptr [g_rawp_18]
   jmp eax
@@ -479,10 +492,13 @@ extern "C" void __declspec(naked) th_19(void){ __asm {
   add  esp, 12
   popad
   popfd
+  cmp dword ptr [g_force_fo], 0
+  jne Lforce_19
   cmp dword ptr [g_fakeonline], 0
   je  Ltail_19
+Lforce_19:
   mov eax, dword ptr [g_fo_done]
-  ret                       // plain ret (cdecl), same ABI assumption as the existing party fakes th_29/th_30/th_55
+  ret                       // force HasOverlappedOperationCompleted=g_fo_done; active when FORCE_FO or FAKE_ONLINE (NOTES 28dq)
 Ltail_19:
   mov eax, dword ptr [g_rawp_19]
   jmp eax
@@ -1194,6 +1210,8 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         { const char* e = getenv("FC3COOP_FAKE_DONE");   if (e && e[0]) g_fo_done   = atoi(e); }
         { const char* e = getenv("FC3COOP_FAKE_RESULT"); if (e && e[0]) g_fo_result = atoi(e); }
         g_logpump = (getenv("FC3COOP_LOG_PUMP") != NULL) ? 1 : 0;
+        g_postlog = (getenv("FC3COOP_PUMP_PROBE") != NULL) ? 1 : 0;
+        g_force_fo  = (getenv("FC3COOP_FORCE_FO") != NULL) ? 1 : 0;
         char exe[MAX_PATH]; GetModuleFileNameA(NULL, exe, MAX_PATH);
         char* b = strrchr(exe, 92); if (b) strcpy(g_exe, b + 1);
         char self[MAX_PATH]; GetModuleFileNameA(h, self, MAX_PATH);
