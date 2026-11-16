@@ -5404,3 +5404,17 @@ PR #1 (peperonid: pr/coop-recon) в Bantila/FarCry3Coop ЗАМЕРДЖЕН Banti
 Операционно: без правок игры/прокси в этой сессии; только документы. NOTES + docs/ubisoft-coop-emulation-recon.{md,ru.md} + перекрёстная ссылка docs/project-status.md; закоммичено и запушено в origin/main.
 
 
+
+
+### Сессия 28du - проверил «короткий командно-строчный путь» хаба (запись coop-anything far-cry-3) на нашей прямой-загрузке: на 1.06 НЕ срабатывает.
+
+Согласно cranebeaker/coop-anything `games/far-cry-3`, «короткий путь» - это девелоперский direct-connect командной строкой `-host -login <n> -coop` + `-client -login <n> -ip <addr>` (session type 3 = локальный co-op без онлайн-сервиса; Storm-LAN-слой цел, multiplayer в 1.06 не вырезан). Хаб помечает блокер: «1.06 retail нельзя запустить с кастомной командной строкой» (farcry3_d3d11.exe - заглушка без GetCommandLine, перезапускается через лаунчер).
+
+Эксперимент: с нашим uplay-прокси поверх mod-262 (farcry3_d3d11.exe стартует напрямую мимо Ubisoft Connect), net-on (FAKE_CREDS+BLOCK_LOGOUT+WATCH_LOGIN+DNS_REDIRECT, без FAKE_ONLINE чтобы Storm занял порты) с аргументами `-host -coop -login fc3host -skipintro`.
+Результат: игра загрузилась в ОБЫЧНОЕ меню. Окно «Far Cry 3»; в прокси-логе идентичный штатный бут-паттерн (Init, PARTY_Init, FRIENDS_Init, ClearGameSession, GetCredentials, GetCdKeys, потом pump достижений/IsConnected) и НОЛЬ RVCreateGameSession/SetGameSession; только UDP 192.168.1.8:9000 (тот же сокет, что открывает голое меню). Значит аргументы `-host -coop` не дошли до лаунчер-обработчика хоста - игра восприняла запуск как обычный одиночный старт.
+
+Вывод: оптимистичный «короткий путь - командная строка» хаба на 1.06 PC через прямой запуск НЕ работает; аргументы игнорируются. Чтобы реализовать LAN/офлайн-сессию, надо ВЫЗВАТЬ путь запуска хоста внутри процесса, а не через аргументы лаунчера. Это опция из самого списка хаба «хукнуть _RdV-провайдеров / двигать путь Offline-coop своим транспортом»: (route R1) найти и вызвать через наш shim функцию FC3_d3d11.dll, которую вызвал бы настоящий `-host -coop` (стартер listen-сессии session-type-3), затем проверить Storm listen-сессию + входящий второй экземпляр; либо (route R2) ASI/shim, хукающий matchmaking-провайдеры `_RdV` и внедряющий LAN-провайдер. Оба - проекты реверса+кода, не переключатель.
+
+Операционно: игра убита; прокси оставлен поверх mod-262 (bin/uplay_r1_loader.dll = наш прокси 8e996199, реальный mod-262 загрузчик спрятан в real/uplay_r1_loader.dll md5 dacd14c0). Откат к чистому mod-262 по завершении: python -I scripts/deploy_proxy_only.py restore.
+
+

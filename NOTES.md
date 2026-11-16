@@ -5705,3 +5705,17 @@ Recommendation: keep mod-262 SOLO as the deliverable; treat FC3 co-op-backend em
 Operational: no game/proxy changes this session; docs only. NOTES + docs/ubisoft-coop-emulation-recon.{md,ru.md} + docs/project-status.md cross-link; committed and pushed to origin/main.
 
 
+
+
+### Session 28du - tested the hub's "short command-line path" (coop-anything far-cry-3 entry) on our direct-launch setup: it does NOT engage on 1.06.
+
+Per cranebeaker/coop-anything `games/far-cry-3` the "short path" is the developer direct-connect command line `-host -login <n> -coop` + `-client -login <n> -ip <addr>` (session type 3 = local co-op, no online service; Storm LAN layer intact, multiplayer not stripped in 1.06). The hub flags the blocker as "the 1.06 retail build cannot be launched with custom command-line arguments" (farcry3_d3d11.exe is a stub, no GetCommandLine, relaunches via launcher).
+
+Experiment: with our uplay proxy installed over the mod-262 base (so farcry3_d3d11.exe launches directly outside Ubisoft Connect), launched net-on (FAKE_CREDS+BLOCK_LOGOUT+WATCH_LOGIN+DNS_REDIRECT, NO FAKE_ONLINE so Storm binds) with args `-host -coop -login fc3host -skipintro`.
+Result: the game booted to the NORMAL menu. Window title "Far Cry 3"; proxy log shows the identical boot pattern (Init, PARTY_Init, FRIENDS_Init, ClearGameSession, GetCredentials, GetCdKeys, then achievements/IsConnected pump) and ZERO RVCreateGameSession/SetGameSession; only UDP 192.168.1.8:9000 (the same socket the plain menu opens). So the `-host -coop` arguments did not reach the game's launcher host handler - the game treated the launch as a normal single-player start.
+
+Conclusion: the hub's optimistic "short path is a command line" does NOT work on the 1.06 PC build via direct launch either; the args are ignored. Realizing the LAN/offline session therefore needs the game's own host-start path to be TRIGGERED in-process, not via launcher args. That is the "hook the _RdV providers / drive the Offline-coop path with your own transport" option in the hub's own list: (route R1) locate + call the FC3_d3d11.dll function that a real `-host -coop` would invoke (the session-type-3 listen-session starter) via our shim, then verify a Storm listen session + a joining second instance; or (route R2) an ASI/shim that hooks the `_RdV` matchmaking providers and injects a LAN provider. Both are RE+code projects, not a config toggle.
+
+Operational: game killed; proxy left deployed over the mod-262 base (bin/uplay_r1_loader.dll = our proxy 8e996199, real mod-262 loader stashed at real/uplay_r1_loader.dll md5 dacd14c0). Rollback to clean mod-262 when done: python -I scripts/deploy_proxy_only.py restore.
+
+
