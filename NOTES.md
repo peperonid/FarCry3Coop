@@ -5544,3 +5544,20 @@ Practical consequence: the locked deliverable stays mod-262 SOLO OFFLINE co-op. 
 Operational: after this session the experiment processes are stopped and the game env rolled back to clean mod-262. Ghidra entry probe: scratch rv_entry.txt (FUN_112492a0 reads the "SandboxUrl" config key and returns 0 when absent -> RV has no target; FUN_11252f70 ConnectToAuthenticationService exits 0x8001000a when unauthenticated; all RV funcs have 55 8b ec prologues, safe for 6-byte trampolines).
 
 
+
+
+### Session 28di - BREAKTHROUGH, corrects 28dh: FCX's online/net engine DOES come up offline. The zero-network in 28dh was an artifact of FC3COOP_FAKE_ONLINE. WITHOUT FAKE_ONLINE (only FAKE_CREDS + IsConnected=1 + BLOCK_LOGOUT + WATCH_LOGIN + DNS_REDIRECT + LOG_PUMP) the game boots to menu normally AND the network stack initializes.
+
+Live evidence (TestFC3_105, no FAKE_ONLINE):
+- getaddrinfo observer fires: DNS-LOOKUP '239.255.255.250' svc=1900 (SSDP/UPnP discovery) -> the net engine is running.
+- the game binds a real LAN socket: UDP 192.168.1.8:9000 (storm::echo session/voice port). So the LAN transport is live at menu.
+- login still advances 3,4,5,6=LoggingIn,7,8,9=Succeeded,13 with BLOCK_LOGOUT (no logout).
+- At MENU no OnlineConfig fetch and no RV dial yet (0 hits to config_server :80 / rv_server :50000): those appear to be triggered on entering online Multiplayer, which needs the owner UI step.
+
+So the true frontier moved: the net engine is NOT gated after all; FC3COOP_FAKE_ONLINE was suppressing it. Two now-plausible routes reopen: (1) OFFLINE RV: enter Co-op and see if the game fetches OnlineConfig (our DNS-redirect -> config_server) then dials RV (rv_server captures it) - the original A2 capture; (2) LAN storm::echo: with UDP:9000 live, re-test whether Co-op -> Host forms a LAN session a second human can join (revisit the 28ad-28ag LAN idea under the now-working net stack; 28cw thought the session descriptor is RV-only, re-verify).
+
+Owner UI step needed to advance: from this menu (game left running), open Multiplayer -> Co-op -> Host and report; simultaneously the three captures (coop_shim.log DNS/LOGIN-EV, config_server.out, rv_capture.log, plus netstat UDP:9000) will show which route the engine takes.
+
+State: env LEFT IN THIS net-on config for the owner test (proxy + shim deployed; config_server :80 + rv_server :50000 running; launch env WITHOUT FC3COOP_FAKE_ONLINE). To roll back to clean mod-262: python -I scripts/deploy_proxy_only.py restore + delete bin/coop_shim.dll. Evidence: local/scratch/28di_coop_shim.log + 28di_netstat.txt.
+
+
