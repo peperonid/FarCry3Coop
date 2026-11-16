@@ -35,3 +35,6 @@ src/coop_shim/*.log
 
 # rv_server capture logs (runtime artifacts)
 scripts/rv_server/rv_capture*.log
+
+# rv_server harness scratch output
+scripts/rv_server/*.out
