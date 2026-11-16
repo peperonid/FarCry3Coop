@@ -5735,3 +5735,16 @@ Conclusion: R1 ("call the host-session starter") is NOT a one-call shim. Making 
 Operational: env restored to clean mod-262 (bin/uplay_r1_loader.dll md5 dacd14c0, no shim/flags); game + java killed. Ghidra helper FindCoopHost.java + _run_findhost.py in H:/FarCryCoop/scratch/ghidra/scripts_live (scratch, not committed; full-analysis path abandoned).
 
 
+
+
+### Session 28dw - R2 started as a project: LAN-provider patch map for FC3_d3d11.dll.
+
+Static recon (capstone). Concrete anchors found for substituting a LAN/non-RV session provider for `_RdV`:
+- Both BASE (non-RV) and _RdV session classes exist: `CSessionCreateOperation` str 0x11523fa8 (code ref 0x10425885) vs `CSessionCreateOperation_RdV` 0x11527a78 (0x1044b650); `CSessionJoinOperation` 0x11524030 (0x10425961) vs `CSessionJoinOperation_RdV` 0x11527b88 (0x1044bfd4); `SessionSearchIPOperation` 0x11524015; `MatchmakingProvider` 0x11589218 vs `MatchmakingProvider_RdV` 0x1158b43d.
+- The base-op factory ~0x10425822 and the _RdV-op factory ~0x1044b2cb have ZERO direct E8 callers => they are VIRTUAL methods; provider is chosen by which provider object is installed, not a call-site branch. That install/construction site is the one anchor still to pin (RTTI/vtable walk).
+- Session param `MatchMakingEnabled` str 0x11561628 registered ~0x1061e581 (ref 0x1061e633); NetEngineType id 0x3c per hub.
+- CLI/mode path (28dv): sessionTypeByName prologue 0x107ab377 (-coop->*[0x1171a99c]); startup parser ~0x100044d0 stores flags into globals 0x117f5d84..
+
+Plan written to docs/r2-lan-provider-plan.md (+ .ru.md): strategies A (swap provider install to base), B (vtable-detour the create/join factory slots to base factory 0x10425822), C (force MatchMakingEnabled=0 + NetEngineType=LAN, quick probe), D (local RV emulator = separate big project). Staged R2-1..R2-4 with gates; R2-1 (pin the _RdV provider construction site + confirm the base provider can stand alone) is the go/no-go gate. Effort weeks-months, high risk; killer risk unchanged (no golden reference of FC3 campaign co-op ever running). Env unchanged (clean mod-262, game not running).
+
+
