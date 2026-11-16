@@ -5287,3 +5287,30 @@ ROUTE A3 (new, concrete, on our H: binary): the game already reaches a working s
 NOTE for owner: to inspect the actual Ubisoft Connect install files (the live uplay_r14.dll it loads, its config/hosts) I need your explicit approval to READ (not write) under `C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\`, since that is drive C: and outside the workspace table. Not needed yet - the mod copy on H: is enough to start.
 
 
+
+
+### Session 28cs - Route A3a is architecturally confirmed and the API contract is now known: the game imports the ENTIRE co-op-via-friends surface from uplay_r1_loader.dll (which is OUR proxy), so the proxy can implement party + game-session + events itself and bridge two local games, no uplay_r14.dll or RV needed.
+
+Import-graph facts (probe_uplay_exports.py, local/scratch/uplay_exports.txt):
+- uplay_r14.dll is 32-bit x86 (machine 0x14c), ImageBase 0x10000000, 136 exports - the real Ubisoft Uplay client.
+- FC3_d3d11.dll (the game) does NOT import uplay_r14.dll directly. It imports `uplay_r1_loader.dll` and `ubiorbitapi_r2_loader.dll`. uplay_r1_loader.dll (the DLL we already ship as a proxy) forwards to uplay_r14.dll. ubiorbitapi_r2_loader.dll only does savegames + StartLauncher (orbit client), not multiplayer.
+- The exact UPLAY functions the game imports from uplay_r1_loader.dll (this is the FULL contract the proxy must satisfy for the friends/party/session flow):
+  lifecycle: UPLAY_Init, UPLAY_Update, UPLAY_Quit, UPLAY_Release, UPLAY_GetLastError, UPLAY_GetNextEvent, UPLAY_HasOverlappedOperationCompleted, UPLAY_GetOverlappedOperationResult
+  user: UPLAY_USER_GetCredentials, UPLAY_USER_GetCdKeys, UPLAY_USER_IsConnected
+  friends: UPLAY_FRIENDS_Init, UPLAY_FRIENDS_GetFriendList
+  party: UPLAY_PARTY_Init, UPLAY_PARTY_IsPartyLeader, UPLAY_PARTY_SetGuest, UPLAY_PARTY_SetUserData, UPLAY_PARTY_GetFullMemberList, UPLAY_PARTY_InvitePartyToGame
+  session: UPLAY_SetGameSession, UPLAY_ClearGameSession
+  misc: UPLAY_OVERLAY_Show, UPLAY_AVATAR_GetAvatarIdForCurrentUser
+
+DESIGN (A3a): make our uplay_r1_loader proxy answer the party/session/event calls with a LOCAL shared registry so two co-located games act as online friends in one party with an open game session:
+1. Shared cross-process state (Windows named shared-memory section, e.g. Global\FC3COOP_Party, or a tiny local UDP/TCP rendezvous the proxy runs) holding: the party (members: {account, name, leader}), each member's GameSession (the opaque blob the game passed to SetGameSession + Joinability), and a pending-event queue.
+2. Host game: calls SetGameSession(data,Open) -> proxy stores host's session blob + marks joinable; returns success. Host is IsPartyLeader=true.
+3. Client game: proxy returns a friend list (GetFriendList) containing the host, and GetFullMemberList returns the party with the host; IsPartyLeader=false. Client's UI shows the host's joinable co-op game.
+4. Join: driven by a UPLAY event delivered through UPLAY_GetNextEvent (friend party update / game invite accepted). The proxy must emit the correct UPLAY_Event_t type + payloads so the game's handler proceeds to dial the HOST'S OWN game data (the co-op data blob, which uses the engine's own LAN/loopback storm transport once the session is 'joined'), NOT Ubisoft.
+5. Must keep UPLAY_USER_IsConnected=true and IsInOfflineMode=false so the front-end shows the online co-op UI (the 28h-era gate).
+
+OPEN QUESTION (next RE): exact struct layouts the game consumes - UPLAY_Event_t + event type enum (what GetNextEvent fills), UPLAY_Friend_t (GetFriendList), UPLAY_PartyMember_t (GetFullMemberList), and the SetGameSession blob format. The real uplay_r14.dll implements these correctly, so disassemble in uplay_r14.dll: UPLAY_GetNextEvent (RVA 0x115ea), UPLAY_PARTY_GetFullMemberList (0xe0fc), UPLAY_FRIENDS_GetFriendList (0x178be), UPLAY_SetGameSession (0x3ce2), UPLAY_PARTY_Init (0x6eba). The Uplay SDK v1.x public headers likely define the structs - cross-check.
+
+Toolchain fits: our existing uplay_proxy already exports the UPLAY entry points the game imports (it currently forwards to real uplay_r14); extend those handlers with the local party/session registry + event pump. No RV/PRUDP, no C: reads required.
+
+

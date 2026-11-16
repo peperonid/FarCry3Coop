@@ -4986,3 +4986,30 @@ Ubisoft Connect устанавливается в `C:\Program Files (x86)\Ubisof
 МЕТКА ДЛЯ ВЛАДЕЛЬЦА: чтобы осмотреть сами файлы установки Ubisoft Connect (живой uplay_r14.dll который он грузит, его config/hosts) нужно твоё явное одобрение ЧИТАТЬ (не писать) в `C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\`, т.к. это диск C: и вне рабочей таблицы. Пока не нужно - копии с H: достаточно чтобы начать.
 
 
+
+
+### Сессия 28cs - маршрут A3a архитектурно подтверждён, контракт API известен: игра импортирует ВЕСЬ ко-оп-поток-через-друзей из uplay_r1_loader.dll (а это НАШ прокси), поэтому прокси может сам реализовать party + game-session + события и связать две локальные игры, без uplay_r14.dll и без RV.
+
+Факты графа импортов (probe_uplay_exports.py, local/scratch/uplay_exports.txt):
+- uplay_r14.dll - 32-бит x86 (machine 0x14c), ImageBase 0x10000000, 136 экспортов - настоящий клиент Ubisoft Uplay.
+- FC3_d3d11.dll (игра) НЕ импортирует uplay_r14.dll напрямую. Она импортирует `uplay_r1_loader.dll` и `ubiorbitapi_r2_loader.dll`. uplay_r1_loader.dll (DLL которую мы уже ставим как прокси) форвардит в uplay_r14.dll. ubiorbitapi_r2_loader.dll - только сохранения + StartLauncher (orbit-клиент), не мультиплеер.
+- Точные UPLAY-функции, которые игра импортирует из uplay_r1_loader.dll (это ПОЛНЫЙ контракт, который прокси обязан удовлетворить для потока friends/party/session):
+  жизненный цикл: UPLAY_Init, UPLAY_Update, UPLAY_Quit, UPLAY_Release, UPLAY_GetLastError, UPLAY_GetNextEvent, UPLAY_HasOverlappedOperationCompleted, UPLAY_GetOverlappedOperationResult
+  пользователь: UPLAY_USER_GetCredentials, UPLAY_USER_GetCdKeys, UPLAY_USER_IsConnected
+  друзья: UPLAY_FRIENDS_Init, UPLAY_FRIENDS_GetFriendList
+  party: UPLAY_PARTY_Init, UPLAY_PARTY_IsPartyLeader, UPLAY_PARTY_SetGuest, UPLAY_PARTY_SetUserData, UPLAY_PARTY_GetFullMemberList, UPLAY_PARTY_InvitePartyToGame
+  сессия: UPLAY_SetGameSession, UPLAY_ClearGameSession
+  прочее: UPLAY_OVERLAY_Show, UPLAY_AVATAR_GetAvatarIdForCurrentUser
+
+ДИЗАЙН (A3a): заставить наш прокси uplay_r1_loader отвечать на вызовы party/session/событий через ЛОКАЛЬНЫЙ общий реестр, чтобы две соседние игры вели себя как онлайн-друзья в одной party с открытой game-сессией:
+1. Общее между-процессное состояние (именованный раздел shared-memory Windows, напр. Global\FC3COOP_Party, или крошечный локальный UDP/TCP rendezvous, который поднимает прокси): party (участники {account, name, leader}), GameSession каждого участника (непрозрачный блоб из SetGameSession + Joinability) и очередь ожидающих событий.
+2. Игра-хост: вызывает SetGameSession(data,Open) -> прокси хранит блоб сессии хоста и помечает joinable; возвращает успех. Хост: IsPartyLeader=true.
+3. Игра-клиент: прокси возвращает список друзей (GetFriendList) с хостом, GetFullMemberList возвращает party с хостом; IsPartyLeader=false. UI клиента показывает доступную ко-оп-игру хоста.
+4. Присоединение: запускается событием UPLAY через UPLAY_GetNextEvent (обновление party друга / принятое игровое приглашение). Пркси обязан выдать верный тип UPLAY_Event_t + поля, чтобы обработчик игры перешёл к набору СОБСТВЕННЫХ игровых данных ХОСТА (блоб ко-оп-данных, который использует собственный LAN/loopback storm-транспорт движка после «входа» в сессию), а не Ubisoft.
+5. Держать UPLAY_USER_IsConnected=true и IsInOfflineMode=false, чтобы фронтенд показывал онлайн ко-оп UI (те же ворота эпохи 28h).
+
+ОТКРЫТЫЙ ВОПРОС (следующий RE): точные раскладки структур, которые потребляет игра - UPLAY_Event_t + enum типов событий (что заполняет GetNextEvent), UPLAY_Friend_t (GetFriendList), UPLAY_PartyMember_t (GetFullMemberList), формат блоба SetGameSession. Настоящий uplay_r14.dll реализует их корректно, поэтому дизассемблировать в uplay_r14.dll: UPLAY_GetNextEvent (RVA 0x115ea), UPLAY_PARTY_GetFullMemberList (0xe0fc), UPLAY_FRIENDS_GetFriendList (0x178be), UPLAY_SetGameSession (0x3ce2), UPLAY_PARTY_Init (0x6eba). Публичные заголовки Uplay SDK v1.x вероятно задают структуры - сверить.
+
+Тулчейн подходит: наш uplay_proxy уже экспортирует вводимые игрой точки UPLAY (сейчас форвардит в настоящий uplay_r14); расширить эти обработчики локальным реестром party/сессий + насосом событий. Без RV/PRUDP, без чтения C:.
+
+
