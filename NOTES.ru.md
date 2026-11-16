@@ -5384,3 +5384,23 @@ A3b (эмуляция лаунчера/друзей/party) нужен лишь �
 ### Журнал коммуникации 28dr - PR #1 замерджен Bantila без содержательного ответа; ветка коммуникации закрыта.
 
 PR #1 (peperonid: pr/coop-recon) в Bantila/FarCry3Coop ЗАМЕРДЖЕН Bantila 2026-11-13 17:47 UTC («Merge pull request #1 from peperonid/pr/coop-recon»). Это единственное действие Bantila: 0 комментариев и 0 ревью от него. Все 5 комментариев в PR наши (peperonid). Ни один вопрос к Bantila не получил ответа (LAN-кооп кампании на 1.05 против classic MP; офлайн-обход SessionTicket / INVALIDSESSIONKEY; форс глобала менеджера онлайн-сессий 0x11f07e48 и чем его наполнить; ожидание лобби callback’а от онлайн-сервиса). Коммитов кода после мержа у Bantila нет (последние реальные правки 2026-10-24). Это согласуется с нашим выводом (28dm-28dq): LAN-бэкенда для кампании в билде нет, поэтому «1.05 LAN», скорее всего, про classic multiplayer. Ветка коммуникации считается ЗАКРЫТОЙ; ревизия теперь часть upstream main.
+
+
+### Сессия 28dt - разведка: open-source эмуляторы Ubisoft/Quazal online и объём/риск эмуляции co-op-бэкенда FC3. Полный разбор в docs/ubisoft-coop-emulation-recon.md (+ .ru.md).
+
+Картина (только чтение / веб):
+- ТРАНСПОРТ PRUDP - решённая общая задача: задокументирован wiki kinnay/NintendoClients PRUDP-Protocol + 3dbrew (V0/V1, magic 0xEA 0xD0, SYN/CONNECT/DATA/DISCONNECT/PING, сигнатура пакета, seq id, опции RC4/AES) и реализован в AnthomStahl `prudp` (Python, v1/v2). FC3 использует ТОТ ЖЕ PRUDP (наш scripts/rv_server/prudp.py уже делает SYN->CONNECT). => транспорт для локального RV-эмулятора низкорисковый и по большей части готов.
+- Detanup01/UplayServer (архив) -> ServerEmus/Release.Uplay (C#): эмулятор LAUNCHER Uplay Demux+API (auth/DRM/ach/store, DLL-шимы через именованные каналы, правленые UplayKit/UbiServices/CoreLib). Релевантен boot-auth / Условию A, НЕ co-op-сессиям.
+- michal-kapala/ubi-gs (Python): Ubisoft Game Service (~2000-2005 gsconnect) auth/друзья/matchmaking/чат/CDkey - старый SDK, не FC3 (FC3 = Quazal RendezVous); только архитектурный прецедент.
+- Сцена современных эмуляторов Ubisoft online (офлайн The Crew 1; PlayBlock / OpenCrew / SwallowBlock / Wild-Ones для Ghost Recon Wildlands/Breakpoint): эмулируют НОВЫЙ стек Ubisoft Online (UbiAuth + party/Uparty + сессии/matchmaking + PRUDP v4+). Доказывают, что полный Ubisoft party/lobby-бэкенд СООБЩЕСТВО эмулирует, но для FC3 (Quazal RendezVous 6 / PRUDP v1, другое поколение) НАПРЯМУЮ не переиспользуется.
+- PretendoNetwork/nex-go + pyprudp (Nintendo NEX поверх PRUDP): транспорт переиспользуется; схема сервисов отличается от RendezVous.
+
+КЛЮЧ: НИ ОДИН open-source проект не эмулирует конкретный Quazal RendezVous co-op-сервис FC3. Ниша пуста.
+
+Объём/риск эмуляции co-op-бэкенда FC3 (пакеты): (1) транспорт PRUDP + RV handshake = УЖЕ СДЕЛАНО здесь, низко. (2) щель Config/SandboxUrl = задействована здесь, низко. (3) довести клиент до реального набора RV (нынешний блокер) = средний/ВЫСОКИЙ. (4) прикладной слой сервиса RendezVous для FC3 (login backend-сервисов, JobTicketManager login/derive/validate, party, GameSession create/join, UPnP/NAT + крипто GameSessionKey/ticket + RMC-маршаллинг) = БОЛЬШОЙ / НАИВЫСШИЙ. (5) синхронизация сессии/party + co-op в мире = большой / средний-высокий. УБИЙСТВЕННЫЙ РИСК: нет эталонного трафика (живую FC3 co-op-запись можно было снять только пока сервис Ubisoft был жив; теперь мёртв) => пакет 4 восстанавливать чисто по статической дизассембле без оракула; ошибки крипто/маршаллинга молчаливы + крашат. Реалистичный размер: многомесячный проект уровня команды (реверс + эмуляция), не правка хука/прокси; один человек/агент правдоподобно закрывает 1-2 и может 3, но пакет 4 без эталонной записи - территория разделённого трафика сообщества.
+
+Рекомендация: держать mod-262 SOLO как результат; эмуляцию co-op-бэкенда FC3 считать отдельным высокозатратным/высокорисковым проектом; не начинать без (a) снятой до выключения живой FC3 co-op-сессии или (b) команды, пулингующей такой трафик. Переиспользуемые активы: наш PRUDP codec / rv_server / config_server, референсы PRUDP kinnay + AnthomStahl, Detanup01/ServerEmus для лаунчера/auth, современные Ubisoft party/lobby-эмуляторы ради архитектуры.
+
+Операционно: без правок игры/прокси в этой сессии; только документы. NOTES + docs/ubisoft-coop-emulation-recon.{md,ru.md} + перекрёстная ссылка docs/project-status.md; закоммичено и запушено в origin/main.
+
+

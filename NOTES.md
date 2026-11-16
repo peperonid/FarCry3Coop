@@ -5685,3 +5685,23 @@ Operational state at end: game killed; rv_server + config_server killed; TestFC3
 ### Communication log 28dr - PR #1 merged by Bantila, no substantive reply; communication thread closed.
 
 PR #1 (peperonid: pr/coop-recon) into Bantila/FarCry3Coop was MERGED by Bantila on 2026-11-13 17:47 UTC ("Merge pull request #1 from peperonid/pr/coop-recon"). That is Bantila's only action: 0 comments, 0 reviews from Bantila. All 5 PR comments are ours (peperonid). None of the questions addressed to Bantila were answered (1.05 LAN campaign co-op vs classic MP; offline SessionTicket / INVALIDSESSIONKEY bypass; forcing the online-session-manager global 0x11f07e48 and what to feed it; the lobby waiting on an online-service callback). Bantila has no code commits after the merge (last real code 2026-10-24). Consistent with our own finding (28dm-28dq): campaign co-op has no LAN backend in the build, so the "1.05 LAN" likely refers to classic multiplayer only. The communication thread is considered CLOSED; the recon is now part of upstream main.
+
+
+### Session 28dt - research recon: open-source Ubisoft/Quazal online emulators and the FC3 co-op-backend emulation effort/risk. Full write-up in docs/ubisoft-coop-emulation-recon.md (+ .ru.md).
+
+Landscape (read-only / web):
+- PRUDP TRANSPORT is a solved, shared problem: documented by kinnay/NintendoClients PRUDP-Protocol wiki + 3dbrew (V0/V1, magic 0xEA 0xD0, SYN/CONNECT/DATA/DISCONNECT/PING, packet signature, seq id, RC4/AES options) and implemented by AnthomStahl `prudp` (Python, v1/v2). FC3 uses the SAME PRUDP (our scripts/rv_server/prudp.py already does SYN->CONNECT). => transport for a local RV emulator is low-risk, largely done.
+- Detanup01/UplayServer (archived) -> ServerEmus/Release.Uplay (C#): Uplay Demux+API LAUNCHER emulator (auth/DRM/ach/store, named-pipe DLL shims, modified UplayKit/UbiServices/CoreLib). Relevant to boot-auth / Condition A, NOT co-op sessions.
+- michal-kapala/ubi-gs (Python): Ubisoft Game Service (~2000-2005 gsconnect) auth/friends/matchmaking/chat/CDkey - older SDK, not FC3 (FC3 = Quazal RendezVous); architecture precedent only.
+- Modern Ubisoft-online emulator scene (The Crew 1 offline; PlayBlock / OpenCrew / SwallowBlock / Wild-Ones for Ghost Recon Wildlands/Breakpoint): emulates the NEW Ubisoft Online stack (UbiAuth + party/Uparty + session/matchmaking + PRUDP v4+). Proves a full Ubisoft party/lobby backend IS community-emulatable, but NOT directly reusable for FC3 (Quazal RendezVous 6 / PRUDP v1, different generation).
+- PretendoNetwork/nex-go + pyprudp (Nintendo NEX over PRUDP): transport reusable; service schema differs from RendezVous.
+
+KEY: NO open project emulates FC3's specific Quazal RendezVous co-op service. The niche is empty.
+
+FC3 co-op-backend emulation effort/risk (packages): (1) PRUDP transport + RV handshake = DONE here, low. (2) Config/SandboxUrl seam = prototyped here, low. (3) client bring-up to actually dial RV (current blocker) = medium/HIGH. (4) RendezVous application service layer for FC3 (backend-services login, JobTicketManager login/derive/validate, party, GameSession create/join, UPnP/NAT + GameSessionKey/ticket crypto + RMC marshalling) = LARGE / HIGHEST. (5) session/party sync + in-world co-op = large / medium-high. KILLER RISK: no golden reference traffic (a live FC3 co-op capture only existed while Ubisoft's service was alive; now dead) => package 4 must be rebuilt from static disassembly with no oracle; crypto/marshalling errors are silent + crash-prone. Realistic sizing: multi-month, team-scale RE + emulation, not a hook/proxy tweak; one contributor/agent can credibly land 1-2 and maybe 3, but 4 without a reference capture is community-traffic territory.
+
+Recommendation: keep mod-262 SOLO as the deliverable; treat FC3 co-op-backend emulation as a separate high-effort/high-risk project; do not start without (a) a pre-shutdown live FC3 co-op capture or (b) a team pooling such traffic. Reusable assets: this repo's PRUDP codec / rv_server / config_server, kinnay + AnthomStahl PRUDP refs, Detanup01/ServerEmus for launcher/auth, modern Ubisoft party/lobby emulators for architecture.
+
+Operational: no game/proxy changes this session; docs only. NOTES + docs/ubisoft-coop-emulation-recon.{md,ru.md} + docs/project-status.md cross-link; committed and pushed to origin/main.
+
+

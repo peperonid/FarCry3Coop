@@ -100,3 +100,5 @@ party / matchmaking / session через event-pump Uplay. Его даёт то�
 matchmaking + session + последующий RV login) - большой отдельный проект эмуляции. RV/PRUDP-тулинг
 (codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) и экспериментальные флаги
 shim/proxy остаются в репо как задел под этот проект.
+
+См. также: docs/ubisoft-coop-emulation-recon.ru.md (картина open-source эмуляторов Ubisoft/Quazal online + объём/риск эмуляции co-op-бэкенда FC3, 28ds-28dt).

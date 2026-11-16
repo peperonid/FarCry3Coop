@@ -97,3 +97,22 @@ has historically needed a community with several people sharing captured traffic
 - modern Ubisoft online emulator scene (The Crew 1 offline; PlayBlock / OpenCrew / SwallowBlock /
   Wild-Ones tooling for Ghost Recon Wildlands / Breakpoint)
 - coop-anything hub entry `games/far-cry-3` + issue "Far Cry 3 Co-op Support"
+
+
+## 7. Source URLs (only directly-verified links listed; others by name)
+
+- PRUDP protocol spec (Nintendo/3DS, same wire format as FC3's PRUDP v1):
+  https://github.com/kinnay/NintendoClients/wiki/PRUDP-Protocol ; also "PRUDP" on 3dbrew.
+- AnthomStahl `prudp` Python library (PRUDP v1/v2 client/server) - on PyPI as `prudp` and on GitHub
+  under AnthomStahl.
+- Uplay launcher/Demux/API emulator (Condition-A / boot-auth layer, NOT co-op sessions):
+  https://github.com/Detanup01/UplayServer (archived) -> successor org https://github.com/ServerEmus
+  (see `ServerEmus/Release.Uplay`).
+- Ubisoft Game Service (~2000-2005) emulator (auth/friends/matchmaking; older SDK, arch precedent):
+  https://github.com/michal-kapala/ubi-gs
+- Nintendo NEX over PRUDP (transport reusable; service schema differs from RendezVous):
+  https://github.com/PretendoNetwork/nex-go (and the Python `pyprudp`).
+- Modern Ubisoft online (party/Uparty/session) emulator scene for Anvil games - The Crew 1 offline
+  emulator, PlayBlock / OpenCrew / SwallowBlock / Wild-Ones tooling for Ghost Recon Wildlands /
+  Breakpoint (reference by name; not directly FC3-reusable, different protocol generation).
+- coop-anything hub: `games/far-cry-3` entry + issue "Far Cry 3 Co-op Support".

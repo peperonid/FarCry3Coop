@@ -97,3 +97,22 @@ Ubisoft, можно было снять только пока сервис бы�
 - сцена современных эмуляторов Ubisoft online (офлайн The Crew 1; PlayBlock / OpenCrew / SwallowBlock /
   инструмент Wild-Ones для Ghost Recon Wildlands / Breakpoint)
 - запись хаба coop-anything `games/far-cry-3` + issue «Far Cry 3 Co-op Support»
+
+
+## 7. URL источников (перечислены только прямо проверенные ссылки; остальные - по имени)
+
+- Спека PRUDP (Nintendo/3DS, тот же wire-формат что PRUDP v1 у FC3):
+  https://github.com/kinnay/NintendoClients/wiki/PRUDP-Protocol ; ещё «PRUDP» на 3dbrew.
+- Python-библиотека AnthomStahl `prudp` (клиент/сервер PRUDP v1/v2) - на PyPI как `prudp` и на GitHub
+  у AnthomStahl.
+- Эмулятор лаунчера/Demux/API Uplay (слой Условие-A / boot-auth, НЕ co-op-сессии):
+  https://github.com/Detanup01/UplayServer (архив) -> орг-преемник https://github.com/ServerEmus
+  (см. `ServerEmus/Release.Uplay`).
+- Эмулятор Ubisoft Game Service (~2000-2005) (auth/друзья/matchmaking; старый SDK, арх-прецедент):
+  https://github.com/michal-kapala/ubi-gs
+- Nintendo NEX поверх PRUDP (транспорт переиспользуется; схема сервисов отличается от RendezVous):
+  https://github.com/PretendoNetwork/nex-go (и Python `pyprudp`).
+- Сцена современных эмуляторов Ubisoft online (party/Uparty/сессии) для игр Anvil - офлайн-эмулятор
+  The Crew 1, тулинг PlayBlock / OpenCrew / SwallowBlock / Wild-Ones для Ghost Recon Wildlands /
+  Breakpoint (перечислены по имени; для FC3 напрямую не переиспользуется, другое поколение протокола).
+- Хаб coop-anything: запись `games/far-cry-3` + issue «Far Cry 3 Co-op Support».

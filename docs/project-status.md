@@ -101,3 +101,5 @@ co-op (offline or online) requires reimplementing the Ubisoft co-op backend (aut
 matchmaking + session + the RV login that follows), which is a large, separate emulation project.
 The RV/PRUDP tooling (codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) and the
 shim/proxy experiment flags remain committed as the groundwork for that project.
+
+See also: docs/ubisoft-coop-emulation-recon.md (open-source Ubisoft/Quazal online emulator landscape + FC3 co-op-backend emulation effort/risk, 28ds-28dt).
