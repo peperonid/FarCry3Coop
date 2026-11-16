@@ -5719,3 +5719,19 @@ Conclusion: the hub's optimistic "short path is a command line" does NOT work on
 Operational: game killed; proxy left deployed over the mod-262 base (bin/uplay_r1_loader.dll = our proxy 8e996199, real mod-262 loader stashed at real/uplay_r1_loader.dll md5 dacd14c0). Rollback to clean mod-262 when done: python -I scripts/deploy_proxy_only.py restore.
 
 
+
+
+### Session 28dv - R1 deep-dive: where the co-op dev/direct-connect path lives, and why it is not a one-call trigger.
+
+Static (capstone over raw FC3_d3d11.dll md5 46bcc097; the project Ghidra copy was -noanalysis and a full headless re-analysis was impractical in this harness - the 40MB analysis ran >18 min and a background run died without output):
+- Command-line strings exist and are referenced by code: -host 0x114cdb0c, -client 0x114cdaac, -dedicated 0x114cda30, -offline 0x114fe5f4, -coop 0x115908d0, -login 0x11590820, -ip 0x1159076c.
+- Two consumers:
+  1. A session-type-by-name mapper function (prologue 0x107ab377): strcmp(argv, "-host"/"-coop"/"-dedicated"/...) via imported strcmp [IAT 0x114ac68c], and returns a session-type/mode enum loaded from globals (e.g. -coop -> *[0x1171a99c], -host-ish -> *[0x1171a9a4], others 0x1171a994/0x1171a98c). It only RESOLVES the token to an enum; it does not start a session.
+  2. An early startup command-line/ini parser around 0x100044d0-0x10004830: reads argv tokens and registry/display config and STORES launch flags into a block of globals (0x117f5d84..0x117f5dd4, a WORD at 0x117f5d88 set to 0x101, etc.). -host/-client/-dedicated are detected here (helpers 0x10003abf / 0x10003118 fetch option values). It records what the user asked for; it does not itself open a listen session.
+- Therefore there is no single "start co-op host" function to call. The dev direct-connect path is: parse argv -> store mode/flags into globals -> (later, at engine/menu init) a startup branch acts on those globals to create a Storm session. On the 1.06 retail build that branch is not reached by our direct launch (the 28du live test booted to the normal menu with -host -coop).
+
+Conclusion: R1 ("call the host-session starter") is NOT a one-call shim. Making an offline 2-player Storm listen session start requires reproducing/emending the engine startup branch that consumes these mode globals and wires a LAN (non-_RdV) session provider - a multi-site patch/reverse effort with no confirmed anchor, on top of the already-proven facts that (a) the campaign has never run as a network game and (b) the online _RdV path is gated on the dead Ubisoft co-op service. This matches and refines the prior assessment: FC3 main-campaign co-op with friends is not achievable by a bounded effort here.
+
+Operational: env restored to clean mod-262 (bin/uplay_r1_loader.dll md5 dacd14c0, no shim/flags); game + java killed. Ghidra helper FindCoopHost.java + _run_findhost.py in H:/FarCryCoop/scratch/ghidra/scripts_live (scratch, not committed; full-analysis path abandoned).
+
+
