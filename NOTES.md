@@ -5243,3 +5243,16 @@ So the manager's sub-object getter FUN_1041f965 returns NULL offline. This sub-o
 NET A2 STATUS: the critical path is confirmed to be "establish the RV client connection (rv_connected) so the manager populates its RV sub-objects", and the client is NOT initiating that connection on its own in the fake-online boot. The next nut (hard, still open) is to make FCX actually START the RV NetEncoder/RendezVous connect toward our emulated host (SandboxUrl=127.0.0.1:50000). Until that connect happens, no emulated RV server has anything to answer and every manager-derived sub-object is null -> crash. Rolled bin back (game normal). This is the make-or-break unknown and is genuinely deep/uncertain.
 
 
+
+
+### Session 28cp - RV connect chain mapped: manager sub-object getter FUN_1041f965 just returns *(manager+0x110) (a ServiceMaster set only AFTER RV connects); the connect is driven by JobBackEndServicesLogin::ConnectToAuthenticationService + JobConnectEndPoint; an ANONYMOUS PC login variant exists.
+
+Ghidra (rv_connect.txt):
+- FUN_1041f965 (the getter that returned NULL at the 28co crash) = `return *(this + 0x110)`. So the manager's RV sub-object is member +0x110, populated only once the RV client connection completes.
+- RV connect orchestration (Client/SecureTransport + Services/BackEnd): `JobBackEndServicesLogin::ConnectToAuthenticationService` FUN_11252f70, `::ConnectToSecureConnectionService` FUN_112524c0; `JobBackEndServicesLoginWithData::ConnectToAuthenticationService` FUN_11253020, `::ConnectToSecureConnectionService` FUN_112525c0. These dial the RV AuthenticationServer/SecureConnectionService.
+- Lower connection state machine JobConnectEndPoint (Client/JobConnectEndPoint.cpp): TryDirectConnect/TryConnectViaRouting/SortURLs FUN_11243d80, ResolveCurrentURL+PrepareNATTraversal FUN_11242bf0, TryCurrentURL FUN_112400a0, ConnectionSucceeded/ProcessConnectionFailure FUN_1123d5b0, ConnectionFailed FUN_112383c0, ProcessConnectionResult FUN_1123f170. ConnectionSucceeded is where member +0x110 (ServiceMaster) would get populated.
+- NEW LEAD: there is an ANONYMOUS back-end login variant `JobAnonymousBackEndServicesLoginPC::ConnectEndPoint` (also JobAnonymousBackEndServicesLogin / JobAnonymousBackEndServicesConnect). An anonymous RV login (no UbiAuthentication user) may be a simpler path to bring the RV connection up than the dummy-user login.
+
+ACTIONABLE: the make-or-break trigger is getting FCX to execute JobBackEndServicesLogin(WithData)::ConnectToAuthenticationService so JobConnectEndPoint dials SandboxUrl (127.0.0.1:50000) and ConnectionSucceeded populates manager+0x110. Next experiments: (a) hook/log FUN_11252f70 + FUN_11243d80 (TryDirectConnect) + FUN_1123d5b0 (ConnectionSucceeded) with a UDP listener on :50000 to see whether ANY connect is attempted and capture the first PRUDP Connection Request; (b) find callers of ConnectToAuthenticationService to locate the FCX login-exec entry that starts the whole chain (the online-init trigger we have not been able to fire). Toolchain: implementable as additional shim log-hooks (patch_5 sites already proven to load).
+
+

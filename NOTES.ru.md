@@ -4942,3 +4942,16 @@ run_a2_stage0c.bat (FC3COOP_FAKE_MGR=3, чистый режим: без флаг
 ИТОГОВЫЙ СТАТУС A2: критический путь подтверждён как «установить соединение RV-клиента (rv_connected), чтобы менеджер наполнил свои RV-саб-объекты», и клиент САМ не инициирует это соединение при фейк-онлайн-загрузке. Следующая орешек-задача (трудная, всё ещё открыта) - заставить FCX реально СТАРТОВАть соединение RV NetEncoder/RendezVous к нашему эмуляруемому хосту (SandboxUrl=127.0.0.1:50000). Пока это соединение не произойдёт, любому эмуляруемому RV-серверу нечего отвечать, и каждый производный от менеджера саб-объект null -> крэш. bin откачен (игра обычная). Это make-or-break неизвестное, оно реально глубокое и неопределённое.
 
 
+
+
+### Сессия 28cp - цепь RV-соединения картирована: геттер саб-объекта менеджера FUN_1041f965 просто возвращает *(manager+0x110) (ServiceMaster, ставится ТОЛЬКО ПОСЛЕ соединения RV); соединение ведёт JobBackEndServicesLogin::ConnectToAuthenticationService + JobConnectEndPoint; существует АНОНИМНЫЙ вариант PC-логина.
+
+Ghidra (rv_connect.txt):
+- FUN_1041f965 (геттер, вернувший NULL на крэше 28co) = `return *(this + 0x110)`. Значит RV-саб-объект менеджера = член +0x110, наполняемый лишь по завершении RV-соединения.
+- Оркестрация RV-соединения (Client/SecureTransport + Services/BackEnd): `JobBackEndServicesLogin::ConnectToAuthenticationService` FUN_11252f70, `::ConnectToSecureConnectionService` FUN_112524c0; `JobBackEndServicesLoginWithData::ConnectToAuthenticationService` FUN_11253020, `::ConnectToSecureConnectionService` FUN_112525c0. Они и наборят RV AuthenticationServer/SecureConnectionService.
+- Низ-level машина состояний соединения JobConnectEndPoint (Client/JobConnectEndPoint.cpp): TryDirectConnect/TryConnectViaRouting/SortURLs FUN_11243d80, ResolveCurrentURL+PrepareNATTraversal FUN_11242bf0, TryCurrentURL FUN_112400a0, ConnectionSucceeded/ProcessConnectionFailure FUN_1123d5b0, ConnectionFailed FUN_112383c0, ProcessConnectionResult FUN_1123f170. Именно в ConnectionSucceeded член +0x110 (ServiceMaster) должен наполниться.
+- НОВАЯ ЗАЦЕПКА: есть АНОНИМНЫЙ вариант back-end логина `JobAnonymousBackEndServicesLoginPC::ConnectEndPoint` (плюс JobAnonymousBackEndServicesLogin / JobAnonymousBackEndServicesConnect). Анонимный RV-логин (без пользователя UbiAuthentication) может быть более простым путём поднять RV-соединение, чем логин фиктивным юзером.
+
+ВОСПРОИЗВОДИМОЕ: make-or-break триггер - заставить FCX выполнить JobBackEndServicesLogin(WithData)::ConnectToAuthenticationService, чтобы JobConnectEndPoint набрал SandboxUrl (127.0.0.1:50000) и ConnectionSucceeded наполнил manager+0x110. Следующие эксперименты: (a) захукать/логировать FUN_11252f70 + FUN_11243d80 (TryDirectConnect) + FUN_1123d5b0 (ConnectionSucceeded) с UDP-листенером на :50000, чтобы увидеть,attempted ли вообще коннект, и снять первый PRUDP Connection Request; (b) найти вызывающих ConnectToAuthenticationService, чтобы locating FCX login-exec вход, запускающий всю цепь (тот самый триггер online-init, который мы не могли запустить). Тулчейн: реализуемо как доп. log-хуки shim (patch_5-сайты доказанно грузятся).
+
+
