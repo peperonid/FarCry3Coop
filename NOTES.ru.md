@@ -5026,3 +5026,25 @@ Ubisoft Connect устанавливается в `C:\Program Files (x86)\Ubisof
 ДАЛЬШЕ: добавить перехватчик логирования (FC3COOP_TRACE_UPPLAY=1) в src/uplay_proxy для поверхности UPLAY_*; прогнать хост + 2-й инстанс клиента через ко-оп UI; прочитать лог, чтобы зафиксировать минимальный контракт и наблюдаемые формы структур/событий. Затем реализовать локальный реестр party/сессий + насос событий в прокси (сборка A3a). Без C:, без RV.
 
 
+
+
+### Сессия 28cu - ЭМПИРИЧЕСКИЙ РЕЗУЛЬТАТ A3a (из live-трассы uplay_api.log): игра НИКОГДА не вызывает UPLAY friends/party/session API ни RV create/join склейку в оффлайне, поэтому A3a не работает как надеялись - ко-оп UI заперт ВЫШЕ каждого контролимого прокси вызова. Это заново подтверждает стену 28cq с полностью независимой стороны (трасса вызовов границы Uplay).
+
+Запущен run_a3a_trace.bat; лог H:\FarCryCoop\TestFC3_105\bin\uplay_api.log накопил 8 запусков игры (269 213 строк). Один прогон (pid 39972, 15:32) чистый форвард (fake=0 online=0); остальные fake=1 online=1 (env протёк из родительского терминала, не flag-файлы - их не было; пустой `set FC3COOP_FAKE_ONLINE=` лаунчера очищает в рамках того cmd, и последний прогон это доказывает).
+
+Профиль частоты по всем прогонам:
+- UPLAY_GetNextEvent 134239, UPLAY_Update 134238 (цикл событий фронтенда - просто опрос, всегда возврат 0 = нет события), HasOverlappedOperationCompleted 547, USER_IsConnected 45, GetOverlappedOperationResult 32, ACH_GetAchievements 20.
+- Только загрузка (по 8 раз): UPLAY_Init, UPLAY_PARTY_Init (a=3), UPLAY_FRIENDS_Init, UPLAY_ClearGameSession, UPLAY_USER_GetCredentials, UPLAY_USER_GetCdKeys.
+- НИКОГДА НЕ ВЫЗЫВАЛИСЬ НИ В ОДНОМ ПРОГОНЕ: UPLAY_SetGameSession (0), UPLAY_USER_SetGameSession (0), UPLAY_FRIENDS_GetFriendList (0), UPLAY_PARTY_IsPartyLeader (0), UPLAY_PARTY_SetUserData (0), UPLAY_PARTY_SetGuest (0), UPLAY_PARTY_InvitePartyToGame (0), UPLAY_PARTY_InviteToParty (0). Лишь 1x UPLAY_PARTY_GetFullMemberList.
+- Метки describe() RVCreateGameSession=0, RVJoinGameSession=0, party-glue-region=0: игра так и не вошла в RV склейку ко-оп-сессий.
+
+Стандартный порядок загрузки: Init -> PARTY_Init(3) -> [15с] FRIENDS_Init -> ClearGameSession -> USER_GetCredentials -> USER_GetCdKeys -> HasOverlapped/GetOverlapped (для этих async-операций) -> ACH_GetAchievements -> затем опрос USER_IsConnected + цикл Update/GetNextEvent -> (владелец вышел: Quit, Release). Игра не идёт дальше «подключён?» к стадии друзей/сессии.
+
+ТОЛКОВАНИЕ (решающее для маршрутизации):
+1. Реальный ко-оп Host/Join FC3 идёт НЕ через UPLAY_PARTY_*/SetGameSession SDK-путь «пригласить друзей» - этот путь есть лишь интеграция оверлея Ubisoft-Connect (друзья/приглашения) и в оффлайне он даже не задействуется. Значит A3a (подделка party+session на границе uplay_r1_loader) бессмысленна: игра эти вызовы не делает, отвечать не на что.
+2. Наш прокси ДЕЙСТВИТЕЛЬНО контролирует UPLAY_USER_IsConnected (возвращает 1) и завершение overlapped-операций, но игра всё равно не вызывает GetFriendList/SetGameSession. Следовательно «подключён на границе Uplay» - НЕ гейт. Гейт - внутренняя машина состояний логина FCX (те же ворота менеджера ко-опа DAT_11e42c90 из 28cq), которую питает boot-auth Ubisoft Connect (gconnect/agora passport), то есть ВЫШЕ и независимо от границы Uplay API, которой мы владеем.
+3. Вывод: каждый достижимый нами рубеж (uplay_r1_loader прокси, uplay_r14.dll, RV-клиент, внутри-процессные патчи) лежит НИЖЕ единственного реального барьера = «FCX login state должен достичь LoggingIn», запертого на boot-auth Ubisoft Connect. A3a, A2-в-процессе и RV-эмулятор - все ниже. Единственный фронтир, способный сдвинуть стену - boot-auth Ubisoft Connect -> инжект кредитов FCX (на диске C:, нужно одобрение владельца), либо принять solo-результат mod-262.
+
+Уборка: flag-файлы не удалены (их не было). Рекомендую обрезать uplay_api.log (50 МБ) перед новой трассой и запускать лаунчер из СВЕЖЕГО чистого терминала, чтобы не протекал устаревший FC3COOP_FAKE_* env. bin оставлен как есть (прокси задеплоен этой трассой).
+
+

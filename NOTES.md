@@ -5327,3 +5327,25 @@ STRATEGY DECISION:
 NEXT: add a logging interceptor (FC3COOP_TRACE_UPPLAY=1) to src/uplay_proxy for the UPLAY_* surface; run host + a 2nd client instance through the co-op UI; read the log to fix the minimal contract and the struct/event shapes actually observed. Then implement the local party/session registry + event pump in the proxy (A3a build). No C:, no RV.
 
 
+
+
+### Session 28cu - A3a EMPIRICAL RESULT (from the live uplay_api.log trace): the game NEVER calls the UPLAY friends/party/session APIs nor the RV create/join glue while offline, so A3a cannot work as hoped - the co-op UI is gated UPSTREAM of every proxy-controllable call. This re-confirms the 28cq wall from a completely independent angle (the Uplay-boundary call trace).
+
+Ran run_a3a_trace.bat; the log H:\FarCryCoop\TestFC3_105\bin\uplay_api.log accumulated 8 game launches (269,213 lines). One run (pid 39972, 15:32) is pure forward (fake=0 online=0); the rest had fake=1 online=1 (env leaked from the parent terminal, not flag files - flag files did not exist; the launcher's empty `set FC3COOP_FAKE_ONLINE=` only clears within that cmd, and the last run proves it clears).
+
+Call-frequency profile across all runs:
+- UPLAY_GetNextEvent 134239, UPLAY_Update 134238 (the front-end event loop - just polling, always return 0 = no event), HasOverlappedOperationCompleted 547, USER_IsConnected 45, GetOverlappedOperationResult 32, ACH_GetAchievements 20.
+- Boot-only (8x each): UPLAY_Init, UPLAY_PARTY_Init (a=3), UPLAY_FRIENDS_Init, UPLAY_ClearGameSession, UPLAY_USER_GetCredentials, UPLAY_USER_GetCdKeys.
+- NEVER CALLED IN ANY RUN: UPLAY_SetGameSession (0), UPLAY_USER_SetGameSession (0), UPLAY_FRIENDS_GetFriendList (0), UPLAY_PARTY_IsPartyLeader (0), UPLAY_PARTY_SetUserData (0), UPLAY_PARTY_SetGuest (0), UPLAY_PARTY_InvitePartyToGame (0), UPLAY_PARTY_InviteToParty (0). Only 1x UPLAY_PARTY_GetFullMemberList.
+- describe() tags RVCreateGameSession=0, RVJoinGameSession=0, party-glue-region=0: the game never entered the RV co-op session glue either.
+
+Standard observed boot order: Init -> PARTY_Init(3) -> [15s] FRIENDS_Init -> ClearGameSession -> USER_GetCredentials -> USER_GetCdKeys -> HasOverlapped/GetOverlapped (for those async ops) -> ACH_GetAchievements -> then USER_IsConnected polling + the Update/GetNextEvent loop -> (owner quit: Quit, Release). The game never advances past "connected?" to the friends/session stage.
+
+INTERPRETATION (decisive for routing):
+1. FC3's actual co-op Host/Join does NOT go through the UPLAY_PARTY_*/SetGameSession "invite friends" SDK path - that path is only the Ubisoft-Connect overlay friend/invite integration and it is never even exercised offline. So A3a (faking party+session at the uplay_r1_loader boundary) is moot: the game never makes those calls, so there is nothing to answer.
+2. Our proxy DOES control UPLAY_USER_IsConnected (returns 1) and the overlapped-op completion, yet the game still never calls GetFriendList/SetGameSession. Therefore "connected at the Uplay boundary" is NOT the gate. The gate is FCX's internal login state machine (the 28cq DAT_11e42c90 co-op-manager gate), which is fed by Ubisoft Connect boot-auth (gconnect/agora passport) - i.e. upstream of and independent from the Uplay API boundary we own.
+3. Conclusion: every controllable boundary we can reach (uplay_r1_loader proxy, uplay_r14.dll, RV client, in-process patches) is DOWNSTREAM of the single real blocker = "FCX login state must reach LoggingIn", gated on Ubisoft Connect boot-auth. A3a, A2-in-process, and the RV emulator are all downstream. The ONLY frontier that can move the wall is Ubisoft Connect boot-auth -> FCX credential injection (on drive C:, needs owner approval), or accepting the mod-262 solo deliverable.
+
+Cleanup: removed no flag files (none existed). Recommend truncating uplay_api.log (50 MB) before any further trace and running the launcher from a FRESH clean terminal so no stale FC3COOP_FAKE_* env leaks. bin left as-is (proxy currently deployed from this trace).
+
+
