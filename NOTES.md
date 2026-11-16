@@ -5644,3 +5644,24 @@ Note: need to confirm with owner what the current "loading" reached - playable s
 Operational: net-on RV_PROBE run left as-is (game alive). RV_PROBE observers are observer-only (no behaviour change). Rollback when done: stop_a2_livecap.ps1 + re-copy bin/real/uplay_r1_loader.dll if loader stuck at 141312. Ghidra scripts_live/PatchPoint.java; shim RV_PROBE in coop_shim.cpp.
 
 
+
+
+### Session 28dp - MGR_WATCH + ONLINE_ON: the Co-op "connecting to servers" spin is blocked UPSTREAM of RendezVous, on a Ubisoft backend party/session event, not on RV and not on the session-manager global.
+
+Two new shim modes (coop_shim.cpp): FC3COOP_MGR_WATCH=1 (poll the online session-manager singleton DAT_11e42c90 every 2s, log on change) and FC3COOP_ONLINE_ON=1 (in the WATCH_LOGIN clean path, still force the online-enable global DAT_11f07e48=1, which the clean path otherwise skips).
+
+Findings on the offline-loader build (uplay_r1_loader dacd14c0 + mod-262 patch), net-on (no FAKE_ONLINE), FAKE_CREDS + BLOCK_LOGOUT + DNS_REDIRECT + RV_PROBE + MGR_WATCH:
+- The session-manager singleton DAT_11e42c90 is NON-NULL already at the menu (0x4ad78520, then 0x444c6020). So the old "Host gate DAT_11e42c90==0" idea is WRONG in the net-on config: the manager object IS present. It also never changes when entering Co-op (stays the same pointer) - the manager is created but idle.
+- Co-op -> Host with FC3COOP_ONLINE_ON=1 (DAT_11f07e48 forced to 1): the game shows "connecting to servers" and spins; RV-PROBE ConnectToAuthenticationService (FUN_11252f70) STILL never fires, RV senders never fire, ZERO DNS, ZERO hits on config_server and rv_server. MGR-WATCH shows the manager pointer unchanged.
+
+Interpretation: forcing the online-enable global is not enough to enqueue the RV connect job. The co-op Host flow does not reach RendezVous at all - it is stuck waiting for a Ubisoft backend co-op event (party / matchmaking / session) that arrives through the Uplay event pump (UPLAY_Update / UPLAY_GetNextEvent / GetOverlappedOperationResult). Our proxy forwards the pump to the real mod-262 offline loader, which fakes Uplay for SOLO only and never delivers a co-op party/session/matchmaking event, so the game waits forever ("connecting to servers") and the RV dial (which is downstream of a successful backend session) is never reached. This is the same root cause as 28cu (game never calls friends/party APIs offline) and 28cv ("PartyInit failed"), now seen from the FCX side.
+
+Consequence for A2: an RV/PRUDP emulator is NOT sufficient and NOT the nearest missing piece. The nearest missing piece is the Ubisoft CO-OP BACKEND event chain (party + matchmaking + session + the RV login that follows), delivered through the loader's event pump. That is a large Ubisoft-protocol emulation with no simple callable seam found so far; the pump events (whose schemas are private and gated) are the only injection point.
+
+Remaining cheap probe (E-A2-PUMP): instrument our proxy's UPLAY_GetNextEvent / GetOverlappedOperationResult / UPLAY_Update path to LOG what event/operation types the game polls for while stuck on "connecting to servers". If there is a single pollable co-op/party event whose arrival would advance the FCX co-op state machine, hand-crafting that one event could un-stick "connecting" without full emulation. If the game just blocks in GetNextEvent waiting and we cannot see/produce the required payload, multi-human is not achievable through this seam.
+
+Overall status (28dm..28dp consolidated): the ONLY working FC3 co-op remains mod-262 SOLO (single human). Any 2+ human co-op (offline or online) needs the Ubisoft co-op backend that is dead online and not present offline; we have repeatedly located the gates (party/session event -> RV connect -> lobby) but found no offline-callable seam past the party/session event. Recommend: ship mod-262 SOLO as the deliverable, and treat full Ubisoft co-op-backend emulation as a separate, large, uncertain project.
+
+Operational: new shim modes MGR_WATCH / ONLINE_ON are observer/flag only (no behaviour change beyond the global write). Rollback unchanged: stop_a2_livecap.ps1 + re-copy bin/real/uplay_r1_loader.dll if the loader is stuck at 141312. Ghidra scripts_live/PatchPoint.java; shim coop_shim.cpp (RV_PROBE 28dn, MGR_WATCH + ONLINE_ON 28dp).
+
+

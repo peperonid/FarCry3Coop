@@ -115,7 +115,9 @@ static int g_fake_mgr_only = 0; // env FC3COOP_FAKE_MGR_ONLY=1 -> ONLY force the
 static int g_watch_login = 0;   // env FC3COOP_WATCH_LOGIN=1 -> ONLY observe FUN_107db689 login-event dispatch (log code), no other patches (NOTES 28dc)
 static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN mode, also skip FUN_107dc7b7 (LogoutOper
 static int g_dns_redirect = 0;  // env FC3COOP_DNS_REDIRECT=1 -> IAT-patch getaddrinfo so onlineconfigservice.ubi.com resolves 127.0.0.1 (feed a crafted OnlineConfig with SandboxUrl->our rv_server, no hosts edit) (NOTES 28dh)
-static int g_rv_probe = 0;      // env FC3COOP_RV_PROBE=1 -> OBSERVE whether FCX reaches the RV connect/dial path at Co-op entry (NOTES 28dn)ation) to stop the login<->logout cycle (NOTES 28df)
+static int g_rv_probe = 0;      // env FC3COOP_RV_PROBE=1 -> OBSERVE whether FCX reaches the RV connect/dial path at Co-op entry (NOTES 28dn)
+static int g_mgr_watch = 0;     // env FC3COOP_MGR_WATCH=1 -> poll the online session-manager global DAT_11e42c90 and log on change (NOTES 28dp)
+static int g_online_on = 0;     // env FC3COOP_ONLINE_ON=1 -> set online-enable global DAT_11f07e48=1 even in WATCH_LOGIN clean mode (try to enqueue the RV connect job) (NOTES 28dp)ation) to stop the login<->logout cycle (NOTES 28df)
 static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
@@ -134,6 +136,8 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_BLOCK_LOGOUT", buf, sizeof(buf)) > 0) g_block_logout = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_DNS_REDIRECT", buf, sizeof(buf)) > 0) g_dns_redirect = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_RV_PROBE", buf, sizeof(buf)) > 0) g_rv_probe = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_MGR_WATCH", buf, sizeof(buf)) > 0) g_mgr_watch = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_ONLINE_ON", buf, sizeof(buf)) > 0) g_online_on = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -673,6 +677,21 @@ static void install_rv_probe(void) {
   LOGF("shim: RV-PROBE observers installed (watch RV-PROBE lines: none => RV never reached; CAS only => RV connect gated by precondition; sendto too => RV actually dials, point DNS-redirect at rv_server)");
 }
 
+// ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
+// Co-op "connecting to servers" hang is blocked on the manager still being NULL (auth/session never established).
+static volatile unsigned g_last_mgr = 0xFFFFFFFFu;
+static DWORD WINAPI mgr_watch_thread(LPVOID p) {
+  (void)p;
+  uintptr_t g = VA(RVA_online_mgr_global);
+  for (;;) {
+    unsigned v = 0xFFFFFFFFu;
+    __try { v = *(volatile unsigned*)g; } __except (EXCEPTION_EXECUTE_HANDLER) { v = 0xFFFFFFFFu; }
+    if (v != g_last_mgr) { logLock(); LOGF("shim: MGR-WATCH DAT_11e42c90=0x%08x (%s)", v, v == 0 ? "NULL = no session-manager" : (v == 0xFFFFFFFF ? "unreadable" : "NON-NULL = manager present")); logUnlock(); g_last_mgr = v; }
+    Sleep(2000);
+  }
+  return 0;
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -720,7 +739,10 @@ static void init(void) {
   }
   if (g_dns_redirect) install_dns_redirect();   // independent lever: works in any mode (NOTES 28dh)
   if (g_rv_probe) install_rv_probe();           // independent observer: works in any mode (NOTES 28dn)
-  if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block(); LOGF("shim: WATCH_LOGIN clean mode - FUN_107db689 observer%s; no online flag, no other hooks", g_block_logout?" + LOGOUT-BLOCK":""); return; }
+  if (g_mgr_watch) { HANDLE mh = CreateThread(0, 0, mgr_watch_thread, 0, 0, 0); LOGF("shim: MGR_WATCH thread started h=%p (watch MGR-WATCH lines while doing Co-op -> Host)", (void*)mh); }
+  if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block();
+    if (g_online_on) { __try { *(volatile unsigned char*)VA(RVA_online_flag_global) = 1; LOGF("shim: ONLINE_ON set DAT_11f07e48=1 (try to enqueue RV connect)"); } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: ONLINE_ON set fault"); } }
+    LOGF("shim: WATCH_LOGIN clean mode - FUN_107db689 observer%s%s; no online flag unless ONLINE_ON, no other hooks", g_block_logout?" + LOGOUT-BLOCK":"", g_online_on?" + ONLINE_ON":""); return; }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
   // Cheap precondition: force the online-enable global (FUN_11245090 returns DAT_11f07e48) to 1.
   *(volatile unsigned char*)VA(RVA_online_flag_global) = 1;
