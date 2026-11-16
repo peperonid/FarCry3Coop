@@ -136,3 +136,21 @@ RTTI для поиска vtable `_RdV`-провайдера и места его
 прописан и базовый не может стоять отдельно — остановить R2; оставшийся путь только стратегия D
 (полная эмуляция co-op-бэкенда RendezVous), а она строго больше. Тем временем mod-262 SOLO остаётся
 единственным рабочим co-op FC3.
+
+
+## 6. РЕЗУЛЬТАТЫ R2-1 (сессия 28dx; полный Ghidra-анализ сделан)
+
+Подтверждено авто-анализом (NOTES 28dx): обе группы провайдеров и операций присутствуют с
+синглтонами-регистраторами имён: базовый `CGameMatchmakingProvider` 0x1158922c / `_RdV` 0x1158b438 /
+`CSessionMatchmakingProvider` 0x11589210; `CSessionCreateOperation` 0x11523fa8 (init FUN_10425868) /
+`_RdV` 0x11527a78; `CSessionJoinOperation` 0x11524030 / `_RdV` 0x11527b88; `CSessionSearchIPOperation`
+0x11524014. Execute RV-создания = FUN_1044b2cb это слот vtable (лишь DATA-ссылка с 0x11527a64,
+0 E8-коллов), гейтится FUN_1042c988(this)=*(this+0x3c)!=1,3. Полная схема параметров в FUN_1061e581
+(NetEngineType id 0x3c, MatchMakingEnabled 0x4d, SessionType 0x38, SearchIdAddress 8, JoinGame 0x53,
+JoinService 0x54, JoinSessionId 0x18, PlaylistId 0x34, SearchSlots 0x48). Дев-парсер CLI FUN_107ab377
+разбирает -keyonline (ключ "a123456"), -login x4 + -password x4, -splitscreen (4-слотная таблица, шаг 0x24).
+
+GO/NO-GO: GO (с оговоркой). Не-RV шов есть, LAN-схема параметров полноправна. Открыто: доказать, что
+базовый провайдер строит Storm LAN-сессию. ДАЛЕЕ = R2-1b: (1) найти место конструкции/установки
+`CGameMatchmakingProvider_RdV` (заменить на базовый `CGameMatchmakingProvider`), (2) декомпилировать
+базовый `CSessionCreateOperation::Execute` и подтвердить открытие Storm-сессии на портах 9000-9004.

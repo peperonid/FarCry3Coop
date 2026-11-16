@@ -5748,3 +5748,20 @@ Static recon (capstone). Concrete anchors found for substituting a LAN/non-RV se
 Plan written to docs/r2-lan-provider-plan.md (+ .ru.md): strategies A (swap provider install to base), B (vtable-detour the create/join factory slots to base factory 0x10425822), C (force MatchMakingEnabled=0 + NetEngineType=LAN, quick probe), D (local RV emulator = separate big project). Staged R2-1..R2-4 with gates; R2-1 (pin the _RdV provider construction site + confirm the base provider can stand alone) is the go/no-go gate. Effort weeks-months, high risk; killer risk unchanged (no golden reference of FC3 campaign co-op ever running). Env unchanged (clean mod-262, game not running).
 
 
+
+
+### Session 28dx - R2-1 RESULT (full Ghidra auto-analysis of FC3_d3d11.dll; 178,384 functions; anchors confirmed)
+
+Method note: the detached-batch run with `> log` produced no usable stdout (redirect captured only the JVM banner); the fix is to run `analyzeHeadless ... -process FC3_d3d11.dll -noanalysis -postScript <X>.java` in the FOREGROUND via subprocess capture against the already-analyzed program (Ping/Ping-Dump trick confirmed it: program saved with 178384 functions; ~40s per dump run). Working dump scripts: FixedDump2.java / DumpR2b.java in H:/FarCryCoop/scratch/ghidra/scripts_live; outputs r2_dump.txt / r2b_dump.txt.
+
+Confirmed R2 anchors (image VA):
+- Provider classes BOTH exist: `CSessionMatchmakingProvider` 0x11589210, `CGameMatchmakingProvider` (BASE) 0x1158922c, `CGameMatchmakingProvider_RdV` 0x1158b438.
+- Session ops BOTH exist: `CSessionCreateOperation` 0x11523fa8 (its lazy init FUN_10425868 registers the name + returns singleton &DAT_11e42d88), `CSessionCreateOperation_RdV` 0x11527a78; `CSessionJoinOperation` 0x11524030, `CSessionJoinOperation_RdV` 0x11527b88; `CSessionSearchIPOperation` 0x11524014; parent `CSessionOperation` init FUN_1041f05b (singleton &DAT_11e42c48).
+- `_RdV` create op Execute = FUN_1044b2cb (it is a VTABLE SLOT: only xref is DATA from 0x11527a64, right by the CSessionCreateOperation_RdV name label; 0 direct E8 callers). It early-returns when FUN_1042c988(this)==1 or ==3; else does RV-service work and ends in the create RPC `[obj->vtable+0x34](&params,this+0x28,0)`.
+- FUN_1042c988(x) = `return *(x+0x3c)` - the type gate read by the RV create path; numeric 0x3c equals the NetEngineType session-param id (see below).
+- Session-param schema = FUN_1061e581 (one-time registration): SearchIdAddress id 8, SearchSessionId 0x10, JoinGame 0x53, JoinService 0x54, JoinSessionId 0x18, DeleteSessionId 0x28, PlaylistId 0x34, MatchMakingEnabled id 0x4d, SessionRefId 0x20, SessionType 0x38, NetEngineType id 0x3c, AccountType 0x40, SearchSlots 0x48, SearchNeedSlots 0x4c, FollowHost 0x5d, DoNATTypeDetection 0x5e, UseTicketRequestAttachment 0x5c, etc.
+- Dev command-line parser = FUN_107ab377: parses `-keyonline` (default key "a123456"), `-login/-login2/-login3/-login4` with `-password/-password2/-password3/-password4`, and `-splitscreen`; builds a 4-slot login table at param_2 (stride 0x24), sets each slot +0x18=2 and +0x1c=flag.
+
+R2-1 GO/NO-GO VERDICT: GO (qualified). A usable non-`_RdV` seam DOES exist: base provider classes, base create/join/searchIP operations, and a first-class LAN session-param schema (NetEngineType 0x3c, MatchMakingEnabled 0x4d, SessionType 0x38, SearchIdAddress 8, JoinGame 0x53). Selection is polymorphic (provider chosen by which object is installed; RV create Execute is a vtable slot). What R2-1 did NOT yet prove: that the base provider, installed instead of _RdV, builds a real Storm LAN listen session without the RV backend. That is R2-1b: find where CGameMatchmakingProvider_RdV is constructed/installed (swap to CGameMatchmakingProvider base) and decompile the base CSessionCreateOperation::Execute to confirm it opens a Storm session. Env unchanged (clean mod-262, game not running). Ghidra project FC3d3d11_live now holds the fully-analyzed FC3_d3d11.dll (reusable for cheap -process dumps).
+
+

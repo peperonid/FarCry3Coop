@@ -136,3 +136,22 @@ can run offline, continue to R2-2. If R2-1 shows the `_RdV` provider is hard-wir
 provider cannot stand alone, stop R2 and the only remaining path is Strategy D (full RendezVous
 co-op backend emulation), which is strictly larger. Meanwhile mod-262 SOLO remains the only working
 FC3 co-op.
+
+
+## 6. R2-1 RESULTS (session 28dx; full Ghidra analysis done)
+
+Confirmed by auto-analysis (NOTES 28dx): both provider families and both op families are present
+with name-registration singles: base `CGameMatchmakingProvider` 0x1158922c / `_RdV` 0x1158b438 /
+`CSessionMatchmakingProvider` 0x11589210; `CSessionCreateOperation` 0x11523fa8 (init FUN_10425868) /
+`_RdV` 0x11527a78; `CSessionJoinOperation` 0x11524030 / `_RdV` 0x11527b88; `CSessionSearchIPOperation`
+0x11524014. `_RdV` create Execute = FUN_1044b2cb is a vtable slot (only DATA xref from 0x11527a64,
+0 E8 callers), gated on FUN_1042c988(this)=*(this+0x3c)!=1,3. Full session-param schema in
+FUN_1061e581 (NetEngineType id 0x3c, MatchMakingEnabled 0x4d, SessionType 0x38, SearchIdAddress 8,
+JoinGame 0x53, JoinService 0x54, JoinSessionId 0x18, PlaylistId 0x34, SearchSlots 0x48). Dev CLI
+parser FUN_107ab377 handles -keyonline (key "a123456"), -login x4 + -password x4, -splitscreen
+(4-slot login table, stride 0x24).
+
+GO/NO-GO: GO (qualified). The non-RV seam exists and the LAN param schema is first-class. Still open:
+prove the base provider builds a Storm LAN session. NEXT = R2-1b: (1) find where the game constructs
+and installs `CGameMatchmakingProvider_RdV` (swap to base `CGameMatchmakingProvider`), (2) decompile
+the base `CSessionCreateOperation::Execute` and confirm it opens a Storm session on ports 9000-9004.
