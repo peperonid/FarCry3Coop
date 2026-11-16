@@ -5056,3 +5056,18 @@ KEY ORDERING INSIGHT (raises A2 difficulty, honest): the client emits the PRUDP 
 Net: A2 machinery + message contract are real and mapped; the crypto/key extraction and the provider-force prerequisite remain the hard core. Scripts committed under scripts/ghidra/. No game files changed.
 
 
+
+
+### Session 28cc - coop_shim LAN short-circuit experiment: shim loads & hooks install, then CRASHES (scaffold stubs are non-functional). Rolled bin back.
+
+Owner ran run_coop_shim_sandbox.bat (proxy+shim deployed). Evidence:
+- shim LOADED + installed all 8 hooks (FC3 base 0x78660000, ASLR; patch addrs = base+RVA), forced online global, fired `online_flag -> 1`. It NEVER reached `shim: host -> ...` (co-op Host) - crashed during online-init.
+- Windows Application Error: faulting `FC3_d3d11.dll + 0x01249226`, exception 0xc0000005 (two runs, pids 0x4870/0x1100). RVA 0x01249226 is just before/near FUN_112492a0 (RVA_rv_sandboxurl 0x012492a0) -> the crash is the caller of the rv_sandboxurl hook, right after it ran.
+
+ROOT CAUSE (from coop_shim.cpp): the LAN hooks are STUBS. `hk_rv_sandboxurl` returns 1 but does NOT write the out sockaddr (`(void)out;` + TODO 28ad "write g_cfg.lan_ip into the exact struct layout the gate reads (FUN_11232e20/FUN_11232ef0)"). So the game consumes an uninitialized/garbage address struct and access-violates. Also `patch_5` stores saved bytes into a SHARED single `g_hooks[0].saved` slot (the documented install_hooks TODO), and several detours never call the original -> stack/return corruption risk. This is exactly what RUN.md warned: an evidence-gathering scaffold, not working co-op.
+
+WHAT WORKS (good signal): the loader-proxy FAKE_ONLINE boot path + hook installation + online_flag short-circuit are solid; the RV auth short-circuit idea (host_handler) is sound. What is MISSING is real implementation of the address/port producers: hk_rv_sandboxurl and hk_gate must fill the exact sockaddr_in the gate consumes (need the FUN_11232e20 / FUN_11232ef0 output struct layouts), and patch_5 needs per-hook saved bytes / correct trampolines that preserve the ABI.
+
+This LAN-short-circuit-via-shim is effectively Plan B implemented in coop_shim; finishing it = days of focused C + small RE (sockaddr struct layout) in coop_shim.cpp. Rolled bin back to the real loader + removed coop_shim.dll (normal play/mod-262 unaffected). Deployed artifacts + env recipe kept (run_coop_shim_sandbox.bat) for a future attempt once the hooks are implemented.
+
+
