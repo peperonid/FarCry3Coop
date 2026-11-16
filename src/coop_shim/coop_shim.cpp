@@ -63,6 +63,7 @@ enum {
   RVA_net_engine_init = 0x01092d256, // FUN_1092d256 net-engine init; param[0xe]: 0=LAN / 1=Online / 2=Offline
   RVA_join_precond    = 0x01127a0d0, // FUN_1127a0d0 join precondition; returns 0 unless rv_connected (28af hook unlocks it)
   RVA_login_event     = 0x007db689, // FUN_107db689 FCX online-login EVENT dispatcher (code 6=LoggingIn 9=Succeeded 0x11=Failed 0xf/0x10=Out), observer-only (NOTES 28dc)
+  RVA_logout_op       = 0x007dc7b7, // FUN_107dc7b7 LogoutOperation (logs 'logout', posts FUN_107db689 code 0xf, tears down session) - target of BLOCK_LOGOUT (NOTES 28df)
 };
 
 // Op-registry descriptors (static op-type data, created via their lazy registrar only; for reference, NOTES 28ag):
@@ -109,6 +110,7 @@ static int g_probe_login = 0;   // env FC3COOP_PROBE_LOGIN=1 -> entry-log the RV
 static int g_no_ticket = 0;     // env FC3COOP_NO_TICKET=1 -> skip ticket_validate/ticket_prepare hooks (isolate post-callback crash)
 static int g_fake_mgr_only = 0; // env FC3COOP_FAKE_MGR_ONLY=1 -> ONLY force the online-manager global [0x11e42c90]; do NOT write the online flag or patch any code (Stage0b: pass the FUN_10443663 '==0 -> service unavailable' gate with zero collateral code changes)
 static int g_watch_login = 0;   // env FC3COOP_WATCH_LOGIN=1 -> ONLY observe FUN_107db689 login-event dispatch (log code), no other patches (NOTES 28dc)
+static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN mode, also skip FUN_107dc7b7 (LogoutOperation) to stop the login<->logout cycle (NOTES 28df)
 static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
@@ -124,6 +126,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_NO_TICKET", buf, sizeof(buf)) > 0) g_no_ticket = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR_ONLY", buf, sizeof(buf)) > 0) g_fake_mgr_only = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_WATCH_LOGIN", buf, sizeof(buf)) > 0) g_watch_login = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_BLOCK_LOGOUT", buf, sizeof(buf)) > 0) g_block_logout = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -546,6 +549,30 @@ static void install_login_event_watch(void) {
   } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: LOGIN_EVENT read fault at 0x%x - skip", (uint32_t)f); }
 }
 
+// ---- NOTES 28df: BLOCK the LogoutOperation FUN_107dc7b7 so the login (which now reaches 6/9) does not
+// immediately log out. Skip = do not run the original (log + thiscall ret with 1 stack arg). Test whether a
+// sticking login lets the co-op front-end proceed / the client dial RV. ----
+static void log_logout_block(void){ logLock(); LOGF("shim: LOGOUT-BLOCK suppressed FUN_107dc7b7 (LogoutOperation)"); logUnlock(); }
+__declspec(naked) static void hk_logout_block(void) {
+  __asm {
+    pushad
+    call log_logout_block
+    popad
+    ret 4            // thiscall(this=ecx, param_2 on stack): callee pops 1 arg
+  }
+}
+static void install_logout_block(void) {
+  uintptr_t site = VA(RVA_logout_op);
+  __try {
+    DWORD old; VirtualProtect((void*)site, 5, PAGE_EXECUTE_READWRITE, &old);
+    uint8_t* t = (uint8_t*)site; t[0]=0xE9;
+    int32_t rel = (int32_t)((uintptr_t)hk_logout_block - (site + 5)); memcpy(t+1, &rel, 4);
+    VirtualProtect((void*)site, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)site, 5);
+    LOGF("shim: LOGOUT-BLOCK hook installed on FUN_107dc7b7 (watch LOGOUT-BLOCK + LOGIN-EV should stop showing code 15)");
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: LOGOUT-BLOCK install fault at 0x%x", (uint32_t)site); }
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -591,7 +618,7 @@ static void init(void) {
     else { install_fake_mgr(); LOGF("shim: FAKE_MGR_ONLY active - only [0x11e42c90] forced; no online flag, no hooks. Try Co-op -> Host now.\n"); }
     return;
   }
-  if (g_watch_login) { install_login_event_watch(); LOGF("shim: WATCH_LOGIN clean mode - only the FUN_107db689 observer; no online flag, no other hooks"); return; }
+  if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block(); LOGF("shim: WATCH_LOGIN clean mode - FUN_107db689 observer%s; no online flag, no other hooks", g_block_logout?" + LOGOUT-BLOCK":""); return; }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
   // Cheap precondition: force the online-enable global (FUN_11245090 returns DAT_11f07e48) to 1.
   *(volatile unsigned char*)VA(RVA_online_flag_global) = 1;

@@ -5499,3 +5499,18 @@ Conclusion: the FCX login reaches LoggingIn + LoggingInSucceeded but is then LOG
 NEXT (all H:): (1) RE the REAL uplay_r14.dll UPLAY_USER_GetCredentials/GetCdKeys to learn what they write into the two out-params (the struct layout), then have the proxy WRITE a valid fabricated credential blob so login sticks past 9; (2) if still logging out, trace the caller that posts 15 to see the exact check that fails. This is the precise, narrow frontier; it is entirely on H: (proxy output fabrication + observer), no C:.
 
 
+
+
+### Session 28df - the login<->logout cycle is now understood and STABILIZED. Read-only Ghidra mapped the logout, and a new shim mode FC3COOP_BLOCK_LOGOUT makes the login stick (FCX reaches LoggingIn(6)+Succeeded(9) and no longer cycles out; game stable and healthy).
+
+Logout mechanism (Ghidra logout_poster.txt / logout_handler.txt / logout_callers.txt):
+- The LoggingOut(15) is posted by FUN_107dc7b7 = the "LogoutOperation" handler: it builds a "LogoutOperation" object, logs the analytics event "logout" (+ accountFlags/terminalIndex), calls FUN_107db689(handle,0xf), then tears the session down (FUN_10550fc2/FUN_104f8f9c...).
+- FUN_107dc7b7 is invoked by the login async-response family FUN_107dcb47 / FUN_107dd3b0 / FUN_107dd649 / FUN_107dda89 / FUN_107dd22d / FUN_107ddeae. In every site it is immediately preceded by FUN_107d981c(handle) (= begin-failure/logout marker) and guarded by the login-session RECORD being not-connected/invalid: record field *(rec+0x40)==0, flags *(rec+0x3a)==0, and online-service checks FUN_107d9a31 / FUN_1051fd5b / FUN_100be78a(+FUN_107df202) returning false. So "Succeeded(9)" is a front-end analytics state; the actual online SESSION (the RV/manager layer) is still not connected, so the periodic validator logs the user out. That is why the earlier run (28dc) looped 3,4,5,6,7,8,9,13,14,15 repeatedly.
+
+NEW shim mode FC3COOP_BLOCK_LOGOUT=1 (with WATCH_LOGIN): installs a naked skip-hook on FUN_107dc7b7 (E9 at entry -> log + `ret 4`, thiscall 1 stack arg, original NEVER runs) so the LogoutOperation never executes. Combined mode logs the FUN_107db689 events AND blocks logout.
+
+Live result (TestFC3_105, run with SHIM=1 WATCH_LOGIN=1 BLOCK_LOGOUT=1 FAKE_ONLINE=1 FAKE_CREDS=1): the boot login now runs 3,4,5,6=LoggingIn,7,8,9=LoggingInSucceeded,13 ONCE and then STAYS (no code 15, no repeating cycle). The process is stable at menu (~835 MB, no crash). So a sticking FCX online-login state is achievable entirely on H: (proxy credential success + fake online + block LogoutOperation). No C: involved, no online-manager forcing needed.
+
+Next: with login now stable, the decisive owner UI test is Multiplayer -> Co-op -> Host: if the front-end still says "service unavailable" then the co-op Host gate truly needs the real session-manager (DAT_11e42c90 populated via RV), but if it proceeds (or the client now dials RV) we capture it via rv_server + the SandboxUrl config seam. This is the fork in the road. Ghidra scripts: scripts_live/DecompLogoutPoster.java, DecompLogoutHandler.java, DecompLogoutCallers.java (in H:/FarCryCoop/scratch/ghidra).
+
+
