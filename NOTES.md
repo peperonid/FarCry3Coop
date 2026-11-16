@@ -5127,3 +5127,16 @@ CONSEQUENCE for the shim LAN plan: two viable directions, both more than a one-l
 NEXT empirical step (cheap): change coop_shim so FUN_11279ba0 is hooked to a SAFE stub (do not call original -> no SandboxUrl parser crash), returning 0 (clean fail) first, and separately return 1+LAN port, and FIX patch_5 to per-hook saved bytes / ABI-safe trampolines so the shim itself never corrupts the stack; rebuild and observe which path (if any) lets the engine form a session. Artifacts: H:/FarCryCoop/scratch/ghidra/addrout_decompile.txt. bin clean, no game files changed.
 
 
+
+
+### Session 28cg - DECISIVE: forcing online_flag=1 (needed for the co-op gate) wakes collateral online subsystems that crash against unpopulated offline state; the fake-online-in-process route is structurally fragile (the A1 wall again).
+
+SandboxUrl parser FUN_11249220 decompiled: `__thiscall FUN_11249220(this, param_2, int* param_3)`. FIRST line `if (*(char*)(this+4)==0) return 2;` => an EMPTY config value returns 2 CLEANLY, no deref, no crash. The AV (28cc fault RVA 0x01249226, parser entry +6) is the `*(this+4)` read or the first iterator deref when the config OBJECT is present-but-malformed/zeroed (length byte set, data pointer bad) - i.e. partially-initialized online state, not a simple empty string.
+
+Parser callers (config key): FUN_112492a0 "SandboxUrl"; FUN_1044a45e "punch_DetectUrls"; FUN_1078a896 "PassportKillSwitch"; and FUN_1126dc60 (netconfig builder). FUN_1126dc60 is the smoking gun: it calls FUN_11245090() (the SAME online-flag the shim forces to 1) and only if online!=0 proceeds to `FUN_11249220(param_1 + 8, &local_20)` parsing a netconfig struct field that is UNPOPULATED offline -> AV. So the shim's own online_flag=1 (required to pass the co-op gate precondition) ACTIVATES a netconfig path that crashes offline. This is the same class as the 28ba/28bp A1 dead-end: the PC co-op path is welded to live online state; faking the flag wakes real online code that needs real server-populated data.
+
+IMPLICATION (strategic): the "fake online inside the process + short-circuit RV auth" (path B) keeps re-hitting the wall the moment it enables the online flag - every subsystem gated on online=1 (netconfig, punch telemetry, passport, session manager) then runs against absent state. Whack-a-mole hooking each collateral site is high-effort/low-probability. The principled path stays A2: emulate the front-end enough (online config + login/gconnect + RV/PRUDP) that the game's OWN netcode believes it is online legitimately and populates all these structures itself, instead of us forcing a flag.
+
+DECISION FOR OWNER: either commit to A2 (weeks; game's own client does the work, we answer config+login+RV), or accept that offline fake-online cannot yield 2-4 human co-op on this PC build and stop the shim path. Toolchain note: coop_shim.cpp builds clean with MSVC v18 vcvars32 (BUILD_DONE 0) when needed. No game files changed; bin clean.
+
+
