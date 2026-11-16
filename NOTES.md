@@ -5216,3 +5216,14 @@ POSITIONING: our loader proxy FAKE_ONLINE ALREADY brings FC3 to the "Play Online
 VERDICT (consolidated, honest): A2 is feasible-in-principle at the RV/PRUDP layer (public protocol, dummy creds 28ck, nex-go/Python transport), but its critical path is an UNSOLVED FCX online-init/rv_connected bring-up that no existing tool achieves; it is genuine RE + implementation with real uncertainty, not a known-solved problem with a missing server. Decision point for owner stands: invest in cracking the FCX online-init bring-up (hard, uncertain) vs treat mod-262 solo offline co-op as the practical deliverable.
 
 
+
+
+### Session 28cn - online-init mechanism RE'd: the manager is built by the game's OWN factory (FUN_10420a77 -> FUN_10418a3d factory vtable+4); principled next experiment = have the shim CALL that factory instead of writing a zeroed fake.
+
+- Manager creator FUN_10420a77 (void): `piVar1=FUN_10418a3d(); DAT_11e42c90 = (**(code**)(*piVar1 + 4))();` - gets the online-manager FACTORY (lazy singleton FUN_10418a3d) and calls its vtable[+4] to CONSTRUCT the manager, storing into the global. Its sole caller is FUN_1041936b. So FCX builds the real manager via this factory; the 28ci zeroed stand-in crashed because it is not a constructed object.
+- rv_connected getter FUN_112345d0 is NOT a bool: it is a RV connection state-machine op (object field param_1[3] = state: 1=connected; it runs FUN_112344e0/FUN_1122dd90 on states 2/3/4, sets state=1, reports Result 0x80010001 via Result.cpp, returns 1). So "connected" is a live storm::echo/RV connection object state, set only when the RV client actually connects.
+- Join precondition FUN_1127a0d0 (thiscall on the join-op): bails unless (a) prior login op state field [8]==5 (done) and (b) FUN_11237670 (rv_connected) true; then builds the UbiAuthentication login via FUN_11279b40.
+
+NEXT EXPERIMENT (principled replacement for the crashed FAKE_MGR): add coop_shim mode FC3COOP_FAKE_MGR=3 that, instead of writing a zeroed object into [0x11e42c90], CALLS the game's own creator FUN_10420a77 (or its caller FUN_1041936b) once the base module is present, letting FCX construct a REAL online manager. If the factory depends only on already-present online state, the real manager materializes and the co-op gate (FUN_10443663 !=0) passes without the 28ci zeroed-object crash. If the factory itself needs rv_connected/RV up, it will still fail - which tells us the online-init is truly gated behind a live RV connection and the whole chain (config -> RV connect -> rv_connected -> manager) must be satisfied by our emulated RV before ANY menu/co-op path works. Toolchain: implementable in the existing C shim (call via function pointer VA(RVA)+0). Artifacts: H:/FarCryCoop/scratch/ghidra/online_init.txt.
+
+
