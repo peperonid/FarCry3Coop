@@ -1,5 +1,15 @@
 # OW15 Open World Co-op — online 2-player checklist (GOAL 1)
 
+
+> **STATUS UPDATE 2026-11-17 (owner):** OW15 fails to start with **"servers unavailable"** when
+> creating the co-op session. OW15 has NO netcode of its own - it uses FC3's native RendezVous
+> co-op lobby on Ubisoft's servers, and that lobby service is not reachable (same Ubisoft
+> kill-switch we measured: OnlineConfig returns 0 bytes). So GOAL 1 "just use OW15 online" does
+> NOT work as-is. See triage in NOTES 28dm. The only thing that works today is **mod-262 SOLO
+> offline co-op**; true multi-human (online OR offline) requires emulating the dead Ubisoft
+> RV/lobby+auth service ourselves (A2), which is unsolved.
+
+
 How to play Far Cry 3 co-op with a friend ONLINE (no port forwarding) using the
 "Far Cry 3 Open World Co-op (Patch 1.5)" mod (pack `H:\FarCryCoop\Downloads\OW15`, archive
 `Far Cry 3 Open World Co-op (Patch 1.5)-220-1-5-...zip`, 2.7 GB).

@@ -5610,3 +5610,18 @@ Two distinct project goals, now cleanly separated:
 Actionable: decide which goal to prioritize. If the owner mainly wants to play with friends online, OW15 likely already works (verify 2-player private session end-to-end). If the owner wants fully offline LAN co-op, the A2 RV/auth emulation is the only path and stays the research target.
 
 
+
+
+### 28dm - GOAL 1 reality (owner): OW15 Open World Co-op will NOT start - "servers unavailable" at co-op session creation. OW15 has no own netcode; it uses FC3 native RendezVous co-op lobby on Ubisoft servers, and that service is unreachable for FC3 (matches our measured kill-switch: OnlineConfig 0 bytes). So OW15 is not a working online route today.
+
+Triage to tell WHY it says "servers unavailable":
+- If Ubisoft Connect itself is down/maintenance OR single-player FC3 also refuses to start -> it is the Ubisoft Connect account/DRM service (transient; retry later, check Ubisoft status page, relogin). OW15 then just inherits that outage.
+- If single-player FC3 starts fine but only Co-op/session-creation reports "servers unavailable" -> it is FC3's dedicated co-op/lobby (RendezVous/GATOR) service that is discontinued/unreachable server-side. This is the hard case: the lobby Ubisoft used to host FC3 co-op is gone, so no client mod can create a session against it.
+
+Consequence for the plan: BOTH multi-human goals collapse to the same missing piece = a working RendezVous co-op lobby + auth service. Online route (OW15/vanilla) needs Ubisoft's still-running version of it (it is not running for FC3). Offline route needs us to run our own (A2). Therefore:
+- The ONLY working co-op today is mod-262 SOLO OFFLINE (single human).
+- Any 2+ human co-op (online or offline) requires an emulated RV/lobby+auth service (our A2), which is unsolved (28cw-28dj). OW15 cannot bypass this because it uses that same service, not custom netcode.
+
+If the owner still wants 2-player: the only realistic path is completing A2 (local RV emulator that OW15/vanilla co-op can dial) - i.e. the offline emulation, which OW15 would actually ride on. That reframes A2 as the single enabler for ANY multi-human co-op, not just offline.
+
+
