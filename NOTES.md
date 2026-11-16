@@ -5140,3 +5140,16 @@ IMPLICATION (strategic): the "fake online inside the process + short-circuit RV 
 DECISION FOR OWNER: either commit to A2 (weeks; game's own client does the work, we answer config+login+RV), or accept that offline fake-online cannot yield 2-4 human co-op on this PC build and stop the shim path. Toolchain note: coop_shim.cpp builds clean with MSVC v18 vcvars32 (BUILD_DONE 0) when needed. No game files changed; bin clean.
 
 
+
+
+### Session 28ch - A2 Stage0 live result: the game fetches ONLY GetOnlineConfig and makes ZERO gconnect/login HTTP and ZERO RV/PRUDP UDP; "service unavailable" is a LOCAL login-state gate, the FCX login step never fires.
+
+Ran run_a2_stage0.bat (loader proxy FC3COOP_FAKE_ONLINE only, coop_shim NOT present, hosts applied, run_capture serving fc3_config.json). Game v1.03 reached the "Play Online Co-op" menu but showed "Far Cry 3 service unavailable. Try again later." Capture (gator_http_log.txt / gator_udp_log.txt):
+- HTTP: the ONLY request from the game is `GET /OnlineConfigService.svc/GetOnlineConfig?onlineConfigID=21fc0b75f83c49f2a51726f60fd1c5f8&target=client` (Host: onlineconfigservice.ubi.com, Accept: */*). There is NO request to /gconnect, no auth POST, nothing else. We served our non-empty config.
+- UDP on 127.0.0.1:50000: nothing from the game (only an old manual test probe from a previous session). So the game NEVER dialled SandboxUrl / opened PRUDP.
+
+CONCLUSION: the co-op "service unavailable" is decided LOCALLY from the game's own FCX online LOGIN STATE, not from a server round-trip. Even with a valid config, the game does not kick off the FCX login (CFCXGatorLoginCheckOperation / LoggingIn->LoggedIn) nor dial RV. The loader proxy fakes only Ubisoft Connect SDK account presence; that is not enough to drive the FCX online login state machine to LoggedIn, so the co-op front-end availability check fails and the game never even attempts RV.
+
+STRATEGIC READ: "emulate the servers the game calls" has NOTHING to answer for the co-op menu, because the game calls nothing. The real frontier is now precisely: make the FCX online LOGIN STATE read as LoggedIn so the co-op menu proceeds (and then it should attempt RV, giving us a real PRUDP packet to capture). This is a local state force, NOT a server emulation - and it must be done WITHOUT forcing the online_flag the way coop_shim did (28cg: online_flag=1 woke netconfig FUN_1126dc60 -> offline AV). NEXT RE: locate the FCX login-state global + the co-op availability check (the code that returns the "service unavailable" Gator status / reads the login enum) and find a minimal, collateral-safe way to set login==LoggedIn (or satisfy the co-op gate) so the game advances to actually dialing RV. Login enum (28bt): Invalid->NotLoggedIn->FetchOnlineConfig->FetchOnlineConfigRdy->LoggingIn(Rdy)->LoggingInFinalizing->LoggedIn.
+
+
