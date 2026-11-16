@@ -5680,3 +5680,8 @@ CONSOLIDATED FINAL VERDICT (28dm..28dq): the ONLY working FC3 co-op is mod-262 S
 Operational state at end: game killed; rv_server + config_server killed; TestFC3_105\bin\uplay_r1_loader.dll restored to the real mod-262 loader (md5 dacd14c0); coop_shim.dll and coop_*.flag removed; hosts clean. uplay_api.log may be locked (harmless, not committed). Repo code left building clean (proxy md5 changes; shim RV_PROBE/MGR_WATCH/ONLINE_ON still present and inert without env flags).
 
 
+
+
+### Communication log 28dr - PR #1 merged by Bantila, no substantive reply; communication thread closed.
+
+PR #1 (peperonid: pr/coop-recon) into Bantila/FarCry3Coop was MERGED by Bantila on 2026-11-13 17:47 UTC ("Merge pull request #1 from peperonid/pr/coop-recon"). That is Bantila's only action: 0 comments, 0 reviews from Bantila. All 5 PR comments are ours (peperonid). None of the questions addressed to Bantila were answered (1.05 LAN campaign co-op vs classic MP; offline SessionTicket / INVALIDSESSIONKEY bypass; forcing the online-session-manager global 0x11f07e48 and what to feed it; the lobby waiting on an online-service callback). Bantila has no code commits after the merge (last real code 2026-10-24). Consistent with our own finding (28dm-28dq): campaign co-op has no LAN backend in the build, so the "1.05 LAN" likely refers to classic multiplayer only. The communication thread is considered CLOSED; the recon is now part of upstream main.
