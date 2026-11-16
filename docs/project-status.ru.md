@@ -73,3 +73,30 @@ Ubisoft Connect (upc.exe).
 Закреплённый практический деливерабл: mod-262 СОЛО офлайн co-op (работает). RV/PRUDP-инструментарий
 (prudp-кодек, rv_server handshake, config_server, getaddrinfo DNS-redirect) закоммичен и готов к
 любому будущему пути, способному выдать подлинное authenticated-событие.
+
+
+## Финальный вердикт (сессии 28dg-28dq)
+
+После исчерпания всех офлайн-вызываемых щелей вопрос co-op кампании для уровня hook/proxy решён:
+
+- Логин МОЖНО подделать и заставить держаться (FC3COOP_FAKE_CREDS + FC3COOP_BLOCK_LOGOUT); сетевой
+  движок поднимается без FAKE_ONLINE (LAN UDP:9000, UPnP); синглтон менеджера сессий
+  (DAT_11e42c90) НЕ-NULL уже в меню (старая идея «гейт Host == 0» была неверна).
+- Но Co-op -> Host по-прежнему висит на «подключении к серверам Far Cry 3», вечно опрашивая
+  UPLAY_USER_IsConnected. До RendezVous он НЕ доходит: нет RV connect (ConnectToAuthenticationService),
+  нет RVCreateGameSession/SetGameSession, нет DNS, нет пакетов к нашему локальному RV/PRUDP-эмулятору.
+- Форс глобала онлайн-включения, форс объекта менеджера сессий, форс каждой async-операции в
+  «завершено + успех» (FC3COOP_FORCE_FO), фейк party/leader/IsConnected и фейк кренов его мимо этой
+  точки НЕ продвигают.
+
+Гейт - подлинное СОСТОЯНИЕ co-op-бэкенда Ubisoft: «online service connected» плюс события
+party / matchmaking / session через event-pump Uplay. Его даёт только ЖИВОЙ Ubisoft co-op-сервис.
+Онлайн этот сервис мёртв (и OW15, и ваниль онлайн дают «серверы недоступны»). Офлайн mod-262
+загрузчик фейкает Uplay только для SOLO и эти события не выдаёт. Синтезировать их ни одной доступной
+нам proxy/hook-щелью нельзя.
+
+Вывод: единственный достижимый FC3 co-op сегодня - mod-262 SOLO (один человек, офлайн). Co-op на 2+
+человек (офлайн или онлайн) требует заново реализовать Ubisoft co-op-бэкенд (auth + party +
+matchmaking + session + последующий RV login) - большой отдельный проект эмуляции. RV/PRUDP-тулинг
+(codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) и экспериментальные флаги
+shim/proxy остаются в репо как задел под этот проект.

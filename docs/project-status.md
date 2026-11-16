@@ -73,3 +73,31 @@ loader-proxy side is not possible without it.
 Locked practical deliverable: mod-262 SOLO offline co-op (working). The RV/PRUDP tooling
 (prudp codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) is committed and ready
 for any future route that can produce a genuine authenticated event.
+
+
+## Final verdict (sessions 28dg-28dq) / Final verdict
+
+After exhausting every offline-callable seam, the campaign-co-op question is settled for the
+hook/proxy layer:
+
+- Login CAN be faked and made to stick (FC3COOP_FAKE_CREDS + FC3COOP_BLOCK_LOGOUT); the net engine
+  comes up without FAKE_ONLINE (LAN UDP:9000, UPnP); the online session-manager singleton
+  (DAT_11e42c90) is NON-NULL already at the menu (the old "Host gate == 0" idea was wrong).
+- But Co-op -> Host still hangs on "connecting to Far Cry 3 servers", polling UPLAY_USER_IsConnected
+  forever. It NEVER reaches RendezVous: no RV connect (ConnectToAuthenticationService), no
+  RVCreateGameSession/SetGameSession, no DNS, no packets to our local RV/PRUDP emulator.
+- Forcing the online-enable global, forcing the session-manager object, forcing every overlapped
+  async op to "completed + success" (FC3COOP_FORCE_FO), faking party/leader/IsConnected, and
+  faking credentials do NOT move it past that point.
+
+The gate is a genuine Ubisoft co-op BACKEND state - "online service connected" plus the
+party / matchmaking / session events delivered through the Uplay event pump - that only a LIVE
+Ubisoft co-op service produces. Online, that service is dead (OW15 and vanilla online both say
+"servers unavailable"). Offline, the mod-262 loader fakes Uplay for SOLO only and never emits those
+events. No proxy/hook seam we have can synthesize them.
+
+Conclusion: the only achievable FC3 co-op today is mod-262 SOLO (one human, offline). 2+ human
+co-op (offline or online) requires reimplementing the Ubisoft co-op backend (auth + party +
+matchmaking + session + the RV login that follows), which is a large, separate emulation project.
+The RV/PRUDP tooling (codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) and the
+shim/proxy experiment flags remain committed as the groundwork for that project.
