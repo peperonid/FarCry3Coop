@@ -5448,3 +5448,22 @@ What to do instead (H:-only): locate the FCX predicate that enqueues the GatorLo
 Consent statement: as the autonomous agent I withhold consent for a C: write now; I do consent to the H:-only predicate hunt as the next step. Mod-262 solo offline coop remains the locked deliverable; condition B stays built + unit-tested, awaiting condition A.
 
 
+
+
+### Session 28db - condition A, H:-only read-only RE: located the FCX loader-signal consumer and the login-event state machine (the safe force point). New Ghidra artifacts login_gate2.txt / login_state.txt / login_pred.txt.
+
+What FCX reads from the loader BEYOND IsConnected (the answer to the owner's question):
+- FUN_107ac658(param_1) = the credential fetcher. Body: `if (FUN_104191f4()==0) FUN_104191fc(); UPLAY_USER_GetCredentials(param_1+0x70, param_1+0x1f8); UPLAY_USER_GetCdKeys(param_1+0x1f0, param_1+0x208); *(byte*)(param_1+0x5e)=0;`. So FCX pulls the user autologin CREDENTIALS (and CD keys) straight out of the loader via UPLAY_USER_GetCredentials into a fixed slot of the online-account object (offsets +0x70 / +0x1f8). Guard FUN_104191f4 -> FUN_10420a1e is an online-manager readiness check (thin wrapper, returns a bool in AL), NOT a passport/signature validation. The whole chain is on H: and reaches us through the loader we already own.
+- FUN_1064acf3(param_1, flags) = the account-flags combiner: if flag bit 0x10 -> AND UPLAY_USER_IsConnected(); if flag bit 0x40 -> AND FUN_10418c95(param_1,0x40) (-> FUN_10421c46, an entitlement/flag check). So "account usable" = IsConnected AND an entitlement bit, both H:-controllable. This is why faking IsConnected alone (28cu) was insufficient: the entitlement bit path is separate.
+
+The login-state (enum) machine:
+- FUN_107db689(this, handle, eventCode) is the online-login progression dispatcher. It emits the MP stat/event keys per code: 3,5,6="MP_OnlineData_Logging_In"+key "LoggingIn", 9="MP_OnlineData_Logging_In_Succeeded", 0x11="MP_OnlineData_Logging_In_Failed", 0xf="MP_OnlineData_Logging_Out", 0x10="MP_OnlineData_Logging_Out_Succeeded", plus 0xd/0xe. So advancing FCX to LoggingIn == some login-op calling FUN_107db689(handle, 6); reaching LoggedIn == a later call with code 9. The function is first gated by FUN_107dea4c(handle,0) which is a table lookup (iterate records stride 0x50 at *(this+8), count at *(this+0xc), match record field0 == handle): it only proceeds for a handle registered in the online-login session table. Its ~dozen callers (FUN_107bbf5b, FUN_107bc478, FUN_107bd209, FUN_107bd836, FUN_107dbc73, FUN_107dbdf6/ec1/edb/f36, ...) are the actual login-op/state functions - a follow-up should find the one posting code 6 and read its guard.
+
+FORCE-POINT MAP (all on H:, no C: needed), in promise order:
+1. Loader side (cleanest, no in-binary patch): make our uplay_r1_loader proxy return valid data for UPLAY_USER_GetCredentials (+ GetCdKeys) AND satisfy the entitlement-bit path FUN_10418c95(0x40). FUN_107ac658 then populates FCX's account credentials the way the real loader does.
+2. Predicates to observe/satisfy: FUN_104191f4 (manager-ready), FUN_1064acf3 (IsConnected AND entitlement 0x40). Neither validates a Ubisoft signature.
+3. FUN_107db689(handle,code) is where the login enum visibly advances (6=LoggingIn, 9=Succeeded); it requires the handle to already be in the session table (FUN_107dea4c), so blindly calling it with a fake handle will not stick - the correct lever is to let FCX itself build the session via the credential path (1), not to fake the dispatcher.
+
+Honest note: this is the map, not yet the crack. The decisive open question stays whether FCX reaches code 6/9 purely once UPLAY_USER_GetCredentials + entitlement are satisfied offline (i.e. whether a non-Ubisubi-signed credential blob is accepted by FCX's own logic). That is answerable by a shim experiment (proxy returns fabricated credentials + entitlement=1) observed via the shim log for FUN_107db689 firing with code 6/9 - a live run, next step, H:-only. No game or C: file touched this session; this was read-only RE as asked.
+
+

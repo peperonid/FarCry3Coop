@@ -67,3 +67,10 @@ Even so, expectations should be near-zero: facts 1-5 above say the capability is
 - Mod-262 SOLO offline co-op remains the locked, working deliverable.
 - Condition B (RV emulator: PRUDP v1 codec + handshake + scaffolded RMC layer) stays built and
   unit-tested; its live capture (S0) still waits on condition A.
+
+
+## Update 28db - concrete force-point map (found by read-only RE, all on H:)
+- Loader credential read: FUN_107ac658 calls UPLAY_USER_GetCredentials(accountObj+0x70, +0x1f8) + GetCdKeys, guarded by FUN_104191f4 (manager-ready, -> FUN_10420a1e; NOT a signature check). This is the FCX-side read of the loader autologin/credential signal.
+- Account-flags combiner: FUN_1064acf3 = (bit 0x10 AND UPLAY_USER_IsConnected()) AND (bit 0x40 AND FUN_10418c95->FUN_10421c46 entitlement). Explains why IsConnected alone was not enough (28cu).
+- Login-event state machine: FUN_107db689(handle, code) with codes 6=LoggingIn, 9=LoggingInSucceeded, 0x11=Failed, 0xf/0x10=Out/OutSucceeded; gated by FUN_107dea4c (handle must be in the online-login session table, stride 0x50).
+Force-point = the loader side (make uplay_r1_loader proxy return valid UPLAY_USER_GetCredentials/GetCdKeys + satisfy entitlement 0x40); then FCX itself should advance the enum via FUN_107db689. No C: write is involved. Next is a shim experiment (proxy returns fabricated credentials + entitlement=1) observed for FUN_107db689 firing code 6/9.
