@@ -5071,3 +5071,20 @@ Ubisoft Connect устанавливается в `C:\Program Files (x86)\Ubisof
 МЕТКА O PII: в логах лаунчера есть LAN IP/MAC/аккаунт владельца - исключены из этой заметки и из любого коммита/PR. Только чтение; в установке Ubisoft Connect ничего не изменено.
 
 
+
+
+### Сессия 28cw - остаточный риск RV-vs-LAN РАЗРЕШЁН: RV. Дескриптор ко-оп-сессии FC3 это сессия Quazal RendezVous, а не грубый LAN IP:port, поэтому эмуляция социального слоя Ubisoft-лаунчера (A3b) НЕ устраняет нужду в RV; сам по себе LAN недостаточен. Остаются оба жёстких требования: (1) FCX доходит до LoggingIn (заперто boot-auth Ubisoft Connect), (2) поднят RV-rendezvous, чтобы два локальных клиента соединили свои P2P-неткоды (после rendezvous это LAN-дружественно).
+
+Доказательства (Ghidra FC3d3d11_live; session_glue.txt, session_param.txt, session_user.txt):
+- Ко-оп-сессия создаётся/входит через классы с именами CCreateGameSessionParam / CJoinGameSessionParam (RTTI-строки в FUN_1042f648 / FUN_1042f76e), управляемые из скрипт-обработчиков фронтенда FUN_10444c7f (хост, рядом с гейтом Host FUN_10443663) и FUN_1043e2a4 (join). Это игровые объекты параметров сессии, передаваемые RV-менеджеру сессий.
+- Менеджер сессий игры - это RendezVous (CSessionManagerImp_RdV с CGame*_Provider_RdV / CSession*_Operation_RdV, NOTES 28ck), а машина состояний соединения - JobConnectEndPoint с TryDirectConnect + PrepareNATTraversal + ConnectionSucceeded (NOTES 28cp), т.е. P2P с проходом NAT. Пути грубого LAN-сокета с анонсом нет; геттер эндпоинта FUN_11279ba0 питает RV-авторизацию (NOTES 28cf), поэтому адрес потребляется внутри RV-логина/релея, а не набирается как простой игровой сокет.
+- UPLAY_SetGameSession / блоб MultiplayerSession/GameSession лаунчера - это Ubisoft СЛОЙ ПРИСУТСТВИЯ/социальный (друзья «видят» доступную игру + приглашение), а не транспорт. Значит фейковый лаунчер (A3b) может заставить UI показывать сессии и разрешать «войти», но две игры всё равно rendezvous+connect через RV NetEngine, сервер которого мёртв. Итак A3b ОРТОГОНАЛЕН эмулятору RV (A2), а не заменяет его.
+
+СЛЕДСТВИЕ ДЛЯ ПЛАНА (сводно): чтобы играть 2+ людей оффлайн, минимальный набор это
+  (A) довести FCX до ELoginStatus_LoggingIn, чтобы он выполнил JobBackEndServicesLogin -> JobConnectEndPoint -> RV create/join (сейчас заперто на boot-auth Ubisoft Connect, 28cv; апстрим ubiservices productId=46 отдаёт no-content), И
+  (B) поднять локальный RV-rendezvous (Quazal RendezVous/PRUDP)-эмулятор на хосте SandboxUrl, чтобы JobConnectEndPoint клиентов дошёл до ConnectionSucceeded и два P2P-игровых неткода соединились по LAN/loopback.
+A3b (эмуляция лаунчера/друзей/party) нужен лишь если хотим рабочую UI-находку через приглашение друга; для двух машин, что уже знают друг друга, он вне критического пути - вне его только (A)+(B). Ранний дизайн RV-эмулятора A2 (docs/coop-gator-emulation-plan.md) это ровно (B); новый добавляемый блокер это (A). И (A), и (B) по-настоящему трудны; (A) затрагивает boot-auth Ubisoft Connect (на C:) либо машину состояний логина FCX.
+
+Примечание по инструментам: два адреса RV-склейки, которые describe() прокси тежил (0x00cf6790/0x00cf6690), на деле несвязанные инициализаторы структур; истинные параметры сессии это CCreateGameSessionParam/CJoinGameSessionParam, найденные по RTTI-строкам. Стоит обновить теги describe() прокси. bin чист; на C: ничего не изменено.
+
+
