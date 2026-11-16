@@ -53,3 +53,23 @@ Key evidence: NOTES sessions 28cg, 28ci, 28ck, 28cl, 28co, 28cq; Ghidra artifact
   no experiment shim). Game plays normally.
 - `hosts` is clean (no redirects). `GamerProfile.xml` session provider is default.
 - All experiments live under ignored `local/` and `scripts/` only.
+
+
+## Final gate (sessions 28df-28dh, 2026-11-16)
+
+We made FCX hold a stable online login offline (proxy credential success + fake online +
+block LogoutOperation): the login reaches LoggingIn(6) + LoggingInSucceeded(9) and stays. That
+was the long-believed-impossible step. But opening Co-op -> Host still issues no session/RV call,
+and the game never resolves any DNS name - FCX's online network engine never initialises under any
+loader-proxy configuration (even forwarding the real loader's 14k events). The offline (mod-262)
+loader cannot emit the genuine "authenticated/connected to Ubisoft" event that wakes the FCX online
+session, because that event only comes from the live Ubisoft Connect (upc.exe) backend.
+
+So the offline co-op frontier is now pinned to one thing: waking FCX's online net engine, which is
+gated on real Ubisoft Connect authentication. Emulating that is a separate, large undertaking
+(route A3b - Ubisoft Connect / upc.exe backend emulator). Reaching a real RV session from the
+loader-proxy side is not possible without it.
+
+Locked practical deliverable: mod-262 SOLO offline co-op (working). The RV/PRUDP tooling
+(prudp codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) is committed and ready
+for any future route that can produce a genuine authenticated event.
