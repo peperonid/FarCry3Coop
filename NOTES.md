@@ -5090,3 +5090,26 @@ REFINED FIX PLAN for coop_shim (much simpler than originally modeled): do NOT tr
 This is a concrete, small shim change once the readiness flag + how to reach the connection `this` are pinned (next: find callers of FUN_11232e20/FUN_11232ef0 to get the `this` object, or hook them to ignore `this`). Artifacts: H:/FarCryCoop/scratch/ghidra/sockaddr_decompile.txt. No game files changed.
 
 
+
+
+### Session 28ce - full call map of the co-op endpoint getter -> single hook seam FUN_11279ba0 feeds BOTH host and join.
+
+Ghidra (FC3d3d11_live, FC3_d3d11.dll md5 46bcc097). Callers of the producers decompiled:
+
+FUN_11279ba0(void* addrOut /*local_8*/, u16* portOut /*&local_c*/) -> bool  == THE co-op "get endpoint" orchestrator:
+  1. FUN_11245090() -> returns global DAT_11f07e48 = the ONLINE flag. The shim ALREADY writes DAT_11f07e48=1, so this gate passes. (Confirmed the shim's online global is the right one.)
+  2. FUN_11235a00() -> lazy-init of the sockaddr CONTAINER: allocs a sockaddr_in, sets *(u16*)sa=2 (AF_INET), zeroes addr/port, sets readiness bytes *(u16*)(obj+0x48)=1, *(u8*)(obj+0x4a)=1, obj[1]=1, *(u8*)(obj+0x49)=0. This is the `this+0x48` gate read by the producers (28cd).
+  3. cVar1 = FUN_112492a0(local_54) -> rv_sandboxurl (resolves config "SandboxUrl" via the FUN_11249220 parser into the container). THE 28cc CRASH is here (parser derefs empty config). If it returns 0 the whole getter returns 0.
+  4. uVar4 = FUN_11232e20(local_8) -> address producer (sockaddr -> dotted string via FUN_11213990/FUN_11213ab0); FUN_11213a50().
+  5. uVar2 = FUN_11232ef0() -> port producer (body calls ntohs(*(u16*)(*this+2)) but returns it via eax); *portOut = uVar2 => **portOut receives the HOST-order port**.
+  returns 1 on success.
+
+FUN_11279ba0 has exactly TWO callers, one per direction, and both feed the (addrOut, port) into the RV auth handler:
+  - FUN_11275f40:  FUN_11279ba0(local_8,&local_c);  FUN_11275d90(param_1, local_8, local_c, ...)   == HOST path (FUN_11275d90 = RVA_host_handler 0x01275d90).
+  - FUN_1127a300 (== RVA_join_online_var 0x0127a300): FUN_11279ba0(local_8,&local_c); FUN_1127a1d0(param_1, local_8, local_c, ...) == JOIN path (FUN_1127a1d0 = RVA_join_handler 0x0127a1d0).
+
+=> SINGLE CLEAN HOOK SEAM: patch FUN_11279ba0. Handler: fill addrOut with our LAN endpoint and write the host-order LAN port to *portOut, return 1, WITHOUT calling the original. Because the original is skipped, FUN_112492a0 + the SandboxUrl parser FUN_11249220 never run -> the 28cc crash cannot happen. This one hook covers host AND join, replacing the earlier broken 3-hook (rv_sandboxurl+gate addr+gate port) design.
+
+REMAINING UNKNOWN before coding the handler: the exact TYPE/layout of addrOut (local_8). From the producers it is the sockaddr CONTAINER object (field [0] = sockaddr_in*, readiness +0x48) whose IP the consumers read; host_handler FUN_11275d90 forwards it to RV auth `(**(code**)(*param_1+0x14))(puVar2,local_11c,local_124)`. Next: decompile FUN_11275d90's consumption of its 2nd arg (local_8) + FUN_1127a1d0 to pin whether addrOut is a sockaddr container pointer or a std::string*, then write the shim hook on FUN_11279ba0 + rebuild. Artifacts: H:/FarCryCoop/scratch/ghidra/gate_callers.txt, endpoint_callers.txt. No game files changed; bin clean.
+
+
