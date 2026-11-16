@@ -5529,3 +5529,18 @@ NEXT LEVER (untested combination): the clean WATCH_LOGIN mode deliberately does 
 Operational: killed the spinning game (42k suppress hot loop burns CPU). Deploy left in experiment config (proxy+shim) for a fast continue-run. Rollback to clean mod-262: python -I scripts/deploy_proxy_only.py restore + delete bin/coop_shim.dll. Evidence: local/scratch/28dg_uplay_api.log + 28dg_coop_shim_trimmed.log.
 
 
+
+
+### Session 28dh - FINAL GATE of the offline RV route identified: FCX's online-session/net-engine bring-up needs a genuine Ubisoft-Connect-authenticated event from the loader; it cannot be produced offline. The live RV capture (and thus finishing condition B's prudps crypto/RV option IDs) is therefore unreachable via the loader-proxy route.
+
+New reusable lever built: shim mode FC3COOP_DNS_REDIRECT=1 IAT-patches FC3_d3d11.dll's WS2_32!getaddrinfo import so onlineconfigservice.ubi.com resolves to 127.0.0.1 (forwards to the real getaddrinfo("127.0.0.1") so freeaddrinfo stays valid). This lets a local scripts/rv_server/config_server.py (:80) serve a crafted OnlineConfig (SandboxUrl -> prudp://address=127.0.0.1:50000) to the game WITHOUT editing C:\Windows\System32\drivers\etc\hosts (respects golden rule 2, in-memory only). The RV dial would then land in scripts/rv_server/rv_server.py (:50000).
+
+Decisive empirical result: with FAKE_ONLINE + FAKE_CREDS + BLOCK_LOGOUT (login holds 3..9..13, no code15) the game issues ZERO getaddrinfo calls at all (observer logs every node; none seen) -> the FCX network stack never initialises, so no OnlineConfig fetch and no RV dial. Enabling FC3COOP_LOG_PUMP=1 (forward UPLAY_Update/GetNextEvent to the real mod-262 loader) makes the loader pump 14679 events, but FCX still never wakes the net engine (0 getaddrinfo, 0 RVCreateGameSession, 0 RV to our server). So the mod-262 loader, not connected to Ubisoft Connect, never emits the authenticated/connected event that drives FCX online-session bring-up (CSessionFetchOnlineConfigOperation -> manager build -> JobConnectEndPoint/RV). That event only comes from the live upc.exe over named pipes (NOTES 28cv).
+
+Verdict (sharpens 28cw/28db): the offline co-op frontier is NOT the credential/credential-buffer nor the RV protocol; it is one layer higher - waking FCX's online net engine, which is gated on real Ubisoft Connect authentication. Emulating that = a full Ubisoft-Connect/upc.exe backend + auth emulator (route A3b), a large separate effort, and 28cw showed it is orthogonal to (and does not by itself grant) the RV session layer. Every loader-proxy configuration tested reaches a stable FCX "logged-in" front-end but never the network bring-up.
+
+Practical consequence: the locked deliverable stays mod-262 SOLO OFFLINE co-op. The RV/PRUDP tooling (prudp codec, rv_server handshake, config_server, getaddrinfo DNS-redirect) is committed and ready for any future route that can produce a genuine authenticated event.
+
+Operational: after this session the experiment processes are stopped and the game env rolled back to clean mod-262. Ghidra entry probe: scratch rv_entry.txt (FUN_112492a0 reads the "SandboxUrl" config key and returns 0 when absent -> RV has no target; FUN_11252f70 ConnectToAuthenticationService exits 0x8001000a when unauthenticated; all RV funcs have 55 8b ec prologues, safe for 6-byte trampolines).
+
+

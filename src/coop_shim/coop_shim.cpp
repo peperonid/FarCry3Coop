@@ -110,7 +110,8 @@ static int g_probe_login = 0;   // env FC3COOP_PROBE_LOGIN=1 -> entry-log the RV
 static int g_no_ticket = 0;     // env FC3COOP_NO_TICKET=1 -> skip ticket_validate/ticket_prepare hooks (isolate post-callback crash)
 static int g_fake_mgr_only = 0; // env FC3COOP_FAKE_MGR_ONLY=1 -> ONLY force the online-manager global [0x11e42c90]; do NOT write the online flag or patch any code (Stage0b: pass the FUN_10443663 '==0 -> service unavailable' gate with zero collateral code changes)
 static int g_watch_login = 0;   // env FC3COOP_WATCH_LOGIN=1 -> ONLY observe FUN_107db689 login-event dispatch (log code), no other patches (NOTES 28dc)
-static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN mode, also skip FUN_107dc7b7 (LogoutOperation) to stop the login<->logout cycle (NOTES 28df)
+static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN mode, also skip FUN_107dc7b7 (LogoutOper
+static int g_dns_redirect = 0;  // env FC3COOP_DNS_REDIRECT=1 -> IAT-patch getaddrinfo so onlineconfigservice.ubi.com resolves 127.0.0.1 (feed a crafted OnlineConfig with SandboxUrl->our rv_server, no hosts edit) (NOTES 28dh)ation) to stop the login<->logout cycle (NOTES 28df)
 static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
@@ -127,6 +128,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_FAKE_MGR_ONLY", buf, sizeof(buf)) > 0) g_fake_mgr_only = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_WATCH_LOGIN", buf, sizeof(buf)) > 0) g_watch_login = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_BLOCK_LOGOUT", buf, sizeof(buf)) > 0) g_block_logout = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_DNS_REDIRECT", buf, sizeof(buf)) > 0) g_dns_redirect = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -573,6 +575,59 @@ static void install_logout_block(void) {
   } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: LOGOUT-BLOCK install fault at 0x%x", (uint32_t)site); }
 }
 
+// ---- NOTES 28dh: DNS REDIRECT via IAT patch (no C:\\hosts edit). FC3_d3d11.dll fetches its OnlineConfig with a raw
+// winsock HTTP GET to http://onlineconfigservice.ubi.com/OnlineConfigService.svc/GetOnlineConfig and resolves the
+// host through the imported WS2_32!getaddrinfo. We overwrite the DLL's getaddrinfo IAT slot so that host resolves to
+// 127.0.0.1 -> a local config_server.py on :80 serves a crafted OnlineConfig whose SandboxUrl points the RV client
+// at our local rv_server. Forwarding to the REAL getaddrinfo with "127.0.0.1" keeps allocation/free semantics valid.
+static void* find_iat_slot(uintptr_t base, const char* dllName, const char* funcName) {
+  __try {
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((unsigned char*)base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+    DWORD impRva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    if (!impRva) return 0;
+    PIMAGE_IMPORT_DESCRIPTOR imp = (PIMAGE_IMPORT_DESCRIPTOR)(base + impRva);
+    for (; imp->Name; imp++) {
+      const char* dn = (const char*)(base + imp->Name);
+      if (_stricmp(dn, dllName) != 0) continue;
+      PIMAGE_THUNK_DATA orig = (PIMAGE_THUNK_DATA)(base + (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
+      PIMAGE_THUNK_DATA iat  = (PIMAGE_THUNK_DATA)(base + imp->FirstThunk);
+      for (; orig->u1.AddressOfData; orig++, iat++) {
+        if (IMAGE_SNAP_BY_ORDINAL(orig->u1.Ordinal)) continue;
+        PIMAGE_IMPORT_BY_NAME ibn = (PIMAGE_IMPORT_BY_NAME)(base + orig->u1.AddressOfData);
+        if (_stricmp((const char*)ibn->Name, funcName) == 0) return (void*)&iat->u1.Function;
+      }
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+  return 0;
+}
+typedef int (WINAPI *getaddrinfo_t)(const char*, const char*, void*, void**);
+static getaddrinfo_t g_real_getaddrinfo = 0;
+static int WINAPI hk_getaddrinfo(const char* node, const char* service, void* hints, void** res) {
+  if (node) { logLock(); LOGF("shim: DNS-LOOKUP '%s' svc=%s", node, service?service:"-"); logUnlock(); }
+  if (node && (strstr(node, "onlineconfigservice") || _stricmp(node, "config.ubi.com") == 0)) {
+    logLock(); LOGF("shim: DNS-REDIRECT '%s' -> 127.0.0.1", node); logUnlock();
+    return g_real_getaddrinfo("127.0.0.1", service, hints, res);
+  }
+  return g_real_getaddrinfo(node, service, hints, res);
+}
+static void install_dns_redirect(void) {
+  void* slot = find_iat_slot(g_mod, "WS2_32.dll", "getaddrinfo");
+  if (!slot) { LOGF("shim: DNS-REDIRECT: WS2_32!getaddrinfo IAT slot NOT found in FC3_d3d11.dll"); return; }
+  HMODULE w = LoadLibraryA("ws2_32.dll");
+  g_real_getaddrinfo = (getaddrinfo_t)GetProcAddress(w ? w : GetModuleHandleA("ws2_32.dll"), "getaddrinfo");
+  if (!g_real_getaddrinfo) { LOGF("shim: DNS-REDIRECT: could not resolve real getaddrinfo"); return; }
+  __try {
+    DWORD old; if (VirtualProtect(slot, 4, PAGE_READWRITE, &old)) {
+      *(volatile void**)slot = (void*)hk_getaddrinfo;
+      VirtualProtect(slot, 4, old, &old);
+      LOGF("shim: DNS-REDIRECT installed on getaddrinfo IAT slot %p (onlineconfigservice.ubi.com -> 127.0.0.1)", slot);
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: DNS-REDIRECT install fault"); }
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -618,6 +673,7 @@ static void init(void) {
     else { install_fake_mgr(); LOGF("shim: FAKE_MGR_ONLY active - only [0x11e42c90] forced; no online flag, no hooks. Try Co-op -> Host now.\n"); }
     return;
   }
+  if (g_dns_redirect) install_dns_redirect();   // independent lever: works in any mode (NOTES 28dh)
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block(); LOGF("shim: WATCH_LOGIN clean mode - FUN_107db689 observer%s; no online flag, no other hooks", g_block_logout?" + LOGOUT-BLOCK":""); return; }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
   // Cheap precondition: force the online-enable global (FUN_11245090 returns DAT_11f07e48) to 1.

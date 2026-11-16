@@ -5228,3 +5228,18 @@ A3b (эмуляция лаунчера/друзей/party) нужен лишь �
 Операционно: spinning-игру заглушил (хот-луп из 42k подавлений жрёт CPU). Деплой оставлен в конфиге эксперимента (proxy+shim) для быстрого продолжения. Откат к чистому mod-262: python -I scripts/deploy_proxy_only.py restore + удалить bin/coop_shim.dll. Доказательства: local/scratch/28dg_uplay_api.log + 28dg_coop_shim_trimmed.log.
 
 
+
+
+### Сессия 28dh - ОПРЕДЕЛЕНА ФИНАЛЬНАЯ СТЕНА офлайн-RV-пути: пробуждение онлайн-сессии/нет-движка FCX требует подлинного события «аутентифицирован» от Ubisoft-Connect-загрузчика, которое офлайн недостижимо. Живой RV-захват (а значит и завершение условия B: prudps-крипто/RV-ID опций) через loader-proxy путь недостижим.
+
+Новый переиспользуемый рычаг: режим shim'а FC3COOP_DNS_REDIRECT=1 патчит IAT-слот WS2_32!getaddrinfo в FC3_d3d11.dll так, что onlineconfigservice.ubi.com резолвится на 127.0.0.1 (вызывает реальный getaddrinfo("127.0.0.1"), поэтому freeaddrinfo остаётся валидным). Это даёт локальному scripts/rv_server/config_server.py (:80) отдавать crafted OnlineConfig (SandboxUrl -> prudp://address=127.0.0.1:50000) игре БЕЗ правки C:\Windows\System32\drivers\etc\hosts (уважает golden rule 2, только память). RV-набор тогда попал бы в scripts/rv_server/rv_server.py (:50000).
+
+Решающий эмпирический результат: с FAKE_ONLINE + FAKE_CREDS + BLOCK_LOGOUT (логин держится 3..9..13, без кода15) игра делает НОЛЬ вызовов getaddrinfo вообще (наблюдатель пишет каждое имя; ни одного нет) -> сетевой стек FCX не инициализируется, значит нет ни fetch-а OnlineConfig, ни RV-набора. Включение FC3COOP_LOG_PUMP=1 (форвард UPLAY_Update/GetNextEvent настоящему mod-262 загрузчику) заставляет загрузчик помпить 14679 событий, но FCX по-прежнему не будит нет-движок (0 getaddrinfo, 0 RVCreateGameSession, 0 RV к нашему серверу). Значит mod-262 загрузчик, не подключённый к Ubisoft Connect, никогда не выдаёт событие authenticated/connected, которое запускает online-сессию FCX (CSessionFetchOnlineConfigOperation -> построение менеджера -> JobConnectEndPoint/RV). Это событие приходит только от живого upc.exe по именованным каналам (NOTES 28cv).
+
+Вердикт (уточняет 28cw/28db): фронтентир офлайн co-op - НЕ креды/их буферы и НЕ протокол RV; он на слой выше - разбудить сетевой движок FCX, гейтнутый подлинной авторизацией Ubisoft Connect. Его эмуляция = полный эмулятор бэкенда+авторизации Ubisoft Connect/upc.exe (route A3b), большая отдельная работа, и 28cw показал, что она ортогональна RV-слою (сама по себе его не даёт). Каждая протестированная конфигурация loader-proxy даёт стабильный front-end «залогинен», но никогда не доводит до сетевого bring-up.
+
+Практическое следствие: закреплённый деливерабл остаётся mod-262 СОЛО офлайн co-op. RV/PRUDP-инструментарий (prudp-кодек, rv_server handshake, config_server, getaddrinfo DNS-redirect) закоммичен и готов к любому будущему пути, способному выдать подлинное authenticated-событие.
+
+Операционно: после этой сессии экспериментальные процессы остановлены, окружение игры откачено к чистому mod-262. Ghidra-проба входов: scratch rv_entry.txt (FUN_112492a0 читает ключ конфига "SandboxUrl" и возвращает 0 когда его нет -> RV некуда слать; FUN_11252f70 ConnectToAuthenticationService выходит 0x8001000a без авторизации; все RV-функции имеют пролог 55 8b ec, безопасны для 6-байтных трамплинов).
+
+
