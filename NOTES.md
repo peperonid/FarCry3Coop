@@ -5594,3 +5594,19 @@ Implications: (a) The owner's multi-human goal may already be satisfied by OW15 
 Next: test OW15 as the multiplayer route (owner install/UI). If OW15 works offline-LAN multi-human, it supersedes the whole RV plan. If it needs Ubisoft online, then our A2/RV offline emulator becomes the tool to make OW15 (or vanilla co-op) run fully offline. NOTE: OW15 replaces the world (open-world co-op), so it is a different game mode, not vanilla co-op maps. Scripts: scratch/ghidra/scripts_live/PatchPoint.java; diff evidence in scratch.
 
 
+
+
+### Correction 28dl (owner): Open World Co-op (OW15) does NOT work without live Ubisoft servers. So 28dk's optimism is corrected: OW15 is real multiplayer but Ubisoft-online-only (private co-op session = Ubisoft private session). It does NOT satisfy the OFFLINE goal.
+
+Reconciled conclusion (this matches and strengthens everything in 28cw/28dg/28dj):
+- The offline loader (uplay_r1_loader md5 dacd14c0, used by BOTH mod-262 and OW15) fakes enough of Uplay for SOLO (mod-262) but does NOT implement the authenticated online session handshake a real multiplayer session needs.
+- OW15 gets multiplayer by using REAL Ubisoft servers (private co-op session). It is therefore an ONLINE play option, not an offline one.
+- Offline multi-human co-op therefore STILL requires reimplementing the Ubisoft online-session layer (RV/RendezVous + auth) - our A2 route - because nothing existing (mod-262, OW15, or the offline loader) provides it.
+
+Two distinct project goals, now cleanly separated:
+1. ONLINE friends without port forwarding: may already be served by OW15 Open World Co-op (Ubisoft private sessions are NAT/relay friendly). Worth confirming for the owner's use case (and player-count: FC3 co-op is 2 in vanilla; OW15 host/client). This is Ubisoft-online, so no RV work needed.
+2. OFFLINE 2-4 humans (no Ubisoft): unsolved; needs A2 (local RV + auth emulation) to satisfy DAT_11e42c90. This remains the hard frontier and the only thing our RV/PRUDP tooling is for.
+
+Actionable: decide which goal to prioritize. If the owner mainly wants to play with friends online, OW15 likely already works (verify 2-player private session end-to-end). If the owner wants fully offline LAN co-op, the A2 RV/auth emulation is the only path and stays the research target.
+
+
