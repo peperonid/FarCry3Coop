@@ -5022,3 +5022,26 @@ STRATEGIC CONCLUSION (now fully evidence-backed): the PC build offers NO offline
 Cheap multi-human avenues (Lan provider config, `-splitscreen4`, dev-launch switches) are now all empirically closed on this build.
 
 
+
+
+### Session 28bz - A2 feasibility ASSESSMENT (Quazal RendezVous / PRUDP emulation for the stock Co-op menu). Evidence-based, from FC3.dll crypto artifacts + public PRUDP state.
+
+CRYPTO STACK in FC3.dll: **OpenSSL 0.9.8l** (RC4 present: `RC4 part of OpenSSL 0.9.8l`; MD5/SHA1/SHA-256; RSA-SHA1 sigs) + **zlib 1.2.5**. A `blowfish` string also present. This matches the public Quazal PRUDP scheme exactly: after a small cleartext connection handshake, packet payloads are **zlib-compressed + RC4-encrypted** with a key derived at connect.
+
+KEY-MODEL EVIDENCE (decisive for feasibility): the client references **`GameSessionKey`** (150+ refs) and errors `E_SESSION_ERROR_RENDEZVOUS_GAMESESSION_INVALIDSESSIONKEY` and `E_SESSION_ERROR_GATOR_KEY_DECRYPTION_FAILED` -> the client RECEIVES a GameSessionKey from the RV server and DECRYPTS it locally. In Quazal RendezVous this is the standard model where the per-title RV/GameSessionKey material is **embedded in the client** (so any legit client can decrypt what the RV issues). Because we HAVE the binary, that key/derivation is **extractable** - this is the single most important de-risk and it looks achievable.
+
+TICKET MODEL: session tickets are minted by the RV/Storm flow itself - `storm::echo::SessionTicketRequestAttachment`, `SessionTicketAttachment`, `inEvent::RequestTicketSessionRefId`, `UseTicketRequestAttachment`, `SessionTicketTimeoutInMs` -> the RV server (us) issues the session ticket; it is NOT a Ubisoft-signed DRM blob. The `NP_TICKET` / `NOT_SIGNED_IN_NP` strings are console/platform entitlement branches, not the PC RV path. So no Ubisoft private key is required to satisfy the session-ticket step.
+
+PUBLIC PROTOCOL STATE: Quazal PRUDP is well reverse-engineered - Hackaday "Analysing PRUDP protocol", wiki/Grokipedia/gist writeups, and importantly an **open-source Python PRUDP server emulator** (GitHub PR by 0xZontier, "PRUDP: Python-based server emulator for Nintendo DSi"), plus community PRUDP server libraries (Nintendo netplay). PRUDP packet format (magic byte, header signature/CRC, conn/session IDs, message/sequence ids, reliability flags), connection handshake (Connection Request/Reply/Ping/Ack) and RC4+zlib payload are documented. FC3's RV = the same Quazal lineage.
+
+HONEST COST/RISK SPLIT for A2:
+- PRUDP transport + handshake + RC4/zlib: LOW risk (public + open implementations to port).
+- Extract the embedded RV/GameSessionKey + key derivation from FC3.dll: MEDIUM (find the constant + the connect-time KDF; RC4 is already in the binary so the scheme matches public docs).
+- Reconstruct the Quazal RendezVous SERVICE-layer messages (login, session create/search/join, ticket issuance) that FC3's `CSession*Operation_RdV` expect: MEDIUM-HIGH - the real work. Not published for FC3 specifically, but tractable because we can read the RV client code AND, once a PRUDP socket is up, capture the client's request/response messages black-box.
+- No confirmed Ubisoft-side signature wall on the session/ticket path (RV issues them); front-end "connected" state is satisfiable (in Lan mode the game already booted online-gate-free).
+
+VERDICT: A2 is FEASIBLE but is a multi-week RE+emulation effort (weeks, not days), gated on (1) extracting the embedded RV key, (2) reconstructing the RV service messages. The big payoff: the game's OWN battle-tested co-op netcode (sessions, sync, host migration) then does all the hard work for free, and peers join exactly like the stock menu - the cleanest route to the original "friends without port-forwarding" goal (we front it with our relay).
+
+RECOMMENDED CHEAP DE-RISK before committing weeks: one Ghidra spike to (a) confirm PRUDP header handling (magic byte/CRC) in the storm::echo connect code, and (b) locate the embedded RV/GameSessionKey constant + its connect-time KDF. If the key is a clean static blob, A2 becomes clearly the preferred path over Plan B (B fights the engine's assumption that remote players require a provider).
+
+
