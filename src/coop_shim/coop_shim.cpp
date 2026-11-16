@@ -64,6 +64,9 @@ enum {
   RVA_join_precond    = 0x01127a0d0, // FUN_1127a0d0 join precondition; returns 0 unless rv_connected (28af hook unlocks it)
   RVA_login_event     = 0x007db689, // FUN_107db689 FCX online-login EVENT dispatcher (code 6=LoggingIn 9=Succeeded 0x11=Failed 0xf/0x10=Out), observer-only (NOTES 28dc)
   RVA_logout_op       = 0x007dc7b7, // FUN_107dc7b7 LogoutOperation (logs 'logout', posts FUN_107db689 code 0xf, tears down session) - target of BLOCK_LOGOUT (NOTES 28df)
+  RVA_connect_auth_svc  = 0x01252f70, // FUN_11252f70 JobBackEndServicesLogin::ConnectToAuthenticationService - RV connect enqueue (RV_PROBE observer, 28dn)
+  RVA_rv_sendto       = 0x01218510, // FUN_11218510 RV socket sendto wrapper (RV_PROBE observer, 28dn)
+  RVA_rv_wsasendto    = 0x01214630, // FUN_11214630 RV socket WSASendTo wrapper (RV_PROBE observer, 28dn)
 };
 
 // Op-registry descriptors (static op-type data, created via their lazy registrar only; for reference, NOTES 28ag):
@@ -111,7 +114,8 @@ static int g_no_ticket = 0;     // env FC3COOP_NO_TICKET=1 -> skip ticket_valida
 static int g_fake_mgr_only = 0; // env FC3COOP_FAKE_MGR_ONLY=1 -> ONLY force the online-manager global [0x11e42c90]; do NOT write the online flag or patch any code (Stage0b: pass the FUN_10443663 '==0 -> service unavailable' gate with zero collateral code changes)
 static int g_watch_login = 0;   // env FC3COOP_WATCH_LOGIN=1 -> ONLY observe FUN_107db689 login-event dispatch (log code), no other patches (NOTES 28dc)
 static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN mode, also skip FUN_107dc7b7 (LogoutOper
-static int g_dns_redirect = 0;  // env FC3COOP_DNS_REDIRECT=1 -> IAT-patch getaddrinfo so onlineconfigservice.ubi.com resolves 127.0.0.1 (feed a crafted OnlineConfig with SandboxUrl->our rv_server, no hosts edit) (NOTES 28dh)ation) to stop the login<->logout cycle (NOTES 28df)
+static int g_dns_redirect = 0;  // env FC3COOP_DNS_REDIRECT=1 -> IAT-patch getaddrinfo so onlineconfigservice.ubi.com resolves 127.0.0.1 (feed a crafted OnlineConfig with SandboxUrl->our rv_server, no hosts edit) (NOTES 28dh)
+static int g_rv_probe = 0;      // env FC3COOP_RV_PROBE=1 -> OBSERVE whether FCX reaches the RV connect/dial path at Co-op entry (NOTES 28dn)ation) to stop the login<->logout cycle (NOTES 28df)
 static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
@@ -129,6 +133,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_WATCH_LOGIN", buf, sizeof(buf)) > 0) g_watch_login = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_BLOCK_LOGOUT", buf, sizeof(buf)) > 0) g_block_logout = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_DNS_REDIRECT", buf, sizeof(buf)) > 0) g_dns_redirect = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_RV_PROBE", buf, sizeof(buf)) > 0) g_rv_probe = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -628,6 +633,46 @@ static void install_dns_redirect(void) {
   } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: DNS-REDIRECT install fault"); }
 }
 
+// ---- NOTES 28dn: RV bring-up PROBE. OBSERVER-only trampolines (log 'was called', then tail-call the original via a
+// 6-byte trampoline) on the RV connect path, to learn where FCX's co-op RV bring-up stops. All three targets have the
+// 55 8b ec prologue (verified in scratch rv_entry.txt) so a 6-byte entry trampoline is safe. NO behaviour change.
+static uintptr_t g_rv_cas_tr = 0, g_rv_st_tr = 0, g_rv_ws_tr = 0;
+static void rv_log_cas(void){ logLock(); LOGF("shim: RV-PROBE ConnectToAuthenticationService (FUN_11252f70) CALLED"); logUnlock(); }
+static void rv_log_st(void){ logLock(); LOGF("shim: RV-PROBE RV sendto (FUN_11218510) CALLED -> RV packet being sent"); logUnlock(); }
+static void rv_log_ws(void){ logLock(); LOGF("shim: RV-PROBE RV WSASendTo (FUN_11214630) CALLED -> RV packet being sent"); logUnlock(); }
+__declspec(naked) static void hk_rv_cas(void){ __asm {
+  pushad
+  call rv_log_cas
+  popad
+  jmp dword ptr [g_rv_cas_tr]
+} }
+__declspec(naked) static void hk_rv_st(void){ __asm {
+  pushad
+  call rv_log_st
+  popad
+  jmp dword ptr [g_rv_st_tr]
+} }
+__declspec(naked) static void hk_rv_ws(void){ __asm {
+  pushad
+  call rv_log_ws
+  popad
+  jmp dword ptr [g_rv_ws_tr]
+} }
+static int install_rv_observer(uintptr_t rva, void* detour, uintptr_t* tr, const char* nm) {
+  uintptr_t f = VA(rva); uint8_t* p = (uint8_t*)f;
+  __try {
+    if (p[0]==0x55 && p[1]==0x8B && p[2]==0xEC) return patch_entry_n(f, 6, detour, tr);
+    LOGF("shim: RV-PROBE %s prologue at 0x%x not 55 8b EC (got %02x %02x %02x) - skip", nm, (uint32_t)f, p[0], p[1], p[2]);
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-PROBE %s read fault at 0x%x", nm, (uint32_t)f); }
+  return -1;
+}
+static void install_rv_probe(void) {
+  install_rv_observer(RVA_connect_auth_svc, (void*)hk_rv_cas, &g_rv_cas_tr, "ConnectToAuthSvc");
+  install_rv_observer(RVA_rv_sendto,        (void*)hk_rv_st,  &g_rv_st_tr,     "rv_sendto");
+  install_rv_observer(RVA_rv_wsasendto,     (void*)hk_rv_ws,  &g_rv_ws_tr,     "rv_wsasendto");
+  LOGF("shim: RV-PROBE observers installed (watch RV-PROBE lines: none => RV never reached; CAS only => RV connect gated by precondition; sendto too => RV actually dials, point DNS-redirect at rv_server)");
+}
+
 static void install_hooks(void) {
   struct { uintptr_t rva; void* detour; const char* name; } tbl[] = {
     { RVA_online_flag,     (void*)hk_online_flag,     "online_flag" },
@@ -674,6 +719,7 @@ static void init(void) {
     return;
   }
   if (g_dns_redirect) install_dns_redirect();   // independent lever: works in any mode (NOTES 28dh)
+  if (g_rv_probe) install_rv_probe();           // independent observer: works in any mode (NOTES 28dn)
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block(); LOGF("shim: WATCH_LOGIN clean mode - FUN_107db689 observer%s; no online flag, no other hooks", g_block_logout?" + LOGOUT-BLOCK":""); return; }
   // TODO: verify module md5 == 46bcc097 before patching (else RVAs are wrong -> crash).
   // Cheap precondition: force the online-enable global (FUN_11245090 returns DAT_11f07e48) to 1.
