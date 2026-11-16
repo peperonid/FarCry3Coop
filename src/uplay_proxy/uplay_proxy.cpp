@@ -76,6 +76,7 @@ static const char* g_names[NEXP] = {
 static int g_fakeval[NEXP] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0};
 static int g_fake = 0;
 static int g_fakeonline = 0;      // env FC3COOP_FAKE_ONLINE -> fake the Uplay online-service overlapped op (NOTES 28al)
+static int g_fakecreds = 0;       // env FC3COOP_FAKE_CREDS -> GetCdKeys/GetCredentials return success w/o real loader (NOTES 28dc)
 static int g_fo_done      = 1;    // slot 19 UPLAY_HasOverlappedOperationCompleted return (1 = completed); env FC3COOP_FAKE_DONE
 static int g_fo_result    = 0;    // slot 18 UPLAY_GetOverlappedOperationResult return (0 = UPLAY success code); env FC3COOP_FAKE_RESULT
 // NOTE: slot 55 UPLAY_USER_IsConnected (th_55) ALREADY returns 1 unconditionally in this proxy, so 'connected' is already faked.
@@ -1027,6 +1028,11 @@ extern "C" void __declspec(naked) th_53(void){ __asm {
   add  esp, 12
   popad
   popfd
+  cmp dword ptr [g_fakecreds], 0
+  je  Ltail_53
+  xor eax, eax
+  ret                       // FAKE_CREDS: success without calling real UPLAY_USER_GetCdKeys
+Ltail_53:
   mov eax, dword ptr [g_rawp_53]
   jmp eax
 } }
@@ -1043,6 +1049,11 @@ extern "C" void __declspec(naked) th_54(void){ __asm {
   add  esp, 12
   popad
   popfd
+  cmp dword ptr [g_fakecreds], 0
+  je  Ltail_54
+  xor eax, eax
+  ret                       // FAKE_CREDS: success without calling real UPLAY_USER_GetCredentials
+Ltail_54:
   mov eax, dword ptr [g_rawp_54]
   jmp eax
 } }
@@ -1179,6 +1190,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID rsv) {
         logOpen();
         g_fake = (getenv("FC3COOP_FAKE_PARTY") != NULL) ? 1 : 0;
         g_fakeonline = (getenv("FC3COOP_FAKE_ONLINE") != NULL) ? 1 : 0;
+    g_fakecreds  = (getenv("FC3COOP_FAKE_CREDS") != NULL) ? 1 : 0;
         { const char* e = getenv("FC3COOP_FAKE_DONE");   if (e && e[0]) g_fo_done   = atoi(e); }
         { const char* e = getenv("FC3COOP_FAKE_RESULT"); if (e && e[0]) g_fo_result = atoi(e); }
         g_logpump = (getenv("FC3COOP_LOG_PUMP") != NULL) ? 1 : 0;

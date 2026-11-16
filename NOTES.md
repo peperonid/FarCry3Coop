@@ -5467,3 +5467,22 @@ FORCE-POINT MAP (all on H:, no C: needed), in promise order:
 Honest note: this is the map, not yet the crack. The decisive open question stays whether FCX reaches code 6/9 purely once UPLAY_USER_GetCredentials + entitlement are satisfied offline (i.e. whether a non-Ubisubi-signed credential blob is accepted by FCX's own logic). That is answerable by a shim experiment (proxy returns fabricated credentials + entitlement=1) observed via the shim log for FUN_107db689 firing with code 6/9 - a live run, next step, H:-only. No game or C: file touched this session; this was read-only RE as asked.
 
 
+
+
+### Session 28dd - BREAKTHROUGH on condition A: the shim experiment shows FCX's online-login event machine DOES reach LoggingIn(6) and LoggingInSucceeded(9) OFFLINE once the loader returns success for UPLAY_USER_GetCredentials + UPLAY_USER_GetCdKeys and the overlapped op completes. This overturns 28cu's "FCX never advances" (in that pure-forward trace GetCredentials went to the real mod loader, which returned nothing, so login stalled; with our FAKE_CREDS success it advances). Evidence: local/scratch/28dc_uplay_api.log + 28dc_coop_shim.log.
+
+Tooling added (both build clean x86, reversible):
+- uplay_proxy: env FC3COOP_FAKE_CREDS=1 -> th_53 (UPLAY_USER_GetCdKeys) and th_54 (UPLAY_USER_GetCredentials) return eax=0 (success) WITHOUT forwarding to the real loader. (IsConnected th_55 already returned 1.)
+- coop_shim: NEW clean observer mode env FC3COOP_WATCH_LOGIN=1 -> installs ONLY a log-and-tailcall hook on FUN_107db689 (RVA 0x7db689) via the proven 6-byte patch_entry_n trampoline (guarded on prologue 55 8B EC), no online-flag write and no other hooks. Logs (this, handle, code) for every login event.
+- run bat: local/scratch/run_28dc_credtrace.bat (deploy proxy + shim; env FC3COOP_SHIM=1 FC3COOP_WATCH_LOGIN=1 FC3COOP_FAKE_ONLINE=1 FC3COOP_FAKE_CREDS=1; launches farcry3_d3d11.exe to menu).
+
+Live trace result (TestFC3_105, this run):
+- Boot call sequence from the proxy log: UPLAY_Init @FC3+0x420a2d -> PARTY_Init @+0x77d52f -> FRIENDS_Init @+0x77b9fb -> ClearGameSession + GetCredentials + GetCdKeys, all three from FC3+0x7ac6xx (= FUN_107ac658, the credential fetcher from 28db) -> HasOverlappedOperationCompleted x2 + GetOverlappedOperationResult x2 from FC3+0x7acaf8/0x7acbx (the credential async op; FAKE_ONLINE completes it with result 0) -> then ACH_GetAchievements and repeated UPLAY_USER_IsConnected from FC3+0x64ad04 (= FUN_1064acf3, the account-flags combiner from 28db; the flag arg seen is 0x10 and 0x02/0x07 on others).
+- The shim observer caught the FCX login event sequence on this=0x4c5ac020: codes 3,4,5,6,7,8,9,13,14,15 then a repeat, i.e. 6=LoggingIn and 9=LoggingInSucceeded both FIRE, followed by 15=LoggingOut, then the cycle repeats (login does not currently stick).
+- Interpretation of codes (from FUN_107db689's own stat strings): 3/5 = early "MP_OnlineData" states, 6 = MP_OnlineData_Logging_In ("LoggingIn"), 9 = MP_OnlineData_Logging_In_Succeeded, 0x11 = _Failed, 0xf/0x10 = Logging_Out/_Succeeded. So FCX visibly enters LoggingIn and logs in successfully, then logs out and retries.
+
+So the head blocker is NOT "FCX can never reach LoggingIn" - it reaches LoggingIn AND Succeeded offline with a success-returning credential API + completed overlapped op + IsConnected=1. The NEW, narrower open questions: (1) why the login cycles back through LoggingOut(15) instead of sticking - candidates: the credential OUT buffers (a=011d33a0 / 011d3528) are left EMPTY because we return success without writing the credential struct, or the entitlement bit path FUN_10418c95/FUN_10421c46(0x40) fails, or post-login RV connect is required; (2) whether a sticking login opens the co-op front-end (the co-op Host gate FUN_10443663 still reads the online-manager singleton DAT_11e42c90). This is the real frontier now, and it is entirely on H: (proxy output fabrication + shim observation). No C: was involved.
+
+Next: keep the observer live and (a) have the owner open Multiplayer -> Co-op -> Host to see if the front-end still says "service unavailable" or now proceeds; (b) make the proxy actually WRITE a credential blob into the GetCredentials out-params (needs the struct layout) to stop the LoggingOut cycle; (c) start rv_server + the SandboxUrl config seam to capture any RV dial that a sticking login triggers.
+
+
