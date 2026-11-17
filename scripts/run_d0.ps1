@@ -73,8 +73,8 @@ foreach ($f in @("coop_shim.log","uplay_api.log")) { Set-Content -Path (Join-Pat
 foreach ($f in @("rv_capture.log","config_server.out","rv_server.out")) { $p = Join-Path $RvDir $f; if (Test-Path $p) { Set-Content -Path $p -Value "" } }
 
 # 3) start rv_server (:50000) + config_server (:80, advertises SandboxUrl -> prudp://127.0.0.1:50000)
-Start-Process -FilePath $Py -ArgumentList @("-I","rv_server.py","--host","127.0.0.1","--port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden
-Start-Process -FilePath $Py -ArgumentList @("-I","config_server.py","--host","0.0.0.0","--port","80","--rv-port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden
+Start-Process -FilePath $Py -ArgumentList @("-I","rv_server.py","--host","127.0.0.1","--port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $RvDir "rv_server.out") -RedirectStandardError (Join-Path $RvDir "rv_server.err")
+Start-Process -FilePath $Py -ArgumentList @("-I","config_server.py","--host","0.0.0.0","--port","80","--rv-port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $RvDir "config_server.out") -RedirectStandardError (Join-Path $RvDir "config_server.err")
 Start-Sleep -Seconds 2
 
 # 4) launch the game NET-ON (NO FAKE_ONLINE) with RV + manager observers on

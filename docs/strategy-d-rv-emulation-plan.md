@@ -147,3 +147,32 @@ honest 2-bot QA pass. (Same stage as R2-4; independent of whether we got here vi
   there only if the key-exchange looks recoverable. As of current evidence (28dj: RV-PROBE zero on
   a real co-op-host attempt), the prior is that D0 FAILS, so treat D as low-probability and
   mod-262 SOLO as the deliverable.
+
+
+## 7. D0 RESULT (executed 2026-11-17): **FAIL**
+
+A clean, valid run (after fixing two harness bugs: the running game had been locking the loader, and
+an elevated shell resolved bare `python` to a system32 document). With the harness provably engaged:
+- proxy live (UPLAY event pump logged from `FC3_d3d11.dll`), shim live (RV-PROBE/MGR_WATCH/login
+  hooks installed);
+- FCX login reached and stuck **LoggingIn(6) -> LoggingInSucceeded(9) -> 13/14**, no 15 loop
+  (LOGOUT-BLOCK fired ~60k times = engine kept trying to logout, blocked);
+- online session-manager global `DAT_11e42c90` NON-NULL (`0x44a8bbb0`, manager present but idle);
+- shim DNS-REDIRECT installed (`onlineconfigservice.ubi.com -> 127.0.0.1` on the `getaddrinfo` IAT slot).
+
+**Decisive outcome: FC3 never entered the RendezVous client at all.**
+- `rv_capture.log`: **0** packets (no SYN, nothing reached `:50000`).
+- shim **RV-PROBE runtime hits: 0** (only the install banner logged; the in-process RV connect/send
+  probes never fired).
+- `uplay_api.log`: **0** `SetGameSession` / `CreateGameSession` / `ConnectToAuthenticationService` /
+  `GetFriendList` / `IsPartyLeader`.
+
+This is independent of the config value: RV-PROBE sits on the RV client functions *inside* FC3, so a
+zero there means the RV code path is never reached regardless of what `SandboxUrl` points to. The
+co-op "connecting to servers" wait is gated **upstream** of RendezVous, on the FCX online-service /
+party-session state (NOTES 28dp/28dq).
+
+**Verdict: Strategy D is DEAD, and Strategy B' shares the same gate so it is dead too** (28ea:
+B' bottomed out in the same NetConnect/RV plumbing that FC3 never reaches). The kill criterion in
+Stage D0 ("zero inbound + RV-PROBE never fires => KILL D") is met. **The only working Far Cry 3
+co-op remains mod-262 SOLO (1 human).** Do not pursue D1-D4.
