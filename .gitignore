@@ -38,3 +38,6 @@ scripts/rv_server/rv_capture*.log
 
 # rv_server harness scratch output
 scripts/rv_server/*.out
+
+# pktmon RV capture output (large binaries; may contain the owner's public IP - never commit)
+scripts/rv_capture/
