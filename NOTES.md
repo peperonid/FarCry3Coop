@@ -5970,3 +5970,21 @@ KEY RE-EXAMINATION (decisive, reframes the whole key problem): the 28f6/28f7 RV 
 NEXT (all agent-side, Ghidra + offline, NO owner run needed): locate the PRUDP RC4 key-schedule in the RV module and its static key/magic constant - trace up the send path (FUN_11214630 <- FUN_112161b0 <- ... until the function that inits RC4/sets the key from a constant + conn-id) or scan the RV OpenSSL region near MD5 (FUN_11219270) for the RC4 core; extract the static secret bytes + the exact MD5/SHA1 input layout; then compute the RC4 keys for the captured connIds and decrypt the 28f6 pcap offline to read the plaintext RV RMC (the decoded golden reference). This also directly answers whether a compatible local RV server is feasible (it just needs the same static secret + formula). mod-262 SOLO stays banked.
 
 
+
+
+### Session 28g0 - RV WIRE FORMAT decoded offline from the pcap + crypto model proven (per-connection stream cipher keyed by connId + STATIC secret; no ephemeral DH); co-op failure = message retransmitted 88x unacked
+
+Re-parsed scripts/rv_capture/rv.pcap (pcapng EPB packet data at block+28, IPv4 proto byte at offset 9 - two earlier parser bugs fixed). RV = UDP client 192.168.1.8:56235 <-> 203.132.26.146 & .143:21251, 1400 pkts. Decoded structure (empirical, all sizes 11/12/13/14/15/17/18/29/86):
+- b0..b1 magic-direction: OUT 3e 31 or 3f 31; IN 31 3e or 31 3f (byte-pair swapped per direction; not EA D0 - this is FC3's obfuscated PRUDP magic).
+- b2 = type/flags: 0x32 = reliable PAYLOAD (encrypted, the 86B ones); 0x24/0x0a/0x31/0x20 = control (low entropy; a 15B type-0x20 body is ALL ZEROS = keepalive, i.e. not everything is encrypted).
+- b3 = per-packet field that varies among retransmits (retransmit/nonce byte).
+- b4..b7 = CONNECTION IDENTIFIER, CLEARTTEXT both directions (observed 3a da dd f9 and 3a da bf db; a 3rd 8f/92 1a 87 db seen in IN packets).
+- b8 = sequence byte (increments across distinct messages, constant across retransmits).
+- b9.. = payload; LAST byte is NOT an additive/neg/len checksum (tested sum/negsum/len+sum: 0/16/1384) => the last byte is part of the ciphertext (RC4 keystream byte XOR plaintext, which is why it increments in lockstep with the seq counter).
+CRITICAL crypto findings:
+- For each connId the 86B payload is BYTE-IDENTICAL across ALL 88 packets of that connection (only b3 + offsets 19/20 [and for the other connId seq b8 + a couple] differ). => a single reliable RMC message retransmitted 88x. This is the actual failure signature: the co-op RV message is never acked by the (dead/mismatched) Ubisoft server => "servers unavailable".
+- Payload cipher = stream cipher (RC4-class), keystream CONSTANT per connection (retransmits reproduce identical ciphertext). No ~128B packets anywhere => NO ephemeral Diffie-Hellman. Confirms 28ff: static-key Quazal/RakNet PRUDP mode.
+- Tried RC4 with key = connId (LE/BE/repeated), all-zero, EA D0, connId+ead0 => no plausible plaintext (printable ratio ~0.4-0.5, no structure). => the key = f(connectionId, STATIC_GAME_SECRET). The static secret is a constant inside FC3_d3d11.dll and is NOT derivable from the pcap.
+GOLDEN-REFERENCE STATUS: the RV wire STRUCTURE is now fully decoded (this note). Full plaintext decode + a compatible local RV server require the one remaining constant: the static secret + the exact RC4 key-schedule. NEXT (agent-side, bounded): Ghidra/RE the RV module (0x11214xxx-0x1121exxx, same object as MD5 FUN_11219270 and RV WSASendTo FUN_11214630) to find the RC4 KSA and the key-input constant (the per-title magic) - the send serializer that builds the packet (computes the packet from connId + encrypts body) is the anchor; the static secret appears as an immediate/`.rdata` blob consumed by the KSA. Extract secret + key layout => decrypt pcap offline AND implement the emulator's RC4. mod-262 SOLO stays banked.
+
+
