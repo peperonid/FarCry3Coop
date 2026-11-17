@@ -13,16 +13,21 @@ if (Test-Path $shim) {
     $txt = Get-Content $shim
     $install = ($txt | Select-String -Pattern "RV-PROBE observers installed" -SimpleMatch).Count
     $probe = ($txt | Select-String -Pattern "RV-PROBE" | Where-Object { $_.Line -notmatch "observers installed" }).Count
+    $enc  = ($txt | Select-String -Pattern "shim: RV-ENC #" | Where-Object { $_.Line -match "connId=" }).Count
+    $drv  = ($txt | Select-String -Pattern "shim: RV-DRV1" | Where-Object { $_.Line -match "connId=" }).Count
     $mgr  = ($txt | Select-String -Pattern "MGR-WATCH" | Where-Object { $_.Line -notmatch "thread started" }).Count
     $login = ($txt | Select-String -Pattern "LOGIN-EV").Count
     Write-Host ""
-    Write-Host "================ REAL-LOGIN RV-PROBE RESULT ================"
+    Write-Host "================ REAL-LOGIN RV RESULT ================"
     Write-Host ("LOGIN-EV lines         : {0}" -f $login)
     Write-Host ("MGR-WATCH polls        : {0}" -f $mgr)
     Write-Host ("RV-PROBE install banner: {0}" -f $install)
     Write-Host ("RV-PROBE RUNTIME hits  : {0}" -f $probe)
-    if ($probe -ge 1) {
-        Write-Host ">>> FC3 ENTERED RendezVous on a real Ubisoft login (RV client reachable)."
+    Write-Host ("RV-ENC captures        : {0}" -f $enc)
+    Write-Host ("RV-DRV captures        : {0}" -f $drv)
+    if (($enc -ge 1) -or ($drv -ge 1) -or ($probe -ge 1)) {
+        Write-Host ">>> FC3 ENTERED RendezVous on a real Ubisoft login (RV client reachable) AND RV packets were captured."
+        Write-Host "    NOTE 28g4: RV-ENC sits at FUN_11214630, BELOW the prudps cipher - the captured buffer is already-encrypted (driver=0). The plaintext lives upstream in the Quazal packet-object layer."
     } else {
         Write-Host ">>> FC3 never entered RendezVous even with a real login (gate is above RV)."
     }
@@ -31,6 +36,16 @@ if (Test-Path $shim) {
 }
 
 foreach ($proc in @("farcry3_d3d11","farcry3")) { Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+$loader = Join-Path $Bin "uplay_r1_loader.dll"
+$real   = Join-Path $Bin "real\uplay_r1_loader.dll"
+if ((Test-Path $loader) -and (Test-Path $real) -and ((Get-Item $real).Length -ne (Get-Item $loader).Length)) {
+    # the python restore can race a lingering handle; force-clear read-only + retry a copy of the genuine loader
+    for ($i = 1; $i -le 4; $i++) {
+        try { attrib -r -a -s -h "$loader" 2>$null; Copy-Item $real $loader -Force; break } catch { Start-Sleep -Seconds 2 }
+    }
+    if ((Get-Item $real).Length -ne (Get-Item $loader).Length) { Write-Host "WARNING: loader still not restored to genuine ($( (Get-Item $loader).Length ) vs $( (Get-Item $real).Length )); a process may hold it - close Ubisoft Connect and re-run restore." }
+}
 
 $cmdPy = Get-Command python.exe -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike "*\WindowsApps\*" } | Select-Object -First 1
 if (-not $cmdPy) { $cmdPy = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
