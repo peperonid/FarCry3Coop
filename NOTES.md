@@ -5780,3 +5780,15 @@ Via the analyzed program (Ghidra + capstone), no MSVC RTTI exists for these clas
 CONCLUSION: Strategy A (swap the installed provider to the existing base provider) is RULED OUT - the base provider is an abstract default that does not implement session create/join, so swapping to it yields error stubs, worse than _RdV. There is NO working non-RV (LAN) matchmaking provider shipped in the binary. The LAN session-param schema exists (28dx) but no code path uses a non-_RdV provider to build a Storm session. R2 therefore reduces to: (B') AUTHOR a brand-new CGameMatchmakingProvider_LAN implementing the provider vtable interface + Storm create (ports 9000-9004) - substantial reverse-engineering of every provider interface method plus correct Storm session bring-up, with the same no-golden-reference risk; or (D) the full RendezVous co-op backend emulator. Both remain team-scale. The provider vtable 0x1158b458 + its singleton 0x11e684e8 + ctor 0x10786c8d give a precise place to install a custom provider once written. Env unchanged (clean mod-262, game not running).
 
 
+
+
+### Session 28dz - R2 interface spec: all 24 slots of the RdV provider vtable (0x1158b458) classified
+
+Decompiled all 24 vtable slots of `CGameMatchmakingProvider_RdV` (Ghidra DumpR2f.java -> r2f_dump.txt) + capstone for the thunks. Full bilingual spec written to docs/r2-lan-provider-interface.md (+ .ru.md). Summary:
+- Object/lifecycle boilerplate: slot0 ctor FUN_10786cc3, slot1 dtor FUN_10786e1d, slot6 member-dtor FUN_10787aee, slot7 thunk->FUN_10443193, slot21 lifecycle-forwarder FUN_113a842a(->FUN_1041f2f5).
+- Trivial/getters/stubs (can stay as shipped): slot3 getter [ecx+4]; slot4 getter [ecx+8]; slot8/9 no-op FUN_10d75d32; slot10/11 `return 0`; slot12/14 `return 1`; slot18/19 no-op; slot20 `return 0`; slot2 accessor returns &PTR_FUN_1158cc08.
+- NETWORK-SPECIFIC (the 5 a LAN provider must implement): slot5 FUN_10787949 = operation dispatch (reads session-manager *0x11e42c90 vtable+0xc; dispatches code=(arg+8)/1000 in {1,5,1000} x subtype=(arg+0x10) in {0,1,2} -> create/join/search handlers); slot13 FUN_10786f66 = async join/search-by-id (FUN_11279ae0(id=(arg+0x10), callback=&PTR_FUN_1158b460, this+0xb0/+0xb4, timeout 250)->bool); slot15 FUN_10787103 = CreateSession (builds session-desc list, FUN_107925a8(arg+0x10,list)->bool); slot16 FUN_10787745 = enumerate session results (walk list this+0xb4, state map {1->3,2->1,3->2,else 0}, fill array stride 0x1c via FUN_1077cf40); slot17 FUN_10787268 = enumerate players/slots (walk list this+0xa0, fill output stride 0x10 via FUN_10b4cbc4).
+- Events: slot22 FUN_113a84c5 add-observer (append to vector this+0x2c / count +0x30); slot23 FUN_113a8444 remove-observer (swap-remove).
+Key point: slots 5/13 use the FCX online session-manager global *0x11e42c90 (the same online-service object that gated NOTES 28dj-28dq), so B' relocates that problem into these 5 methods rather than dodging it. Recommended B' go/no-go spike: implement slots 15+13+5+22/23 minimal, install via vptr swap on singleton 0x11e684e8, check for a Storm listen session on 9000-9004. Env unchanged (clean mod-262, game not running).
+
+
