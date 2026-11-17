@@ -31,7 +31,19 @@ Start-Sleep -Seconds 2
 # 2) deploy proxy (over bin/uplay_r1_loader.dll) + copy shim; clear logs
 python -I "$Repo\scripts\deploy_proxy_only.py" deploy
 Copy-Item $ShimSrc (Join-Path $Bin "coop_shim.dll") -Force
-foreach ($f in @("coop_shim.log","uplay_api.log")) { $p = Join-Path $Bin $f; if (Test-Path $p) { Set-Content -Path $p -Value "" } }
+
+# VERIFY the proxy actually landed (size must equal the built proxy, else the seam is wrong/copy failed)
+$ProxySrc = Join-Path $Repo "src\uplay_proxy\uplay_r1_loader.dll"
+$BinLoader = Join-Path $Bin "uplay_r1_loader.dll"
+$want = (Get-Item $ProxySrc).Length; $got = (Get-Item $BinLoader).Length
+Write-Host ("[verify] bin/uplay_r1_loader.dll size {0} (proxy is {1})" -f $got, $want)
+if ($got -ne $want) { throw "DEPLOY FAILED: bin loader is $got bytes, expected proxy $want. Not launching (logs would be misleading)." }
+$WantShim = (Get-Item $ShimSrc).Length; $GotShim = (Get-Item (Join-Path $Bin "coop_shim.dll")).Length
+Write-Host ("[verify] bin/coop_shim.dll size {0} (built {1})" -f $GotShim, $WantShim)
+if ($GotShim -ne $WantShim) { throw "SHIM COPY FAILED: $GotShim != $WantShim." }
+
+# force-create the logs so MISSING (never loaded) is distinguishable from EMPTY (loaded, silent)
+foreach ($f in @("coop_shim.log","uplay_api.log")) { Set-Content -Path (Join-Path $Bin $f) -Value ("# cleared " + (Get-Date -Format HH:mm:ss)) }
 foreach ($f in @("rv_capture.log","config_server.out","rv_server.out")) { $p = Join-Path $RvDir $f; if (Test-Path $p) { Set-Content -Path $p -Value "" } }
 
 # 3) start rv_server (:50000) + config_server (:80, advertises SandboxUrl -> prudp://127.0.0.1:50000)
@@ -50,6 +62,19 @@ $env:FC3COOP_RV_PROBE    = "1"   # log every RV connect/send attempt in the 0x11
 $env:FC3COOP_MGR_WATCH   = "1"   # poll the online session-manager global DAT_11e42c90 / RV sub-object this+0x110
 # deliberately NOT setting FC3COOP_FAKE_ONLINE (it suppresses the net engine - NOTES 28di)
 Start-Process -FilePath (Join-Path $Bin "farcry3_d3d11.exe") -ArgumentList @("-skipintro","-quickstartup")
+
+# ENGAGEMENT CHECK: give the loader+shim a moment to load, then report whether the harness is live
+# BEFORE touching the UI. If these are 0, the proxy/shim did not load and the run is INCONCLUSIVE.
+Start-Sleep -Seconds 15
+$alive = Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue
+$apiSz = (Get-Item (Join-Path $Bin "uplay_api.log")).Length
+$shimSz = (Get-Item (Join-Path $Bin "coop_shim.log")).Length
+Write-Host ""
+Write-Host "[engagement] game process : $(if ($alive) {'RUNNING pid '+$alive.Id} else {'NOT RUNNING'})"
+Write-Host ("[engagement] uplay_api.log bytes  : {0}  (>11 => proxy LOADED and logging)" -f $apiSz)
+Write-Host ("[engagement] coop_shim.log bytes  : {0}  (>11 => shim LOADED)" -f $shimSz)
+if (-not $alive) { Write-Host "[engagement] WARNING: game not running - it exited; capture is INCONCLUSIVE." }
+if ($shimSz -le 11) { Write-Host "[engagement] WARNING: shim not logging - RV-PROBE/MGR_WATCH will be silent. Do NOT read a FAIL verdict until this is >11." }
 
 Write-Host ""
 Write-Host "== D0 harness up =="
