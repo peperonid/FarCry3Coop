@@ -115,3 +115,16 @@ The co-op "connecting to servers" wait is gated upstream of RendezVous on the FC
 party-session state, so there is no RV traffic for any local emulator to serve. **Strategy D is dead;
 Strategy B' (LAN provider) shares the same NetConnect/RV gate and is dead too.** This closes every
 multi-human route. **The only working Far Cry 3 co-op remains mod-262 SOLO (1 human).**
+
+
+## UPDATE 2026-11-17 (NOTES 28f5) - the D0 "FAIL / D dead" above is SUPERSEDED
+
+The D0 FAIL (28f0) used FAKE credentials. A control on a clean 1.05 with a REAL Ubisoft Connect
+login (run_d0_reallogin.ps1) showed the FC3 RendezVous client FIRES: RV-PROBE hit 17 times on
+RV WSASendTo (FUN_11214630) while attempting Co-op. So FC3 DOES dial RendezVous when the login is
+genuine - the "gate is above RV / D is dead" reading was an artifact of the fake login. Strategy D /
+A2 (local RendezVous emulator) is REOPENED: the next step is to capture the real RV handshake
+(redirect the RV destination to rv_server under a real login) to obtain the golden reference traffic.
+Risks unchanged: prudps crypto, full RV service replies, and the separate high-level Ubisoft party/
+matchmaking layer. Netstat watch (28f2/28f4) only saw gconnect:80 (web) because it cannot see the
+RV UDP; the in-process RV-PROBE does, and it is positive.
