@@ -128,3 +128,16 @@ A2 (local RendezVous emulator) is REOPENED: the next step is to capture the real
 Risks unchanged: prudps crypto, full RV service replies, and the separate high-level Ubisoft party/
 matchmaking layer. Netstat watch (28f2/28f4) only saw gconnect:80 (web) because it cannot see the
 RV UDP; the in-process RV-PROBE does, and it is positive.
+
+
+## UPDATE 2026-11-17 (NOTES 28f7) - golden RV reference OBTAINED (was the last blocker)
+
+The pktmon capture of a genuine-login Co-op attempt captured FC3 dialing Ubisoft's real RendezVous
+servers: lb-rdv-as-prod01.ubisoft.com:21251 and ne1-z3-as-rdv04.ubisoft.com:21251, and the RV server
+REPLIES (transport alive). Transport is prudps-secured Quazal RV (header: magic-pair + cleartext
+connectionId + seq + RC4/HMAC body + checksum), NOT plain PRUDP v1. So the old "no golden RV reference"
+killer risk is partly lifted: we now have real RV vectors both ways (scripts/rv_capture/, gitignored).
+Decisive next steps: (A) offline RE the FC3 prudps key exchange (Ghidra 0x112xxxxx) to decrypt the
+captured payloads and read the real RV methods; (B) hosts-redirect lb-rdv-*.ubisoft.com -> rv_server and
+replay the captured handshake to see if the client advances. A2 feasibility now rests on prudps key
+derivation, not on "we will never see the traffic".
