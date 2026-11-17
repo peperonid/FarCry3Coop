@@ -75,4 +75,5 @@ Write-Host "VERDICT: any 'RV-PROBE' RUNTIME hit during Co-op => FC3 enters Rende
 Write-Host "         'RV-ENC' lines = each RV packet buffer BEFORE and AFTER the driver encrypts it."
 Write-Host "         RV-ENC ... payload_changed=1 => the PRE/POST pair is a plaintext/ciphertext pair => the RC4 keystream = pt^ct (NO secret)."
 Write-Host "         RV-ENC ... payload_changed=0 => the driver encrypts a copy; the RV-DRV10/RV-DRV1C lines (driver-vtable swap, armed automatically) are the fallback plaintext view at the driver boundary - the extractor pairs them with the captured pcap ciphertext."
+Write-Host "         RV-PKT / RV-PKT4 = the UPSTREAM Quazal packet-object serialize capture (NOTES 28g5): RV-PKT4 payload_changed=1 => the +0x4 serialize method is the cipher and its PRE dump is the PLAINTEXT."
 Write-Host "         Either way send the coop_shim.log; scripts/rv_capture/rv_enc_extract.py <log> --apply scripts/rv_capture/rv.pcap recovers the keystream + decrypts offline."

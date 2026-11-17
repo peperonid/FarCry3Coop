@@ -915,6 +915,90 @@ static void rv_drv_hook_resolve(void* thisp) {
   } __except (EXCEPTION_EXECUTE_HANDLER) { logLock(); LOGF("shim: RV-DRV resolve fault"); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); }
 }
 
+// ---- NOTES 28g5: Quazal packet-OBJECT serialize capture (the upstream plaintext hunt; NOTES 28g4 found RV-ENC is
+// below the cipher). FUN_112161b0 (one of the two FUN_11214630 callers) is `__thiscall(this, packetObject, p3)`:
+// it calls the packet object's vtable method +0x4 `(**(code**)(*obj + 4))()` then FUN_11214630(obj[2]=buf, obj[3]=len).
+// Packet-object layout: vptr@0, [2]=buffer ptr (+8), [3]=length (+0xc), [4]=capacity (+0x10). We (a) install an
+// inline observer on FUN_112161b0 that dumps the object buffer at entry (the plaintext candidate) and on exit, and
+// (b) SWAP the object's vtable slot +0x4 (resolved at runtime from *obj) with a capture stub that dumps the same
+// buffer before/after the serialize method runs. If the prudps cipher is applied inside that +0x4 method, its PRE is
+// the plaintext and the pair yields the keystream; if entry is already ciphertext we still learn where it turns over.
+// All read-only (one call to each original, return value passed through); vtable swap needs no instruction relocation.
+typedef int (__thiscall *pkt_send_t)(void* thisp, void* obj, int p3);
+typedef int (__thiscall *pkt_v4_t)(void* obj);
+static uintptr_t g_rv_pkt_tr = 0;          // FUN_112161b0 trampoline
+static uintptr_t g_pkt4_orig = 0;           // original packet-object vtable +0x4
+static volatile LONG g_pkt4_hooked = 0;     // once flag for the vtable swap
+static volatile LONG g_pkt_logged = 0, g_pkt4_logged = 0;
+#define RV_PKT_DUMP_CAP 80
+static int __cdecl rv_pkt_v4_work(void* obj, uintptr_t orig) {
+  int r = -1; LONG idx = InterlockedIncrement(&g_pkt4_logged); int do_log = (idx <= RV_PKT_DUMP_CAP); unsigned s0 = 0;
+  __try {
+    unsigned char* b = 0; int len = 0;
+    if (obj) { b = *(unsigned char**)((char*)obj + 8); len = *(volatile int*)((char*)obj + 0xc); }
+    int ok = (b && len > 8 && len < 65536);
+    if (do_log && ok) { s0 = rv_enc_sum(b, len); unsigned cid = (unsigned)*(volatile int*)(b + 4);
+      logLock(); LOGF("shim: RV-PKT4 #%ld obj=%p len=%d connId=%08x (serialize +0x4)", idx, obj, len, cid); rv_enc_dump("PRE(serialize)", b, len); logUnlock(); }
+    if (orig) r = ((pkt_v4_t)orig)(obj);
+    if (do_log && ok) {
+      unsigned s1 = rv_enc_sum(b, len); int changed = (s0 != s1);
+      logLock(); LOGF("shim: RV-PKT4 #%ld POST rc=%d payload_changed=%d%s", idx, r, changed, changed ? "  <== cipher applied INSIDE the serialize method: PRE here is the plaintext" : ""); rv_enc_dump("POST(serialize)", b, len); logUnlock();
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-PKT4 #%ld fault", idx); }
+  return r;
+}
+__declspec(naked) static void rv_pkt_v4_repl(void){ __asm {   // vtable +0x4 called as (**(obj)+4)() : ECX=obj, 0 stack args
+  push dword ptr [g_pkt4_orig]
+  push ecx
+  call rv_pkt_v4_work
+  add  esp, 8
+  ret
+} }
+static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
+  int rc = -1; LONG idx = InterlockedIncrement(&g_pkt_logged); int do_log = (idx <= RV_PKT_DUMP_CAP); unsigned s0 = 0;
+  __try {
+    unsigned char* b = 0; int len = 0;
+    if (obj) { b = *(unsigned char**)((char*)obj + 8); len = *(volatile int*)((char*)obj + 0xc); }
+    int ok = (b && len > 8 && len < 65536);
+    if (do_log && ok) { s0 = rv_enc_sum(b, len); unsigned cid = (unsigned)*(volatile int*)(b + 4);
+      logLock(); LOGF("shim: RV-PKT #%ld obj=%p vtbl=%p len=%d connId=%08x", idx, obj, *(void**)obj, len, cid); rv_enc_dump("PRE(obj@entry)", b, len); logUnlock(); }
+    if (do_log && obj) {   // arm the +0x4 wrap (once) before invoking the original, so THIS send's serialize is captured
+      uintptr_t vptr = *(volatile uintptr_t*)obj;
+      if (InterlockedCompareExchange(&g_pkt4_hooked, 1, 0) == 0) {
+        if (vptr >= g_mod && vptr < g_mod + g_imgsize) {
+          DWORD old; uintptr_t m4 = *(volatile uintptr_t*)(vptr + 4);
+          logLock(); LOGF("shim: RV-PKT obj vtbl=0x%08x slot4=0x%08x (rva 0x%x) inmod=%d", (uint32_t)vptr, (uint32_t)m4, (uint32_t)(m4 - g_mod), (m4 >= g_mod && m4 < g_mod + g_imgsize) ? 1 : 0); logUnlock();
+          if (m4 >= g_mod && m4 < g_mod + g_imgsize && VirtualProtect((void*)(vptr + 4), 4, PAGE_READWRITE, &old)) {
+            g_pkt4_orig = m4; *(volatile uintptr_t*)(vptr + 4) = (uintptr_t)&rv_pkt_v4_repl;
+            VirtualProtect((void*)(vptr + 4), 4, old, &old);
+          } else { logLock(); LOGF("shim: RV-PKT slot4 swap skipped"); logUnlock(); }
+        } else { InterlockedExchange(&g_pkt4_hooked, 0); logLock(); LOGF("shim: RV-PKT obj vtbl 0x%08x outside module - retry", (uint32_t)vptr); logUnlock(); }
+      }
+    }
+    if (g_rv_pkt_tr) rc = ((pkt_send_t)g_rv_pkt_tr)(thisp, obj, p3);
+    if (do_log && ok) {
+      unsigned s1 = rv_enc_sum(b, len); int changed = (s0 != s1);
+      logLock(); LOGF("shim: RV-PKT #%ld POST rc=%d payload_changed=%d", idx, rc, changed); rv_enc_dump("POST(obj@exit)", b, len); logUnlock();
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-PKT #%ld fault rc=%d", idx, rc); }
+  return rc;
+}
+__declspec(naked) static void hk_rv_pkt(void){ __asm {   // FUN_112161b0 is thiscall: ECX=this, [ebp+8]=obj, [ebp+0xc]=p3
+  push ebp
+  mov  ebp, esp
+  push dword ptr [ebp+0x0c]
+  push dword ptr [ebp+0x08]
+  push ecx
+  call rv_pkt_capture
+  add  esp, 12
+  pop  ebp
+  ret  8
+} }
+static void install_rv_pkt(void){
+  int rc = install_rv_observer(0x012161b0u, (void*)hk_rv_pkt, &g_rv_pkt_tr, "rv_pkt_send");   // FUN_112161b0 (prologue 55 8B EC verified)
+  LOGF("shim: RV-PKT capture install rc=%d (FUN_112161b0 RVA 0x012161b0). Do Co-op -> Host w/ real login; read RV-PKT / RV-PKT4 lines: RV-PKT4 payload_changed=1 means the serialize +0x4 method is the cipher and its PRE dump is the PLAINTEXT (=> keystream = PRE^POST, no secret).");
+}
+
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
 // Co-op "connecting to servers" hang is blocked on the manager still being NULL (auth/session never established).
 static volatile unsigned g_last_mgr = 0xFFFFFFFFu;
@@ -979,6 +1063,7 @@ static void init(void) {
   if (g_rv_probe) install_rv_probe();           // independent observer: works in any mode (NOTES 28dn)
   if (g_rv_md5) install_rv_md5();               // independent read-only key-derivation observer (NOTES 28fd)
   if (g_rv_enc) install_rv_enc();               // independent read-only plaintext/ciphertext capture (NOTES 28g2)
+  if (g_rv_enc) install_rv_pkt();               // upstream Quazal packet-object serialize capture (NOTES 28g5)
   if (g_mgr_watch) { HANDLE mh = CreateThread(0, 0, mgr_watch_thread, 0, 0, 0); LOGF("shim: MGR_WATCH thread started h=%p (watch MGR-WATCH lines while doing Co-op -> Host)", (void*)mh); }
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block();
     if (g_online_on) { __try { *(volatile unsigned char*)VA(RVA_online_flag_global) = 1; LOGF("shim: ONLINE_ON set DAT_11f07e48=1 (try to enqueue RV connect)"); } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: ONLINE_ON set fault"); } }
