@@ -102,3 +102,15 @@ matchmaking + session + последующий RV login) - большой отд
 shim/proxy остаются в репо как задел под этот проект.
 
 См. также: docs/ubisoft-coop-emulation-recon.ru.md (картина open-source эмуляторов Ubisoft/Quazal online + объём/риск эмуляции co-op-бэкенда FC3, 28ds-28dt).
+
+
+## Обновление 2026-11-17 (NOTES 28f0) - Стратегия D проверена вживую и ЗАКРЫТА
+
+Последний открытый маршрут, Стратегия D (локальный эмулятор RendezVous/NetConnect), проверен от начала
+до конца через эксперимент этапа D0 (scripts/run_d0.ps1). Когда харнесс заведомо жив (прокси + шим живы,
+FCX login залип на LoggingInSucceeded, менеджер сессий non-null, DNS-redirect конфига активен), FC3 сделала
+**ноль** попыток RendezVous (RV-PROBE в рантайме 0, rv_capture 0 пакетов, нет SetGameSession/CreateSession).
+Ожидание co-op «connecting to servers» гейтится ВЫШЕ RendezVous на состоянии FCX online-service /
+party-session, поэтому локальному эмулятору просто нечего обслуживать. **Стратегия D мертва; Стратегия B'
+(LAN-провайдер) делит тот же NetConnect/RV-гейт и тоже мертва.** Это закрывает все multi-human маршруты.
+**Единственный рабочий Far Cry 3 co-op остаётся mod-262 SOLO (1 человек).**

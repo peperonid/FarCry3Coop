@@ -103,3 +103,15 @@ The RV/PRUDP tooling (codec, rv_server handshake, config_server, getaddrinfo DNS
 shim/proxy experiment flags remain committed as the groundwork for that project.
 
 See also: docs/ubisoft-coop-emulation-recon.md (open-source Ubisoft/Quazal online emulator landscape + FC3 co-op-backend emulation effort/risk, 28ds-28dt).
+
+
+## Update 2026-11-17 (NOTES 28f0) - Strategy D live-tested and CLOSED
+
+The last open route, Strategy D (local RendezVous/NetConnect emulator), was tested end-to-end via the
+Stage D0 capture experiment (scripts/run_d0.ps1). With the harness provably engaged (proxy + shim live,
+FCX login stuck at LoggingInSucceeded, session-manager non-null, config DNS-redirect active), FC3 made
+**zero** RendezVous attempts (RV-PROBE runtime 0, rv_capture 0 packets, no SetGameSession/CreateSession).
+The co-op "connecting to servers" wait is gated upstream of RendezVous on the FCX online-service /
+party-session state, so there is no RV traffic for any local emulator to serve. **Strategy D is dead;
+Strategy B' (LAN provider) shares the same NetConnect/RV gate and is dead too.** This closes every
+multi-human route. **The only working Far Cry 3 co-op remains mod-262 SOLO (1 human).**
