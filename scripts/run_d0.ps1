@@ -24,18 +24,33 @@ $ShimSrc = Join-Path $Repo "src\coop_shim\coop_shim.dll"
 
 if (-not (Test-Path $ShimSrc)) { throw "shim not built: $ShimSrc (run scripts\deploy_coop_shim.bat or build first)" }
 
-# 1) stop any running game
-Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# 1) stop any running game (both the launcher farcry3.exe and the renderer farcry3_d3d11.exe; the
+#    running process maps bin/uplay_r1_loader.dll and locks it, which makes deploy's copy fail)
+foreach ($proc in @("farcry3_d3d11","farcry3")) {
+    Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+}
 Start-Sleep -Seconds 2
 
-# 2) deploy proxy (over bin/uplay_r1_loader.dll) + copy shim; clear logs
-python -I "$Repo\scripts\deploy_proxy_only.py" deploy
-Copy-Item $ShimSrc (Join-Path $Bin "coop_shim.dll") -Force
-
-# VERIFY the proxy actually landed (size must equal the built proxy, else the seam is wrong/copy failed)
+# 2) deploy proxy (over bin/uplay_r1_loader.dll) + copy shim. Retry: a lingering game process can hold
+#    the DLL for a few seconds after kill, so loop until the size matches the built proxy.
 $ProxySrc = Join-Path $Repo "src\uplay_proxy\uplay_r1_loader.dll"
 $BinLoader = Join-Path $Bin "uplay_r1_loader.dll"
-$want = (Get-Item $ProxySrc).Length; $got = (Get-Item $BinLoader).Length
+$want = (Get-Item $ProxySrc).Length
+$landed = $false
+for ($i = 1; $i -le 6; $i++) {
+    python -I "$Repo\scripts\deploy_proxy_only.py" deploy | Out-Null
+    if ((Test-Path $BinLoader) -and ((Get-Item $BinLoader).Length -eq $want)) { $landed = $true; break }
+    Write-Host ("[retry] deploy attempt {0}: loader still {1} bytes; killing any game and retrying in 3s" -f $i, ((Get-Item $BinLoader -ErrorAction SilentlyContinue).Length))
+    foreach ($proc in @("farcry3_d3d11","farcry3")) { Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 3
+}
+if (-not $landed) {
+    throw ("DEPLOY FAILED after retries: bin/uplay_r1_loader.dll is not the proxy ($want bytes). A process is still holding it - FULLY close the game AND Ubisoft Connect, then re-run.")
+}
+Copy-Item $ShimSrc (Join-Path $Bin "coop_shim.dll") -Force
+
+# VERIFY sizes landed
+$got = (Get-Item $BinLoader).Length
 Write-Host ("[verify] bin/uplay_r1_loader.dll size {0} (proxy is {1})" -f $got, $want)
 if ($got -ne $want) { throw "DEPLOY FAILED: bin loader is $got bytes, expected proxy $want. Not launching (logs would be misleading)." }
 $WantShim = (Get-Item $ShimSrc).Length; $GotShim = (Get-Item (Join-Path $Bin "coop_shim.dll")).Length
