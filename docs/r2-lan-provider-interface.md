@@ -68,3 +68,14 @@ and object lifecycle 0/1/6/7/21). Slots 3,4,8,9,10,11,12,14,18,19,20 can stay as
   against our own reconstruction. Recommend a single spike: implement slots 15+13+5+22/23 minimal, install via
   vptr swap on singleton 0x11e684e8, and check whether a Storm listen session appears on 9000-9004 — that is the
   go/no-go for the whole B' route.
+
+
+## Addendum (28ea): slot 15/13 bottom out in the RV/NetConnect RPC client - no direct Storm create
+
+Slot 15 create (FUN_10787103 -> FUN_107925a8) and slot 13 search (FUN_10786f66 -> FUN_11279ae0) do NOT reach a
+plain Storm session-create: the bodies are the NetConnect/RendezVous RPC client (FUN_11258f20 issues the RV create;
+FUN_11279920 the RV search). The offline storm::echo LAN layer (storm::echo::lan DiscoveredSession /
+SetDiscoveryHandler / BroadcastLanDiscovery2, the thing that formed the UDP:9000 session in NOTES 28do) exists but
+is a stripped library reached via event-registration thunks, not named callables. So B' cannot just swap in one
+call: it must either reimplement over the storm::echo NetLayer vtable/event ABI, or route the RV RPC to a local
+RendezVous server (Strategy D). B' and D converge on the same NetConnect/RV plumbing work.

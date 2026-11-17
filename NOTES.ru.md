@@ -5489,3 +5489,15 @@ PR #1 (peperonid: pr/coop-recon) в Bantila/FarCry3Coop ЗАМЕРДЖЕН Banti
 Ключ: слоты 5/13 используют онлайн-менеджер сессий FCX *0x11e42c90 (тот же объект online-service, гейтивший NOTES 28dj-28dq), поэтому B' переносит эту проблему в эти 5 методов, а не отменяет её. Рекомендованный go/no-go спайк B': реализовать минимально 15+13+5+22/23, установить через подмену vptr на синглтоне 0x11e684e8, проверить появление Storm listen-сессии на 9000-9004. Окружение не менялось (чистый mod-262, игра не запущена).
 
 
+
+
+### Сессия 28ea - R2 до низа create/search: что реально вызывают слот 15 (create) и слот 13 (search)
+
+Декомпилированы две сетевые точки входа провайдера (Ghidra DumpR2g.java -> r2g_dump.txt; DumpR2h.java -> r2h_dump.txt):
+- Слот 15 create -> FUN_107925a8: берёт сервис через FUN_10433465, дальше всё тело это RPC-клиент NetConnect/RendezVous (блок 0x112xxxxx, тот же регион, что prudps URI-билдеры / WSASendTo из 28cq): FUN_1122ad00, FUN_112550d0, FUN_112561c0 (сборка запроса), FUN_11254fd0, FUN_11258cd0, FUN_11254df0, финальный FUN_11258f20(param_2, req) = отправить RV create-запрос; FUN_11212700 unlock. НИ ОДНОЙ ветки в LAN/Storm-direct create.
+- Слот 13 search -> FUN_11279ae0: tail-call FUN_11279920 (тоже блок NetConnect/RV). RV rendezvous-поиск, ветки LAN нет.
+- Слой storm::echo LAN, который в 28do реально сформировал офлайн UDP:9000-сессию, существует (строки storm::echo::lan::outEvent::DiscoveredSession 0x1165f5f0, inEvent::SetDiscoveryHandler 0x1165fd18, BroadcastLanDiscovery2 0x11660a2d), но это БИБЛИОТЕКА, достижимая только через thunk-регистрацию событий (напр. FUN_10e5efc0 регистрирует событие SetDiscoveryHandler); у её методов нет именованных вызываемых точек входа, а строки CreateSession/StartSession/CreateSessionOperation (0x1157e2b0/0x115c0a9c/0x115967d8) имеют НОЛЬ код-ссылок (strip-библиотека).
+
+ОТВЕТ на цель: готового вызываемого не-RV Storm session-create под провайдером НЕТ. Create/search провайдера намертво вшиты в RPC-клиент RV/NetConnect (FUN_11258f20 / FUN_11279920). Поэтому B' LAN-провайдер обязан либо (a) переписать поверх vtable/event ABI storm::echo NetLayer (недокументирован; офлайн UDP:9000 хост доказывает, что примитив есть, но не вызывается по имени напрямую), либо (b) оставить RV RPC-путь, но направить его на ЛОКАЛЬНЫЙ RendezVous-сервер (это Стратегия D). B' и D таким образом сходятся к одной и той же работе: управлять или эмулировать слой NetConnect/RendezVous. Итог не изменился: единственный рабочий FC3 co-op = mod-262 SOLO. Окружение не менялось (чистый mod-262, игра не запущена).
+
+

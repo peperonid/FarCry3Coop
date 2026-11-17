@@ -5792,3 +5792,15 @@ Decompiled all 24 vtable slots of `CGameMatchmakingProvider_RdV` (Ghidra DumpR2f
 Key point: slots 5/13 use the FCX online session-manager global *0x11e42c90 (the same online-service object that gated NOTES 28dj-28dq), so B' relocates that problem into these 5 methods rather than dodging it. Recommended B' go/no-go spike: implement slots 15+13+5+22/23 minimal, install via vptr swap on singleton 0x11e684e8, check for a Storm listen session on 9000-9004. Env unchanged (clean mod-262, game not running).
 
 
+
+
+### Session 28ea - R2 create/search bottom-out: what slot 15 (create) and slot 13 (search) actually call
+
+Decompiled the two provider network entry points (Ghidra DumpR2g.java -> r2g_dump.txt; DumpR2h.java -> r2h_dump.txt):
+- Slot 15 create -> FUN_107925a8: gets a service via FUN_10433465, then the whole body is the NetConnect/RendezVous RPC client (0x112xxxxx block, same region as the prudps URI builders / WSASendTo from 28cq): FUN_1122ad00, FUN_112550d0, FUN_112561c0 (build request), FUN_11254fd0, FUN_11258cd0, FUN_11254df0, final FUN_11258f20(param_2, req) = issue the RV create request; FUN_11212700 unlock. NO branch to any LAN/Storm-direct create.
+- Slot 13 search -> FUN_11279ae0: tail-calls FUN_11279920 (also the NetConnect/RV block). RV rendezvous search, no LAN branch.
+- The storm::echo LAN layer that DID form the offline UDP:9000 session in 28do exists (strings storm::echo::lan::outEvent::DiscoveredSession 0x1165f5f0, inEvent::SetDiscoveryHandler 0x1165fd18, BroadcastLanDiscovery2 0x11660a2d) but is a LIBRARY reached only via event-registration thunks (e.g. FUN_10e5efc0 registers the SetDiscoveryHandler event); its methods have no named callable entry points, and the CreateSession/StartSession/CreateSessionOperation strings (0x1157e2b0/0x115c0a9c/0x115967d8) have ZERO code xrefs (stripped library).
+
+ANSWER to the goal: there is NO ready-to-call non-RV Storm session-create beneath the provider. The provider create/search are hard-wired into the RV/NetConnect RPC client (FUN_11258f20 / FUN_11279920). A B' LAN provider must therefore either (a) reimplement over the storm::echo NetLayer vtable/event ABI (undocumented; the offline UDP:9000 host proves the primitive exists but is not directly callable by name), or (b) keep the RV RPC path but point it at a LOCAL RendezVous server (that is Strategy D). B' and D thus converge on the same underlying work: drive or emulate the NetConnect/RendezVous layer. Net conclusion unchanged: only working FC3 co-op = mod-262 SOLO. Env unchanged (clean mod-262, game not running).
+
+

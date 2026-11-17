@@ -68,3 +68,14 @@
   валидируется против нашей собственной реконструкции. Рекомендован один спайк: реализовать минимально
   15+13+5+22/23, установить через подмену vptr на синглтоне 0x11e684e8, и проверить, появится ли Storm
   listen-сессия на 9000-9004 - это и есть go/no-go для всего пути B'.
+
+
+## Дополнение (28ea): слоты 15/13 уходят в RPC-клиент RV/NetConnect - прямого Storm-create нет
+
+Слот 15 create (FUN_10787103 -> FUN_107925a8) и слот 13 search (FUN_10786f66 -> FUN_11279ae0) НЕ попадают в
+обычный Storm session-create: их тела это RPC-клиент NetConnect/RendezVous (FUN_11258f20 отправляет RV create;
+FUN_11279920 RV search). Офлайн слой storm::echo LAN (storm::echo::lan DiscoveredSession / SetDiscoveryHandler /
+BroadcastLanDiscovery2 - то, что сформировало UDP:9000-сессию в NOTES 28do) существует, но это strip-библиотека,
+достижимая через thunk-регистрацию событий, а не именуемыми вызовами. Значит B' не может просто подставить один
+вызов: нужно либо переписать поверх vtable/event ABI storm::echo NetLayer, либо направить RV RPC на локальный
+RendezVous-сервер (Стратегия D). B' и D сходятся к одной работе с NetConnect/RV.
