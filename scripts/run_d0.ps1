@@ -24,6 +24,17 @@ $ShimSrc = Join-Path $Repo "src\coop_shim\coop_shim.dll"
 
 if (-not (Test-Path $ShimSrc)) { throw "shim not built: $ShimSrc (run scripts\deploy_coop_shim.bat or build first)" }
 
+# Resolve a REAL python.exe. Elevation can put C:\Windows\system32 on PATH where a stray `python`
+# document (no extension) shadows the interpreter; Get-Command python.exe avoids that, and we verify
+# it actually runs before using it for the deploy.
+$cmdPy = Get-Command python.exe -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike "*\WindowsApps\*" } | Select-Object -First 1
+if (-not $cmdPy) { $cmdPy = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+if (-not $cmdPy) { throw "python.exe not found on PATH (run from a normal shell or ensure Python is installed for this user)" }
+$Py = $cmdPy.Source
+& $Py --version | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "python at $Py did not run (--version failed)" }
+Write-Host ("[env] using python: {0}" -f $Py)
+
 # 1) stop any running game (both the launcher farcry3.exe and the renderer farcry3_d3d11.exe; the
 #    running process maps bin/uplay_r1_loader.dll and locks it, which makes deploy's copy fail)
 foreach ($proc in @("farcry3_d3d11","farcry3")) {
@@ -38,7 +49,7 @@ $BinLoader = Join-Path $Bin "uplay_r1_loader.dll"
 $want = (Get-Item $ProxySrc).Length
 $landed = $false
 for ($i = 1; $i -le 6; $i++) {
-    python -I "$Repo\scripts\deploy_proxy_only.py" deploy | Out-Null
+    & $Py -I "$Repo\scripts\deploy_proxy_only.py" deploy
     if ((Test-Path $BinLoader) -and ((Get-Item $BinLoader).Length -eq $want)) { $landed = $true; break }
     Write-Host ("[retry] deploy attempt {0}: loader still {1} bytes; killing any game and retrying in 3s" -f $i, ((Get-Item $BinLoader -ErrorAction SilentlyContinue).Length))
     foreach ($proc in @("farcry3_d3d11","farcry3")) { Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
@@ -62,8 +73,8 @@ foreach ($f in @("coop_shim.log","uplay_api.log")) { Set-Content -Path (Join-Pat
 foreach ($f in @("rv_capture.log","config_server.out","rv_server.out")) { $p = Join-Path $RvDir $f; if (Test-Path $p) { Set-Content -Path $p -Value "" } }
 
 # 3) start rv_server (:50000) + config_server (:80, advertises SandboxUrl -> prudp://127.0.0.1:50000)
-Start-Process -FilePath "python" -ArgumentList @("-I","rv_server.py","--host","127.0.0.1","--port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden
-Start-Process -FilePath "python" -ArgumentList @("-I","config_server.py","--host","0.0.0.0","--port","80","--rv-port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden
+Start-Process -FilePath $Py -ArgumentList @("-I","rv_server.py","--host","127.0.0.1","--port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden
+Start-Process -FilePath $Py -ArgumentList @("-I","config_server.py","--host","0.0.0.0","--port","80","--rv-port","50000") -WorkingDirectory $RvDir -WindowStyle Hidden
 Start-Sleep -Seconds 2
 
 # 4) launch the game NET-ON (NO FAKE_ONLINE) with RV + manager observers on

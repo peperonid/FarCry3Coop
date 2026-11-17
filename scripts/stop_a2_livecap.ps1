@@ -7,6 +7,10 @@ $Repo = Split-Path -Parent $PSScriptRoot
 $Game = if ($env:GAME_DIR) { $env:GAME_DIR } else { "H:\FarCryCoop\TestFC3_105" }
 $Bin  = Join-Path $Game "bin"
 
+$cmdPy = Get-Command python.exe -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike "*\WindowsApps\*" } | Select-Object -First 1
+if (-not $cmdPy) { $cmdPy = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+$Py = if ($cmdPy) { $cmdPy.Source } else { "python" }
+
 taskkill /F /IM farcry3_d3d11.exe 2>$null | Out-Null
 
 # kill python processes that own :80 and :50000
@@ -19,6 +23,6 @@ foreach ($line in $netstat) {
     }
 }
 
-python -I "$Repo\scripts\deploy_proxy_only.py" restore
+& $Py -I "$Repo\scripts\deploy_proxy_only.py" restore
 Remove-Item (Join-Path $Bin "coop_shim.dll") -Force -ErrorAction SilentlyContinue
 Write-Host "Stopped and rolled back to clean mod-262 (proxy removed, shim removed, servers killed)."
