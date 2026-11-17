@@ -230,3 +230,5 @@ Run from an **elevated** PowerShell (config_server binds :80).
 | `run_a2_livecap.ps1` | Earlier net-on RV/LAN capture (same recipe, without RV-PROBE/MGR_WATCH). |
 | `stop_a2_livecap.ps1` | Teardown for both: kills game + servers (:80,:50000), removes shim, restores clean mod-262 loader. |
 | `run_a2_rvcapture.bat` | Older one-shot (rv_server + config_server + hosts step). |
+
+| `d0_reallogin_watch.ps1` | PASSIVE control: with a GENUINE Ubisoft Connect login (no mods, no proxy/shim) on the real install, watches farcry3_d3d11 outbound connections for any non-LAN (Ubisoft) remote during Co-op->Host. Answers the one untested variable: does FC3 dial RV/lobby at all when the login is real? (public remote => RV client reachable, only the backend is dead; none => gate is above RV.) Read-only, no admin. Log: `d0_reallogin_watch.log`. |
