@@ -155,3 +155,16 @@ GO/NO-GO: GO (qualified). The non-RV seam exists and the LAN param schema is fir
 prove the base provider builds a Storm LAN session. NEXT = R2-1b: (1) find where the game constructs
 and installs `CGameMatchmakingProvider_RdV` (swap to base `CGameMatchmakingProvider`), (2) decompile
 the base `CSessionCreateOperation::Execute` and confirm it opens a Storm session on ports 9000-9004.
+
+
+## 7. R2-1b RESULTS (session 28dy) - Strategy A RULED OUT
+
+Provider install + both vtables found. Constructors write provider vtables: BASE CGameMatchmakingProvider ctor
+FUN_1077ac7e writes 0x11589198 (base vtable); CGameMatchmakingProvider_RdV ctor 0x10786c8d writes 0x1158b458
+(RdV vtable, at 0x10786c94); RdV singleton 0x11e684e8 built by provider-init 0x10786c5c which registers the
+base provider then layers RdV via FUN_1008bf50. Swap point = patch 0x10786c94 (or runtime vptr swap of
+0x11e684e8). BUT the base provider vtable 0x11589198 virtuals are ABSTRACT STUBS (return 0x12/0x3e/0x3f/1,
+empty dtors); create/join not implemented. => Strategy A dead: swapping to base gives error stubs. There is NO
+working non-RV provider in the binary. R2 now = (B') author a new LAN provider implementing the full provider
+vtable interface + Storm create, or (D) full RendezVous emulator. Custom-provider install anchor: vtable
+0x1158b458 / singleton 0x11e684e8 / ctor 0x10786c8d.
