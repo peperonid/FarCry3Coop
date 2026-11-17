@@ -747,6 +747,7 @@ static int install_rv_md5(void){
 // yields a known plaintext/ciphertext pair => the per-connection keystream = pt^ct, NO static secret needed.
 // NO behaviour change: exactly one call to the original, its return value passed through unchanged.
 typedef int (__thiscall *rv_wsasendto_t)(void* thisp, void* buf, int len, void* addr, void** out);
+static void rv_drv_hook_resolve(void* thisp);   // NOTES 28g3: forward decl (defined after install_rv_enc)
 static uintptr_t g_rv_enc_tr = 0;
 static volatile LONG g_enc_logged = 0;
 #define RV_ENC_DUMP_CAP 80
@@ -782,6 +783,11 @@ static int __cdecl rv_enc_capture(void* thisp, void* buf, int len, void* addr, v
       rv_enc_dump("PRE(plaintext)", b, len);
       logUnlock();
     }
+    // NOTES 28g3: arm the driver-vtable capture on the FIRST RV send, BEFORE we invoke the original (which is
+    // what calls the driver vtable send). Even if the cipher encrypts an internal COPY (payload_changed=0 here),
+    // the driver-method repl sees the buffer at the vtable boundary -> a second independent plaintext view, and
+    // the on-wire ciphertext is already in the captured pcap, so PRE + pcap still yields the keystream.
+    if (do_log && ok && thisp) rv_drv_hook_resolve(thisp);
     if (g_rv_enc_tr) rc = ((rv_wsasendto_t)g_rv_enc_tr)(thisp, buf, len, addr, out);
     if (do_log && ok) {
       unsigned char* b = (unsigned char*)buf;
@@ -813,6 +819,100 @@ static int install_rv_enc(void){
   int rc = install_rv_observer(RVA_rv_wsasendto, (void*)hk_rv_ws_enc, &g_rv_enc_tr, "rv_wsasendto_enc");
   LOGF("shim: RV-ENC capture install rc=%d (FUN_11214630 RVA 0x01214630). Do Co-op -> Host with a REAL login; read RV-ENC lines. payload_changed=1 => the PRE/POST pair IS the plaintext/ciphertext -> keystream = pt^ct (no static secret). payload_changed=0 => the driver encrypts a copy; next add a driver-vtable-side capture.");
   return rc;
+}
+
+// ---- NOTES 28g3: driver-vtable capture (the payload_changed=0 fallback). Instead of inline-patching an
+// unknown driver method (relocating 6 bytes is only safe for a known '55 8B EC..' prologue), we SWAP the two
+// send slots in the socket-driver vtable: resolve it at runtime from the RV object thisp (+0x9c) -> vtable, then
+// write our thiscall replacements into slots +0x10 (4 args, ret16) and +0x1c (3 args, ret12), saving the original
+// pointers. The replacement dumps the buffer on ENTRY (plaintext at the driver boundary) and on EXIT (in-place
+// change), then calls the original. vtable swap needs NO instruction relocation, so it is safe on an unknown
+// target. Runs once (InterlockedCompareExchange guard); both send slots are in one 16-byte RW page (vtbl+0x10).
+typedef int (__thiscall *drv10_t)(void* thisp, void* buf, int len, void* addr, void** out);
+typedef int (__thiscall *drv1c_t)(void* thisp, void* buf, int len, void** out);
+static uintptr_t g_drv10_orig = 0, g_drv1c_orig = 0;
+static volatile LONG g_drv_hooked = 0;
+static volatile LONG g_drv_logged = 0;
+#define RV_DRV_DUMP_CAP 80
+static unsigned rv_drv_sum(unsigned char* b, int len) { unsigned s = 0; for (int i = 8; i < len; ++i) s = (s + b[i] + (s << 5)) & 0xffffffffu; return s; }
+static int __cdecl rv_drv_work10(void* thisp, void* buf, int len, void* addr, void** out) {
+  int rc = -1; LONG idx = InterlockedIncrement(&g_drv_logged); int do_log = (idx <= RV_DRV_DUMP_CAP); unsigned s0 = 0;
+  __try {
+    int ok = (buf && len > 8 && len < 65536);
+    if (do_log && ok) {
+      unsigned char* b = (unsigned char*)buf; unsigned cid = (unsigned)*(volatile int*)((char*)buf + 4); s0 = rv_drv_sum(b, len);
+      logLock(); LOGF("shim: RV-DRV10 #%ld this=%p len=%d connId=%08x", idx, thisp, len, cid); rv_enc_dump("PRE(driver-in)", b, len); logUnlock();
+    }
+    if (g_drv10_orig) rc = ((drv10_t)g_drv10_orig)(thisp, buf, len, addr, out);
+    if (do_log && ok) {
+      unsigned char* b = (unsigned char*)buf; unsigned s1 = rv_drv_sum(b, len); int changed = (s0 != s1);
+      logLock(); LOGF("shim: RV-DRV10 #%ld POST rc=%d payload_changed=%d%s", idx, rc, changed, changed ? "  <== IN-PLACE cipher at driver boundary" : "  <== driver encrypts an internal copy (no in-place change here)"); rv_enc_dump("POST(driver-out)", b, len); logUnlock();
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-DRV10 #%ld fault rc=%d", idx, rc); }
+  return rc;
+}
+static int __cdecl rv_drv_work1c(void* thisp, void* buf, int len, void** out) {
+  int rc = -1; LONG idx = InterlockedIncrement(&g_drv_logged); int do_log = (idx <= RV_DRV_DUMP_CAP); unsigned s0 = 0;
+  __try {
+    int ok = (buf && len > 8 && len < 65536);
+    if (do_log && ok) {
+      unsigned char* b = (unsigned char*)buf; unsigned cid = (unsigned)*(volatile int*)((char*)buf + 4); s0 = rv_drv_sum(b, len);
+      logLock(); LOGF("shim: RV-DRV1C #%ld this=%p len=%d connId=%08x", idx, thisp, len, cid); rv_enc_dump("PRE(driver-in)", b, len); logUnlock();
+    }
+    if (g_drv1c_orig) rc = ((drv1c_t)g_drv1c_orig)(thisp, buf, len, out);
+    if (do_log && ok) {
+      unsigned char* b = (unsigned char*)buf; unsigned s1 = rv_drv_sum(b, len); int changed = (s0 != s1);
+      logLock(); LOGF("shim: RV-DRV1C #%ld POST rc=%d payload_changed=%d%s", idx, rc, changed, changed ? "  <== IN-PLACE cipher at driver boundary" : "  <== driver encrypts an internal copy (no in-place change here)"); rv_enc_dump("POST(driver-out)", b, len); logUnlock();
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-DRV1C #%ld fault rc=%d", idx, rc); }
+  return rc;
+}
+// thiscall entry stubs (ECX=this; the game cleans the stack args with ret16/ret12, we mirror that) that hand
+// off to the __cdecl workers (MSVC forbids __thiscall on a free function; only the fn-pointer typedefs carry it).
+__declspec(naked) static void rv_drv_repl10(void){ __asm {
+  push ebp
+  mov  ebp, esp
+  push dword ptr [ebp+0x14]   // out
+  push dword ptr [ebp+0x10]   // addr
+  push dword ptr [ebp+0x0c]   // len
+  push dword ptr [ebp+0x08]   // buf
+  push ecx                    // this
+  call rv_drv_work10
+  add  esp, 20
+  pop  ebp
+  ret  16
+} }
+__declspec(naked) static void rv_drv_repl1c(void){ __asm {
+  push ebp
+  mov  ebp, esp
+  push dword ptr [ebp+0x10]   // out
+  push dword ptr [ebp+0x0c]   // len
+  push dword ptr [ebp+0x08]   // buf
+  push ecx                    // this
+  call rv_drv_work1c
+  add  esp, 16
+  pop  ebp
+  ret  12
+} }
+static void rv_drv_hook_resolve(void* thisp) {
+  if (InterlockedCompareExchange(&g_drv_hooked, 1, 0) != 0) return;
+  __try {
+    uintptr_t drv = *(volatile unsigned*)((char*)thisp + 0x9c);
+    if (drv < 0x10000u) { logLock(); LOGF("shim: RV-DRV driver ptr 0x%08x invalid - will retry next send", (uint32_t)drv); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); return; }
+    uintptr_t vtbl = *(volatile uintptr_t*)drv;
+    if (vtbl < g_mod || vtbl >= g_mod + g_imgsize) { logLock(); LOGF("shim: RV-DRV vtable 0x%08x outside module [0x%08x,+0x%x) - skip", (uint32_t)vtbl, (uint32_t)g_mod, (unsigned)g_imgsize); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); return; }
+    uintptr_t m10 = *(volatile uintptr_t*)(vtbl + 0x10), m1c = *(volatile uintptr_t*)(vtbl + 0x1c);
+    int ok10 = (m10 >= g_mod && m10 < g_mod + g_imgsize), ok1c = (m1c >= g_mod && m1c < g_mod + g_imgsize);
+    logLock(); LOGF("shim: RV-DRV resolved driver=0x%08x vtbl=0x%08x slot10=0x%08x(rva 0x%x) slot1c=0x%08x(rva 0x%x)", (uint32_t)drv, (uint32_t)vtbl, (uint32_t)m10, (uint32_t)(m10 - g_mod), (uint32_t)m1c, (uint32_t)(m1c - g_mod));
+    DWORD old;
+    if (VirtualProtect((void*)(vtbl + 0x10), 0x10, PAGE_READWRITE, &old)) {
+      if (ok10) { g_drv10_orig = m10; *(volatile uintptr_t*)(vtbl + 0x10) = (uintptr_t)&rv_drv_repl10; }
+      if (ok1c) { g_drv1c_orig = m1c; *(volatile uintptr_t*)(vtbl + 0x1c) = (uintptr_t)&rv_drv_repl1c; }
+      VirtualProtect((void*)(vtbl + 0x10), 0x10, old, &old);
+      FlushInstructionCache(GetCurrentProcess(), (void*)(vtbl + 0x10), 0x10);
+      logUnlock(); logLock(); LOGF("shim: RV-DRV vtable slots swapped: slot10=%s slot1c=%s (watch RV-DRV10/RV-DRV1C lines)", ok10 ? "YES" : "no", ok1c ? "YES" : "no"); logUnlock();
+    } else { logUnlock(); logLock(); LOGF("shim: RV-DRV VirtualProtect on vtable failed - skip"); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { logLock(); LOGF("shim: RV-DRV resolve fault"); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); }
 }
 
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the

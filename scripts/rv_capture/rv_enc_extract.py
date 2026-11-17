@@ -22,8 +22,8 @@
 #     0000: .. .. ..
 import sys, re, glob
 
-HDR = re.compile(r"RV-ENC #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
-POSTH = re.compile(r"RV-ENC #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
+HDR = re.compile(r"RV-(ENC|DRV10|DRV1C) #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
+POSTH = re.compile(r"RV-(ENC|DRV10|DRV1C) #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
 ROW = re.compile(r"([0-9a-fA-F]{4}):\s+((?:[0-9a-fA-F]{2}\s*)+)")
 
 def parse_rows(lines, i, want):
@@ -49,13 +49,13 @@ def extract(logpath):
     while i < len(lines):
         m = HDR.search(lines[i])
         if m:
-            n = int(m.group(1)); L = int(m.group(2)); cid = m.group(3).lower()
-            d = caps.setdefault(n, {"len": L, "cid": cid})
+            src = m.group(1); n = int(m.group(2)); L = int(m.group(3)); cid = m.group(4).lower()
+            d = caps.setdefault((src, n), {"len": L, "cid": cid, "src": src})
             i += 1
             # PRE label?
-            while i < len(lines) and "PRE(plaintext)" not in lines[i] and "RV-ENC #" not in lines[i]:
+            while i < len(lines) and "PRE(" not in lines[i] and HDR.search(lines[i]) is None:
                 i += 1
-            if i < len(lines) and "PRE(plaintext)" in lines[i]:
+            if i < len(lines) and "PRE(" in lines[i]:
                 i += 1
                 b, i = parse_rows(lines, i, L)
                 if b is not None: d["pre"] = b
@@ -63,11 +63,11 @@ def extract(logpath):
             while i < len(lines) and not POSTH.search(lines[i]) and not HDR.search(lines[i]):
                 i += 1
             pm = POSTH.search(lines[i]) if i < len(lines) else None
-            if pm and int(pm.group(1)) == n:
-                d["rc"] = int(pm.group(2)); d["changed"] = int(pm.group(3)); i += 1
-                while i < len(lines) and "POST(after)" not in lines[i] and "RV-ENC #" not in lines[i]:
+            if pm and (pm.group(1), int(pm.group(2))) == (src, n):
+                d["rc"] = int(pm.group(3)); d["changed"] = int(pm.group(4)); i += 1
+                while i < len(lines) and "POST(" not in lines[i] and HDR.search(lines[i]) is None:
                     i += 1
-                if i < len(lines) and "POST(after)" in lines[i]:
+                if i < len(lines) and "POST(" in lines[i]:
                     i += 1
                     b, i = parse_rows(lines, i, L)
                     if b is not None: d["post"] = b
