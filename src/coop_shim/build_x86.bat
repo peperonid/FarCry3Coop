@@ -1,6 +1,8 @@
 @echo off
 rem build_x86.bat - compile coop_shim.dll (x86) with MSVC. Output stays in THIS folder (NOT the game).
 rem NOTE: target is x86 (/MACHINE:X86, /DWIN32); use the 32-bit toolchain (vcvars32).
+rem vswhere.exe must be on PATH or vcvars32 silently fails to add cl (NOTES 28fd gotcha).
+set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\Installer;%PATH%"
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars32.bat" >vc.log 2>&1
 where cl >nul 2>&1 || (echo NO_CL & exit /b 1)
 if not exist obj mkdir obj

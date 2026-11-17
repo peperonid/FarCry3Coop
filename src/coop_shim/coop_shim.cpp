@@ -67,6 +67,7 @@ enum {
   RVA_connect_auth_svc  = 0x01252f70, // FUN_11252f70 JobBackEndServicesLogin::ConnectToAuthenticationService - RV connect enqueue (RV_PROBE observer, 28dn)
   RVA_rv_sendto       = 0x01218510, // FUN_11218510 RV socket sendto wrapper (RV_PROBE observer, 28dn)
   RVA_rv_wsasendto    = 0x01214630, // FUN_11214630 RV socket WSASendTo wrapper (RV_PROBE observer, 28dn)
+  RVA_md5_update      = 0x01219270, // FUN_11219270 OpenSSL MD5_Update inside the RV module (RV-MD5 key-derivation observer, 28fc/28fd)
 };
 
 // Op-registry descriptors (static op-type data, created via their lazy registrar only; for reference, NOTES 28ag):
@@ -116,6 +117,7 @@ static int g_watch_login = 0;   // env FC3COOP_WATCH_LOGIN=1 -> ONLY observe FUN
 static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN mode, also skip FUN_107dc7b7 (LogoutOper
 static int g_dns_redirect = 0;  // env FC3COOP_DNS_REDIRECT=1 -> IAT-patch getaddrinfo so onlineconfigservice.ubi.com resolves 127.0.0.1 (feed a crafted OnlineConfig with SandboxUrl->our rv_server, no hosts edit) (NOTES 28dh)
 static int g_rv_probe = 0;      // env FC3COOP_RV_PROBE=1 -> OBSERVE whether FCX reaches the RV connect/dial path at Co-op entry (NOTES 28dn)
+static int g_rv_md5 = 0;        // env FC3COOP_RV_MD5=1 -> read-only hook MD5_Update FUN_11219270 and hexdump prudps key-derivation input buffers (NOTES 28fc/28fd)
 static int g_mgr_watch = 0;     // env FC3COOP_MGR_WATCH=1 -> poll the online session-manager global DAT_11e42c90 and log on change (NOTES 28dp)
 static int g_online_on = 0;     // env FC3COOP_ONLINE_ON=1 -> set online-enable global DAT_11f07e48=1 even in WATCH_LOGIN clean mode (try to enqueue the RV connect job) (NOTES 28dp)ation) to stop the login<->logout cycle (NOTES 28df)
 static uintptr_t g_fake_obj = 0;
@@ -136,6 +138,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_BLOCK_LOGOUT", buf, sizeof(buf)) > 0) g_block_logout = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_DNS_REDIRECT", buf, sizeof(buf)) > 0) g_dns_redirect = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_RV_PROBE", buf, sizeof(buf)) > 0) g_rv_probe = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_RV_MD5", buf, sizeof(buf)) > 0) g_rv_md5 = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_MGR_WATCH", buf, sizeof(buf)) > 0) g_mgr_watch = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_ONLINE_ON", buf, sizeof(buf)) > 0) g_online_on = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
@@ -677,6 +680,61 @@ static void install_rv_probe(void) {
   LOGF("shim: RV-PROBE observers installed (watch RV-PROBE lines: none => RV never reached; CAS only => RV connect gated by precondition; sendto too => RV actually dials, point DNS-redirect at rv_server)");
 }
 
+// ---- NOTES 28fc/28fd: RV-MD5 key-derivation OBSERVER. Read-only hook on the RV module's OpenSSL
+// MD5_Update FUN_11219270 (prologue 55 8B EC 56 8B F1: ctx passed in ECX, moved to ESI). prudps derives
+// its per-connection RC4 keys + packet HMAC with MD5 over the DH shared secret + the game magic/salt +
+// connection ids; logging the MD5_Update INPUT buffer captures the EXACT key-derivation inputs, which
+// lets us rebuild the whole scheme offline (more reconstructive than the final keys). To filter out the
+// TLS/other-process MD5 use we hexdump only callers inside the RV/NetConnect code range. NO behaviour
+// change: hexdump args, then tail-call the original through a 6-byte trampoline.
+static uintptr_t g_rv_md5_tr = 0;
+static volatile LONG g_md5_logged = 0;
+static volatile LONG g_md5_calls  = 0;
+#define RV_MD5_DUMP_CAP 600
+static void __cdecl rv_md5_log(void* ctx, void* buf, unsigned len, void* ret){
+  LONG calls = InterlockedIncrement(&g_md5_calls);
+  uintptr_t r = (uintptr_t)ret;
+  int rvrange = (r >= g_mod + 0x01210000u) && (r <= g_mod + 0x01280000u);
+  LONG done = InterlockedCompareExchange(&g_md5_logged, 0, 0);
+  if (!rvrange) { if ((calls % 5000) == 0) { logLock(); LOGF("shim: RV-MD5 %ld MD5_Update calls so far (%ld RV-range dumped)", calls, done); logUnlock(); } return; }
+  if (InterlockedIncrement(&g_md5_logged) > RV_MD5_DUMP_CAP) return;
+  unsigned cap = len > 256 ? 256 : len;
+  logLock();
+  LOGF("shim: RV-MD5 MD5_Update ctx=%p buf=%p len=%u ret=0x%08x (RV-range caller)", ctx, buf, len, (uint32_t)r);
+  __try {
+    unsigned char* b = (unsigned char*)buf;
+    char line[100];
+    for (unsigned i = 0; i < cap; ) {
+      int k = wsprintfA(line, "    %04x:", i);
+      unsigned j = 0;
+      for (; j < 16 && i + j < cap; ++j) k += wsprintfA(line + k, " %02x", b[i + j]);
+      LOGF("%s", line);
+      i += 16;
+    }
+    if (len > cap) LOGF("    ...(%u more bytes)", len - cap);
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("    <read fault>"); }
+  logUnlock();
+}
+__declspec(naked) static void hk_rv_md5(void){
+  __asm {
+    pushad                       // [esp]=EDI [+4]=ESI [+8]=EBP [+12]=esp0 [+16]=EBX [+20]=EDX [+24]=ECX [+28]=EAX
+    mov ebp, esp                 // base; ctx=ECX=[ebp+24]  ret=[ebp+32]  buf=[ebp+36]  len=[ebp+40]
+    push dword ptr [ebp+32]      // ret (4th arg)
+    push dword ptr [ebp+40]      // len (3rd arg)
+    push dword ptr [ebp+36]      // buf (2nd arg)
+    push dword ptr [ebp+24]      // ctx (1st arg)
+    call rv_md5_log
+    add esp, 16
+    popad
+    jmp dword ptr [g_rv_md5_tr]
+  }
+}
+static int install_rv_md5(void){
+  int rc = install_rv_observer(RVA_md5_update, (void*)hk_rv_md5, &g_rv_md5_tr, "rv_md5_update");
+  LOGF("shim: RV-MD5 observer install rc=%d (FUN_11219270 MD5_Update RVA 0x01219270); read RV-MD5 lines: each RV-range MD5_Update input buffer = a prudps key-derivation input");
+  return rc;
+}
+
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
 // Co-op "connecting to servers" hang is blocked on the manager still being NULL (auth/session never established).
 static volatile unsigned g_last_mgr = 0xFFFFFFFFu;
@@ -739,6 +797,7 @@ static void init(void) {
   }
   if (g_dns_redirect) install_dns_redirect();   // independent lever: works in any mode (NOTES 28dh)
   if (g_rv_probe) install_rv_probe();           // independent observer: works in any mode (NOTES 28dn)
+  if (g_rv_md5) install_rv_md5();               // independent read-only key-derivation observer (NOTES 28fd)
   if (g_mgr_watch) { HANDLE mh = CreateThread(0, 0, mgr_watch_thread, 0, 0, 0); LOGF("shim: MGR_WATCH thread started h=%p (watch MGR-WATCH lines while doing Co-op -> Host)", (void*)mh); }
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block();
     if (g_online_on) { __try { *(volatile unsigned char*)VA(RVA_online_flag_global) = 1; LOGF("shim: ONLINE_ON set DAT_11f07e48=1 (try to enqueue RV connect)"); } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: ONLINE_ON set fault"); } }
