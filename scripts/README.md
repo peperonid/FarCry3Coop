@@ -216,3 +216,17 @@ already read those verified paths.
   (NOTES 28ai).
 
 - `rv_server/` - PRUDP/RendezVous emulator (condition B): PRUDP v1 codec + SYN->CONNECT handshake server + offline tests; see `rv_server/README.md`.
+
+
+## Co-op live-harness (D0 / RendezVous + OnlineConfig capture)
+
+PowerShell harnesses that run the game under the proxy+shim to capture live co-op/RV behaviour.
+Run from an **elevated** PowerShell (config_server binds :80).
+
+| Script | What it does |
+|---|---|
+| `run_d0.ps1` | Strategy-D Stage D0 (docs/strategy-d-rv-emulation-plan.md): net-on config (NO FAKE_ONLINE) + shim RV-PROBE/MGR_WATCH + `rv_server.py :50000` + `config_server.py :80` (SandboxUrl -> prudp://127.0.0.1:50000). Owner drives Co-op->Host; goal = catch >=1 PRUDP SYN (D tractable) or prove zero RV dial (D dead). |
+| `d0_status.ps1` | Reads the D0 logs and prints a PASS/FAIL/UNKNOWN verdict (rv_capture SYN/ESTABLISHED + shim RV-PROBE + OnlineConfig GETs + UDP:9000). |
+| `run_a2_livecap.ps1` | Earlier net-on RV/LAN capture (same recipe, without RV-PROBE/MGR_WATCH). |
+| `stop_a2_livecap.ps1` | Teardown for both: kills game + servers (:80,:50000), removes shim, restores clean mod-262 loader. |
+| `run_a2_rvcapture.bat` | Older one-shot (rv_server + config_server + hosts step). |
