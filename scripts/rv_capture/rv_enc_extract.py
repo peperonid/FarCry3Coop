@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+# rv_enc_extract.py - offline recovery of the Quazal prudps RC4 keystream from the coop_shim RV-ENC log.
+#
+# The shim hook (FC3COOP_RV_ENC=1, NOTES 28g2) prints, for every RV send-wrapper call on
+# FUN_11214630, the packet buffer BEFORE the socket driver encrypts (PRE = plaintext) and AFTER
+# (POST). If the driver encrypts IN PLACE (payload_changed=1), then for the encrypted region:
+#     keystream[i] = PRE[i] XOR POST[i]
+# Because the prudps keystream is CONSTANT per connection (proven in NOTES 28g0 from the 88x identical
+# retransmits), one such capture yields the whole keystream for that connection's connId -> decrypt any
+# captured pcap packet of the same connId offline, with NO static secret.
+#
+# Usage:
+#   python -I rv_enc_extract.py <coop_shim.log>            # show recovered keystreams
+#   python -I rv_enc_extract.py <coop_shim.log> --apply rv.pcap out.txt   # also decrypt matching pcap pkts
+#
+# Log line grammar (shim LOGF):
+#   shim: RV-ENC #N this=... driver=... slotSel=... len=L connId=XXXXXXXX
+#   shim:   PRE(plaintext):
+#     0000: aa bb ...
+#   shim: RV-ENC #N POST rc=.. payload_changed=.. ...
+#   shim:   POST(after):
+#     0000: .. .. ..
+import sys, re, glob
+
+HDR = re.compile(r"RV-ENC #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
+POSTH = re.compile(r"RV-ENC #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
+ROW = re.compile(r"([0-9a-fA-F]{4}):\s+((?:[0-9a-fA-F]{2}\s*)+)")
+
+def parse_rows(lines, i, want):
+    """consume hexdump rows starting at index i until we've read `want` bytes; return (bytes,newi)."""
+    out = {}
+    while i < len(lines) and len(out) < want + 16:
+        m = ROW.search(lines[i])
+        if not m:
+            if out: break
+            i += 1; continue
+        off = int(m.group(1), 16)
+        for j, hx in enumerate(m.group(2).split()):
+            out[off + j] = int(hx, 16)
+        i += 1
+    if not out: return None, i
+    top = max(out); b = bytearray((out.get(k, 0)) for k in range(top + 1))
+    return b, i
+
+def extract(logpath):
+    lines = open(logpath, encoding="utf-8", errors="replace").read().splitlines()
+    caps = {}  # n -> dict
+    i = 0
+    while i < len(lines):
+        m = HDR.search(lines[i])
+        if m:
+            n = int(m.group(1)); L = int(m.group(2)); cid = m.group(3).lower()
+            d = caps.setdefault(n, {"len": L, "cid": cid})
+            i += 1
+            # PRE label?
+            while i < len(lines) and "PRE(plaintext)" not in lines[i] and "RV-ENC #" not in lines[i]:
+                i += 1
+            if i < len(lines) and "PRE(plaintext)" in lines[i]:
+                i += 1
+                b, i = parse_rows(lines, i, L)
+                if b is not None: d["pre"] = b
+            # POST
+            while i < len(lines) and not POSTH.search(lines[i]) and not HDR.search(lines[i]):
+                i += 1
+            pm = POSTH.search(lines[i]) if i < len(lines) else None
+            if pm and int(pm.group(1)) == n:
+                d["rc"] = int(pm.group(2)); d["changed"] = int(pm.group(3)); i += 1
+                while i < len(lines) and "POST(after)" not in lines[i] and "RV-ENC #" not in lines[i]:
+                    i += 1
+                if i < len(lines) and "POST(after)" in lines[i]:
+                    i += 1
+                    b, i = parse_rows(lines, i, L)
+                    if b is not None: d["post"] = b
+            continue
+        i += 1
+    return caps
+
+def keystreams(caps):
+    """Return {connId: (start_offset, keystream_bytes)} from changed PRE/POST pairs."""
+    res = {}
+    for n, d in caps.items():
+        if d.get("changed") != 1 or "pre" not in d or "post" not in d: continue
+        pre, post = d["pre"], d["post"]
+        m = min(len(pre), len(post))
+        first = None
+        for k in range(m):
+            if pre[k] != post[k]:
+                first = k; break
+        if first is None: continue
+        ks = bytes(pre[k] ^ post[k] for k in range(first, m))
+        cid = d["cid"]
+        # keep the longest keystream seen per connId, aligned to a common start
+        if cid not in res or len(ks) > len(res[cid][1]):
+            res[cid] = (first, ks)
+    return res
+
+
+def parse_pcap_rv(pcap):
+    import struct
+    data = open(pcap, "rb").read(); i = 0; n = len(data); out = []
+    while i + 8 <= n:
+        bt, bl = struct.unpack_from("<II", data, i)
+        if bl < 8 or i + bl > n: break
+        if bt == 0x00000006:
+            cl = struct.unpack_from("<I", data, i + 20)[0]; pk = data[i + 28:i + 28 + cl]
+            b = rv_udp(pk)
+            if b: out.append(b)
+        i += bl
+    return out
+
+def rv_udp(pkt):
+    import struct
+    if len(pkt) < 14: return None
+    et = struct.unpack_from(">H", pkt, 12)[0]; off = 14
+    if et == 0x8100: off = 18
+    ip = pkt[off:]
+    if len(ip) < 20 or (ip[0] >> 4) != 4 or ip[9] != 17: return None
+    ihl = (ip[0] & 0xf) * 4; u = ip[ihl:]
+    if len(u) < 8: return None
+    sp, dp = struct.unpack_from(">HH", u, 0); pl = struct.unpack_from(">H", u, 4)[0] - 8
+    body = u[8:8 + max(pl, 0)]
+    if sp != 21251 and dp != 21251: return None
+    return body
+
+def apply_to_pcap(ks, pcap):
+    seen = {}
+    for body in parse_pcap_rv(pcap):
+        if len(body) < 12: continue
+        cid = body[4:8].hex()
+        if cid not in ks: continue
+        start, ksb = ks[cid]
+        pt = bytearray(body)
+        for o in range(start, min(len(body), start + len(ksb))):
+            pt[o] = body[o] ^ ksb[o - start]
+        key = (cid, len(body))
+        if key in seen: continue
+        seen[key] = pt
+    print("\nDecrypted pcap packets whose connId matches a recovered keystream:", len(seen))
+    for (cid, ln), pt in sorted(seen.items()):
+        print(f"  connId {cid} len={ln}  header={bytes(pt[:12]).hex(' ')}")
+        ascii_tail = "".join(chr(c) if 32 <= c < 127 else "." for c in pt[12:])
+        print("    plaintext-ish:", ascii_tail[:120])
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__); return
+    caps = extract(sys.argv[1])
+    print("parsed RV-ENC packets:", len(caps))
+    ch = [n for n, d in caps.items() if d.get("changed") == 1]
+    print("payload_changed=1 (in-place, yields keystream):", len(ch))
+    ks = keystreams(caps)
+    for cid, (start, ksb) in sorted(ks.items()):
+        print(f"\nconnId {cid}: keystream starts at offset {start}, length {len(ksb)}")
+        for o in range(0, min(len(ksb), 128), 16):
+            print("  +%04x:" % (start + o), " ".join("%02x" % x for x in ksb[o:o+16]))
+    if not ks:
+        print("\nNo in-place keystream recovered. If RV-ENC shows payload_changed=0, the driver encrypts a")
+        print("copy -> add a driver-vtable-side capture (see NOTES 28g2 'next').")
+        return
+    print("\nOK: recovered keystreams for connIds:", ",".join(sorted(ks)))
+    if "--apply" in sys.argv:
+        try:
+            ai = sys.argv.index("--apply")
+            apply_to_pcap(ks, sys.argv[ai + 1])
+        except (IndexError, FileNotFoundError) as e:
+            print("apply: pcap not found:", e)
+    else:
+        print("Next: re-run with --apply <rv.pcap> to decrypt captured packets of these connIds.")
+
+if __name__ == "__main__":
+    main()

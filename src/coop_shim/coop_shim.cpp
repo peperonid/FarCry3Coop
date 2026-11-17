@@ -118,6 +118,7 @@ static int g_block_logout = 0;  // env FC3COOP_BLOCK_LOGOUT=1 -> in WATCH_LOGIN 
 static int g_dns_redirect = 0;  // env FC3COOP_DNS_REDIRECT=1 -> IAT-patch getaddrinfo so onlineconfigservice.ubi.com resolves 127.0.0.1 (feed a crafted OnlineConfig with SandboxUrl->our rv_server, no hosts edit) (NOTES 28dh)
 static int g_rv_probe = 0;      // env FC3COOP_RV_PROBE=1 -> OBSERVE whether FCX reaches the RV connect/dial path at Co-op entry (NOTES 28dn)
 static int g_rv_md5 = 0;        // env FC3COOP_RV_MD5=1 -> read-only hook MD5_Update FUN_11219270 and hexdump prudps key-derivation input buffers (NOTES 28fc/28fd)
+static int g_rv_enc = 0;        // env FC3COOP_RV_ENC=1 -> read-only capture of the RV send wrapper FUN_11214630: dump the packet buffer before+after the driver encrypts -> a known plaintext/ciphertext pair (NOTES 28g2)
 static int g_mgr_watch = 0;     // env FC3COOP_MGR_WATCH=1 -> poll the online session-manager global DAT_11e42c90 and log on change (NOTES 28dp)
 static int g_online_on = 0;     // env FC3COOP_ONLINE_ON=1 -> set online-enable global DAT_11f07e48=1 even in WATCH_LOGIN clean mode (try to enqueue the RV connect job) (NOTES 28dp)ation) to stop the login<->logout cycle (NOTES 28df)
 static uintptr_t g_fake_obj = 0;
@@ -139,6 +140,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_DNS_REDIRECT", buf, sizeof(buf)) > 0) g_dns_redirect = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_RV_PROBE", buf, sizeof(buf)) > 0) g_rv_probe = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_RV_MD5", buf, sizeof(buf)) > 0) g_rv_md5 = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_RV_ENC", buf, sizeof(buf)) > 0) g_rv_enc = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_MGR_WATCH", buf, sizeof(buf)) > 0) g_mgr_watch = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_ONLINE_ON", buf, sizeof(buf)) > 0) g_online_on = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
@@ -676,7 +678,7 @@ static int install_rv_observer(uintptr_t rva, void* detour, uintptr_t* tr, const
 static void install_rv_probe(void) {
   install_rv_observer(RVA_connect_auth_svc, (void*)hk_rv_cas, &g_rv_cas_tr, "ConnectToAuthSvc");
   install_rv_observer(RVA_rv_sendto,        (void*)hk_rv_st,  &g_rv_st_tr,     "rv_sendto");
-  install_rv_observer(RVA_rv_wsasendto,     (void*)hk_rv_ws,  &g_rv_ws_tr,     "rv_wsasendto");
+  if (!g_rv_enc) install_rv_observer(RVA_rv_wsasendto, (void*)hk_rv_ws, &g_rv_ws_tr, "rv_wsasendto");   // RV-ENC overrides the WSASendTo observer with its capturing hook (same address)
   LOGF("shim: RV-PROBE observers installed (watch RV-PROBE lines: none => RV never reached; CAS only => RV connect gated by precondition; sendto too => RV actually dials, point DNS-redirect at rv_server)");
 }
 
@@ -732,6 +734,84 @@ __declspec(naked) static void hk_rv_md5(void){
 static int install_rv_md5(void){
   int rc = install_rv_observer(RVA_md5_update, (void*)hk_rv_md5, &g_rv_md5_tr, "rv_md5_update");
   LOGF("shim: RV-MD5 observer install rc=%d (FUN_11219270 MD5_Update RVA 0x01219270); read RV-MD5 lines: each RV-range MD5_Update input buffer = a prudps key-derivation input");
+  return rc;
+}
+
+// ---- NOTES 28g2: RV-ENC plaintext/ciphertext CAPTURE. Read-only observer on the RV socket send wrapper
+// FUN_11214630 (thiscall: ECX=this, param_2=buffer, param_3=length, param_4=sockaddr, param_5=out struct).
+// Confirmed in SigSend.java: when the secured socket driver is present (*(this+0x9c)!=0) this function does NOT
+// call the raw WSASendTo; it calls the driver vtable send (slot +0x10 with an addr, or +0x1c without), which
+// applies the Quazal prudps stream cipher and sends. So param_2 here is the PLAIN pre-cipher packet buffer.
+// We dump the buffer BEFORE the original, invoke the original (driver encrypts + sends) via a 6-byte thiscall
+// trampoline, then dump the buffer AFTER. If the driver encrypts IN PLACE, after = ciphertext and one capture
+// yields a known plaintext/ciphertext pair => the per-connection keystream = pt^ct, NO static secret needed.
+// NO behaviour change: exactly one call to the original, its return value passed through unchanged.
+typedef int (__thiscall *rv_wsasendto_t)(void* thisp, void* buf, int len, void* addr, void** out);
+static uintptr_t g_rv_enc_tr = 0;
+static volatile LONG g_enc_logged = 0;
+#define RV_ENC_DUMP_CAP 80
+static void rv_enc_dump(const char* tag, unsigned char* b, int len) {
+  int cap = len > 256 ? 256 : len;
+  char line[120];
+  LOGF("shim:   %s:", tag);
+  for (int i = 0; i < cap; ) {
+    int k = wsprintfA(line, "    %04x:", i);
+    for (int j = 0; j < 16 && i + j < cap; ++j) k += wsprintfA(line + k, " %02x", b[i + j]);
+    LOGF("%s", line);
+    i += 16;
+  }
+}
+static unsigned rv_enc_sum(unsigned char* b, int len) {  // checksum over the payload region [8,len)
+  unsigned s = 0; for (int i = 8; i < len; ++i) s = (s + b[i] + (s << 5)) & 0xffffffffu; return s;
+}
+static int __cdecl rv_enc_capture(void* thisp, void* buf, int len, void* addr, void** out) {
+  int rc = -1;
+  LONG idx = InterlockedIncrement(&g_enc_logged);
+  int do_log = (idx <= RV_ENC_DUMP_CAP);
+  unsigned s0 = 0;
+  __try {
+    int ok = (buf && len > 8 && len < 65536);
+    if (do_log && ok) {
+      unsigned char* b = (unsigned char*)buf;
+      unsigned drv = 0; int slotsel = -1;
+      if (thisp) { drv = *(volatile unsigned*)((char*)thisp + 0x9c); slotsel = *(volatile char*)((char*)thisp + 0x88); }
+      unsigned cid = (unsigned)*(volatile int*)((char*)buf + 4);
+      s0 = rv_enc_sum(b, len);
+      logLock();
+      LOGF("shim: RV-ENC #%ld this=%p driver=0x%08x slotSel=%d len=%d connId=%08x", idx, thisp, drv, slotsel, len, cid);
+      rv_enc_dump("PRE(plaintext)", b, len);
+      logUnlock();
+    }
+    if (g_rv_enc_tr) rc = ((rv_wsasendto_t)g_rv_enc_tr)(thisp, buf, len, addr, out);
+    if (do_log && ok) {
+      unsigned char* b = (unsigned char*)buf;
+      unsigned s1 = rv_enc_sum(b, len);
+      int changed = (s0 != s1);
+      logLock();
+      LOGF("shim: RV-ENC #%ld POST rc=%d payload_changed=%d%s", idx, rc, changed, changed ? "  <== IN-PLACE cipher: this PRE/POST pair IS the keystream (pt^ct), no secret needed" : "  <== driver encrypted a copy (no in-place change); a driver-side hook is needed next");
+      rv_enc_dump("POST(after)", b, len);
+      logUnlock();
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-ENC #%ld capture fault rc=%d", idx, rc); }
+  return rc;
+}
+__declspec(naked) static void hk_rv_ws_enc(void){ __asm {
+  push ebp
+  mov  ebp, esp
+  // ECX=this; [ebp+4]=ret; [ebp+8]=buf(param_2); [ebp+0xc]=len(param_3); [ebp+0x10]=addr(param_4); [ebp+0x14]=out(param_5)
+  push dword ptr [ebp+0x14]
+  push dword ptr [ebp+0x10]
+  push dword ptr [ebp+0x0c]
+  push dword ptr [ebp+0x08]
+  push ecx
+  call rv_enc_capture
+  add  esp, 20
+  pop  ebp
+  ret  16                       // thiscall: callee cleans the 4 stack args (16 bytes), like the original
+} }
+static int install_rv_enc(void){
+  int rc = install_rv_observer(RVA_rv_wsasendto, (void*)hk_rv_ws_enc, &g_rv_enc_tr, "rv_wsasendto_enc");
+  LOGF("shim: RV-ENC capture install rc=%d (FUN_11214630 RVA 0x01214630). Do Co-op -> Host with a REAL login; read RV-ENC lines. payload_changed=1 => the PRE/POST pair IS the plaintext/ciphertext -> keystream = pt^ct (no static secret). payload_changed=0 => the driver encrypts a copy; next add a driver-vtable-side capture.");
   return rc;
 }
 
@@ -798,6 +878,7 @@ static void init(void) {
   if (g_dns_redirect) install_dns_redirect();   // independent lever: works in any mode (NOTES 28dh)
   if (g_rv_probe) install_rv_probe();           // independent observer: works in any mode (NOTES 28dn)
   if (g_rv_md5) install_rv_md5();               // independent read-only key-derivation observer (NOTES 28fd)
+  if (g_rv_enc) install_rv_enc();               // independent read-only plaintext/ciphertext capture (NOTES 28g2)
   if (g_mgr_watch) { HANDLE mh = CreateThread(0, 0, mgr_watch_thread, 0, 0, 0); LOGF("shim: MGR_WATCH thread started h=%p (watch MGR-WATCH lines while doing Co-op -> Host)", (void*)mh); }
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block();
     if (g_online_on) { __try { *(volatile unsigned char*)VA(RVA_online_flag_global) = 1; LOGF("shim: ONLINE_ON set DAT_11f07e48=1 (try to enqueue RV connect)"); } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: ONLINE_ON set fault"); } }
