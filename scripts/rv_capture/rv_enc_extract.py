@@ -22,8 +22,8 @@
 #     0000: .. .. ..
 import sys, re, glob
 
-HDR = re.compile(r"RV-(ENC|DRV10|DRV1C) #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
-POSTH = re.compile(r"RV-(ENC|DRV10|DRV1C) #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
+HDR = re.compile(r"RV-(ENC|DRV10|DRV1C|PKT4|PKT) #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
+POSTH = re.compile(r"RV-(ENC|DRV10|DRV1C|PKT4|PKT) #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
 ROW = re.compile(r"([0-9a-fA-F]{4}):\s+((?:[0-9a-fA-F]{2}\s*)+)")
 
 def parse_rows(lines, i, want):
