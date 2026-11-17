@@ -232,3 +232,5 @@ Run from an **elevated** PowerShell (config_server binds :80).
 | `run_a2_rvcapture.bat` | Older one-shot (rv_server + config_server + hosts step). |
 
 | `d0_reallogin_watch.ps1` | PASSIVE control: with a GENUINE Ubisoft Connect login (no mods, no proxy/shim) on the real install, watches farcry3_d3d11 outbound connections for any non-LAN (Ubisoft) remote during Co-op->Host. Answers the one untested variable: does FC3 dial RV/lobby at all when the login is real? (public remote => RV client reachable, only the backend is dead; none => gate is above RV.) Read-only, no admin. Log: `d0_reallogin_watch.log`. |
+
+| `check_clean_install.py` | Read-only: is a freshly deployed FC3_clean a GENUINE un-modded build for the real-login control? Verifies bin/FC3_d3d11.dll md5 == vanilla 1.05 (46bcc097) AND byte-equals the local vanilla reference (catches the mod-262 7-byte patch), scans for mod/harness leftovers (coop_shim, uplay_api.log, real/, .orig), lists loaders. `python -I scripts/check_clean_install.py [dir]`. exit 0=clean. |
