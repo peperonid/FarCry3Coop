@@ -57,13 +57,22 @@ $env:FC3COOP_MGR_WATCH   = "1"
 $env:FC3COOP_LOG_PUMP    = "1"
 Start-Process -FilePath (Join-Path $Bin "farcry3_d3d11.exe") -ArgumentList @("-skipintro","-quickstartup")
 
-Start-Sleep -Seconds 15
+Start-Sleep -Seconds 20
 $alive = Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue
-$shimSz = (Get-Item (Join-Path $Bin "coop_shim.log")).Length
+$shimLog = Join-Path $Bin "coop_shim.log"
+$shimTxt = if (Test-Path $shimLog) { Get-Content $shimLog -Raw -ErrorAction SilentlyContinue } else { "" }
+$banner = if ($shimTxt -match "RV-PROBE observers installed") { "YES" } else { "no" }
+$anyline = ([regex]::Matches($shimTxt, "shim: ")).Count
+$ubiconn = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "Uplay|Ubisoft" } | Select-Object -First 1
 Write-Host ""
-Write-Host ("[engagement] game : {0}" -f $(if ($alive) {"RUNNING pid $($alive.Id)"} else {"NOT RUNNING"}))
-Write-Host ("[engagement] coop_shim.log bytes : {0}  (>11 => observer LOADED)" -f $shimSz)
-if ($shimSz -le 11) { Write-Host "[engagement] WARNING: shim not logging - RV-PROBE will be silent; run is INCONCLUSIVE." }
+Write-Host ("[engagement] game            : {0}" -f $(if ($alive) {"RUNNING pid $($alive.Id)"} else {"NOT RUNNING - the game process exited; shim cannot log"}))
+Write-Host ("[engagement] Ubisoft Connect : {0}" -f $(if ($ubiconn) {"RUNNING $($ubiconn.ProcessName)"} else {"NOT RUNNING - REAL login will fail, launch Ubisoft Connect first"}))
+Write-Host ("[engagement] coop_shim lines  : {0}   install banner: {1}" -f $anyline, $banner)
+if ($banner -ne "YES") {
+    Write-Host "[engagement] WARNING INCONCLUSIVE: coop_shim.dll wrote NO install banner. Causes: game not running,"
+    Write-Host "               or Ubisoft Connect closed (start it + log in), or a stale game instance. The shim only"
+    Write-Host "               installs RV observers after it hooks the live FC3_d3d11 module; with no running game there is nothing to hook."
+}
 Write-Host ""
 Write-Host "== real-login RV-PROBE harness up =="
 Write-Host ""
