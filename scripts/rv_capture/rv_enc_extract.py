@@ -22,8 +22,8 @@
 #     0000: .. .. ..
 import sys, re, glob
 
-HDR = re.compile(r"RV-(ENC|DRV10|DRV1C|PKT4|PKT) #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
-POSTH = re.compile(r"RV-(ENC|DRV10|DRV1C|PKT4|PKT) #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
+HDR = re.compile(r"RV-(ENC-ST|ENC|DRV10|DRV1C|PKT4|PKT) #(\d+) .*len=(\d+) connId=([0-9a-fA-F]{8})")
+POSTH = re.compile(r"RV-(ENC-ST|ENC|DRV10|DRV1C|PKT4|PKT) #(\d+) POST rc=(-?\d+) payload_changed=(\d+)")
 ROW = re.compile(r"([0-9a-fA-F]{4}):\s+((?:[0-9a-fA-F]{2}\s*)+)")
 
 def parse_rows(lines, i, want):
@@ -179,6 +179,62 @@ def mtp(caps, src_pref=("ENC",)):
                     print("     (printable runs in pt_i^pt_j: crib-drag candidates)")
 
 
+def pair_with_pcap(caps, pcap):
+    """Pair a PRE dump from the shim log (plaintext at the send wrapper, e.g. RV-ENC-ST on sendto) with the
+    matching on-wire CIPHERTEXT packet from a pcap captured in the SAME session. The header bytes b0..b8 (magic,
+    type, retransmit, connId, seq) are cleartext in BOTH the plaintext dump and the ciphertext packet, so we match
+    by (connId, length, seq) and require b0..b4 to agree, then keystream = PRE ^ CT over the body. If PRE is itself
+    already ciphertext the xor is ~all-zero over the body and we skip it (no new info)."""
+    import struct
+    data = open(pcap, "rb").read(); i = 0; n = len(data); ct = []
+    while i + 8 <= n:
+        bt, bl = struct.unpack_from("<II", data, i)
+        if bl < 8 or i + bl > n: break
+        if bt == 0x00000006:
+            cl = struct.unpack_from("<I", data, i + 20)[0]; pk = data[i + 28:i + 28 + cl]
+            if len(pk) >= 14:
+                et = struct.unpack_from(">H", pk, 12)[0]; off = 18 if et == 0x8100 else 14
+                ip = pk[off:]
+                if len(ip) >= 20 and (ip[0] >> 4) == 4 and ip[9] == 17:
+                    ihl = (ip[0] & 0xf) * 4; u = ip[ihl:]
+                    if len(u) >= 8:
+                        dp = struct.unpack_from(">H", u, 2)[0]; pl = struct.unpack_from(">H", u, 4)[0] - 8
+                        if dp == 21251:
+                            body = u[8:8 + max(pl, 0)]
+                            if len(body) >= 12: ct.append(body)
+        i += bl
+    idx = {}
+    for b in ct:
+        idx.setdefault((b[4:8].hex(), len(b), b[8]), []).append(b)
+    print("\n[pair] pcap outbound RV packets to :21251 =", len(ct))
+    res = {}
+    for key, d in caps.items():
+        if "pre" not in d: continue
+        pre = d["pre"]; cid = d["cid"]
+        if len(pre) < 13: continue
+        cands = idx.get((cid, len(pre), pre[8] if len(pre) > 8 else 0), [])
+        for cb in cands:
+            # header must agree in cleartext bytes b0..b4 (magic/type/var/connId first byte)
+            if pre[4] != cb[4] or pre[0] != cb[0]: continue
+            m = min(len(pre), len(cb))
+            ks = bytes(pre[k] ^ cb[k] for k in range(12, m))
+            nz = sum(1 for x in ks if x)
+            if nz < max(2, len(ks) // 4):  # PRE was already ciphertext (xor ~zero) -> no plaintext captured
+                continue
+            start = 12
+            if cid not in res or len(ks) > len(res[cid][1]):
+                res[cid] = (start, ks)
+    if res:
+        print("[pair] recovered keystreams by log-vs-pcap pairing for connIds:", ",".join(sorted(res)))
+        for cid, (start, ksb) in sorted(res.items()):
+            print(f"  connId {cid}: keystream from offset {start}, length {len(ksb)}")
+            for o in range(0, min(len(ksb), 96), 16):
+                print("   +%04x:" % (start + o), " ".join("%02x" % x for x in ksb[o:o+16]))
+    else:
+        print("[pair] no plaintext-vs-ciphertext match (no PRE dump was plaintext for a pcap packet, or connIds differ).")
+    return res
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__); return
@@ -191,19 +247,27 @@ def main():
         print(f"\nconnId {cid}: keystream starts at offset {start}, length {len(ksb)}")
         for o in range(0, min(len(ksb), 128), 16):
             print("  +%04x:" % (start + o), " ".join("%02x" % x for x in ksb[o:o+16]))
+    pcap_arg = None
+    if "--apply" in sys.argv:
+        ai = sys.argv.index("--apply")
+        if ai + 1 < len(sys.argv): pcap_arg = sys.argv[ai + 1]
+    if pcap_arg:
+        try:
+            pk = pair_with_pcap(caps, pcap_arg)
+            for cid, (start, ksb) in pk.items():
+                if cid not in ks or len(ksb) > len(ks[cid][1]): ks[cid] = (start, ksb)
+        except FileNotFoundError as e:
+            print("[pair] pcap not found:", e)
     if not ks:
         mtp(caps)
-        print("\nNo in-place keystream recovered. If RV-ENC shows payload_changed=0, the driver encrypts a")
-        print("copy -> add a driver-vtable-side capture (see NOTES 28g2/28g6).")
+        print("\nNo keystream recovered (no in-place pair and no log-vs-pcap plaintext match). If RV-ENC/RV-ENC-ST")
+        print("PRE dumps are all already-ciphertext, the cipher sits upstream: use the THIS[] window offsets the")
+        print("shim logged to pin the real driver vtable, then hook its send slot for an in-place pair (NOTES 28i2).")
         return
     print("\nOK: recovered keystreams for connIds:", ",".join(sorted(ks)))
     mtp(caps)
-    if "--apply" in sys.argv:
-        try:
-            ai = sys.argv.index("--apply")
-            apply_to_pcap(ks, sys.argv[ai + 1])
-        except (IndexError, FileNotFoundError) as e:
-            print("apply: pcap not found:", e)
+    if pcap_arg:
+        apply_to_pcap(ks, pcap_arg)
     else:
         print("Next: re-run with --apply <rv.pcap> to decrypt captured packets of these connIds.")
 

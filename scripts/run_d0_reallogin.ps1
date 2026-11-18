@@ -66,6 +66,11 @@ Write-Host ("[engagement] coop_shim.log bytes : {0}  (>11 => observer LOADED)" -
 if ($shimSz -le 11) { Write-Host "[engagement] WARNING: shim not logging - RV-PROBE will be silent; run is INCONCLUSIVE." }
 Write-Host ""
 Write-Host "== real-login RV-PROBE harness up =="
+Write-Host ""
+Write-Host "IMPORTANT - capture the on-wire ciphertext in a SECOND elevated PowerShell so the offline"
+Write-Host "pairing (PRE from the shim ^ ciphertext from the pcap) has a SAME-session pcap:"
+Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pktmon_rv_capture.ps1 150"
+Write-Host "Start that AFTER you reach the Co-op Host screen below; keep the host screen up for its whole window."
 Write-Host "UI STEPS:"
 Write-Host "  1) Log in to Ubisoft Connect for real; reach the main menu."
 Write-Host "  2) Multiplayer -> Co-op -> Host -> connect; wait ~60s on whatever screen shows."

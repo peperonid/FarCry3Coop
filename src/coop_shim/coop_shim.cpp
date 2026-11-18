@@ -677,7 +677,7 @@ static int install_rv_observer(uintptr_t rva, void* detour, uintptr_t* tr, const
 }
 static void install_rv_probe(void) {
   install_rv_observer(RVA_connect_auth_svc, (void*)hk_rv_cas, &g_rv_cas_tr, "ConnectToAuthSvc");
-  install_rv_observer(RVA_rv_sendto,        (void*)hk_rv_st,  &g_rv_st_tr,     "rv_sendto");
+  if (!g_rv_enc) install_rv_observer(RVA_rv_sendto, (void*)hk_rv_st, &g_rv_st_tr, "rv_sendto");   // NOTES 28i2: RV-ENC-ST overrides the sendto observer with its capturing hook (same address)
   if (!g_rv_enc) install_rv_observer(RVA_rv_wsasendto, (void*)hk_rv_ws, &g_rv_ws_tr, "rv_wsasendto");   // RV-ENC overrides the WSASendTo observer with its capturing hook (same address)
   LOGF("shim: RV-PROBE observers installed (watch RV-PROBE lines: none => RV never reached; CAS only => RV connect gated by precondition; sendto too => RV actually dials, point DNS-redirect at rv_server)");
 }
@@ -748,6 +748,7 @@ static int install_rv_md5(void){
 // NO behaviour change: exactly one call to the original, its return value passed through unchanged.
 typedef int (__thiscall *rv_wsasendto_t)(void* thisp, void* buf, int len, void* addr, void** out);
 static void rv_drv_hook_resolve(void* thisp);   // NOTES 28g3: forward decl (defined after install_rv_enc)
+static void rv_this_window_scan(void* thisp, const char* from);  // NOTES 28i2: log thisp window + scan for the real driver vtable offset (call with logLock held)
 static uintptr_t g_rv_enc_tr = 0;
 static volatile LONG g_enc_logged = 0;
 #define RV_ENC_DUMP_CAP 80
@@ -781,6 +782,7 @@ static int __cdecl rv_enc_capture(void* thisp, void* buf, int len, void* addr, v
       logLock();
       LOGF("shim: RV-ENC #%ld this=%p driver=0x%08x slotSel=%d len=%d connId=%08x", idx, thisp, drv, slotsel, len, cid);
       rv_enc_dump("PRE(plaintext)", b, len);
+      if (thisp) rv_this_window_scan(thisp, "wsasendto");   // NOTES 28i2: learn the REAL driver-pointer offset (this read 0x0 at +0x9c)
       logUnlock();
     }
     // NOTES 28g3: arm the driver-vtable capture on the FIRST RV send, BEFORE we invoke the original (which is
@@ -818,6 +820,84 @@ __declspec(naked) static void hk_rv_ws_enc(void){ __asm {
 static int install_rv_enc(void){
   int rc = install_rv_observer(RVA_rv_wsasendto, (void*)hk_rv_ws_enc, &g_rv_enc_tr, "rv_wsasendto_enc");
   LOGF("shim: RV-ENC capture install rc=%d (FUN_11214630 RVA 0x01214630). Do Co-op -> Host with a REAL login; read RV-ENC lines. payload_changed=1 => the PRE/POST pair IS the plaintext/ciphertext -> keystream = pt^ct (no static secret). payload_changed=0 => the driver encrypts a copy; next add a driver-vtable-side capture.");
+  return rc;
+}
+
+// ---- NOTES 28i2: thisp-window dump + driver-offset scan. The RV send wrappers log driver=0 at thisp+0x9c
+// (28g3/28g4), so the connection's socket-driver pointer is NOT at +0x9c for the connections we hit. This dumps
+// the thisp region around +0x9c and scans +0x0..0x140 for ANY pointer that behaves like a socket-driver object
+// (an in-module object whose vtable has in-module function pointers at +0x10 and/or +0x1c), and logs every
+// candidate so the real offset can be found from the log (NO writes: pure read, cannot crash the game beyond the
+// __try). Call it while holding logLock (it only calls LOGF, no internal locking).
+static void rv_this_window_scan(void* thisp, const char* from) {
+  __try {
+    unsigned char* o = (unsigned char*)thisp;
+    LOGF("shim:   THIS[%s] window around +0x9c:", from);
+    for (int off = 0x80; off < 0x120; off += 16) {
+      char line[140]; int k = wsprintfA(line, "    +%02x:", off);
+      for (int j = 0; j < 16; j++) k += wsprintfA(line + k, " %02x", o[off + j]);
+      LOGF("%s", line);
+    }
+    LOGF("shim:   THIS[%s] driver-candidate scan (off=field; obj in-module; vtbl in-module; +0x10/+0x1c in-module):", from);
+    int found = 0;
+    for (int off = 0; off <= 0x140; off += 4) {
+      uintptr_t p = *(volatile uintptr_t*)(o + off);
+      if (p < g_mod || p >= g_mod + g_imgsize) continue;            // field not an in-module object pointer
+      uintptr_t vt = *(volatile uintptr_t*)p;                        // candidate vtable
+      if (vt < g_mod || vt >= g_mod + g_imgsize) continue;          // not an in-module vtable
+      uintptr_t m10 = *(volatile uintptr_t*)(vt + 0x10), m1c = *(volatile uintptr_t*)(vt + 0x1c);
+      int ok10 = (m10 >= g_mod && m10 < g_mod + g_imgsize), ok1c = (m1c >= g_mod && m1c < g_mod + g_imgsize);
+      if (ok10 || ok1c) {
+        LOGF("      off=0x%02x obj=0x%08x (rva 0x%x) vtbl=0x%08x slot10=%s slot1c=%s", off, (uint32_t)p, (uint32_t)(p - g_mod), (uint32_t)vt, ok10 ? "in" : "-", ok1c ? "in" : "-");
+        found++; if (found >= 16) break;
+      }
+    }
+    if (!found) LOGF("      none in +0x0..0x140");
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim:   THIS[%s] scan fault", from); }
+}
+
+// ---- NOTES 28i2: RV-ENC-ST. Capture the RV *sendto* wrapper FUN_11218510 - in the 28g8 run the RV data actually
+// left via sendto, not WSASendTo, so the WSASendTo-only capture saw 0. This is an ABI-NEUTRAL observer (save all
+// regs+flags, call a PRE dumper, restore, tail-jump the trampoline) so it cannot corrupt the stack regardless of
+// the wrapper's arg count - unlike the ret-N capture hook. We dump only PRE (the plaintext at the wrapper); the
+// matching on-wire CIPHERTEXT is already captured by pktmon in rv.pcap, so PRE^pcap still yields the keystream.
+static uintptr_t g_rv_st_enc_tr = 0;
+static volatile LONG g_st_logged = 0;
+static void __cdecl rv_st_pre(void* thisp, void** sp) {
+  LONG idx = InterlockedIncrement(&g_st_logged); int do_log = (idx <= RV_ENC_DUMP_CAP);
+  __try {
+    if (!do_log) return;
+    // at the wrapper entry: sp[0]=retaddr, sp[1]=param_2(buf), sp[2]=param_3(len)
+    unsigned char* b = (unsigned char*)sp[1]; int len = (int)sp[2];
+    unsigned drv = 0; if (thisp) drv = *(volatile unsigned*)((char*)thisp + 0x9c);
+    logLock();
+    if (b && len > 8 && len < 65536) {
+      unsigned cid = (unsigned)*(volatile int*)(b + 4);
+      LOGF("shim: RV-ENC-ST #%ld this=%p driver=0x%08x len=%d connId=%08x  (sendto FUN_11218510 PRE only; on-wire ciphertext is in rv.pcap)", idx, thisp, drv, len, cid);
+      rv_enc_dump("PRE(sendto-in)", b, len);
+      if (thisp) rv_this_window_scan(thisp, "sendto");
+    } else {
+      LOGF("shim: RV-ENC-ST #%ld this=%p driver=0x%08x argbuf=%p arglen=%d (not a plausible buffer)", idx, thisp, drv, b, len);
+    }
+    logUnlock();
+  } __except (EXCEPTION_EXECUTE_HANDLER) { logLock(); LOGF("shim: RV-ENC-ST #%ld fault", idx); logUnlock(); }
+}
+__declspec(naked) static void hk_rv_st_capture(void){ __asm {
+  pushfd
+  pushad
+  mov  eax, esp
+  add  eax, 36            // ESP0 (== &retaddr) = current esp + 4 (pushfd) + 32 (pushad)
+  push eax                // arg2 = sp
+  push ecx                // arg1 = this (thiscall this is in ECX on entry)
+  call rv_st_pre
+  add  esp, 8
+  popad
+  popfd
+  jmp  dword ptr [g_rv_st_enc_tr]
+} }
+static int install_rv_st_enc(void) {
+  int rc = install_rv_observer(RVA_rv_sendto, (void*)hk_rv_st_capture, &g_rv_st_enc_tr, "rv_sendto_enc");
+  LOGF("shim: RV-ENC-ST install rc=%d (FUN_11218510 RV sendto RVA 0x01218510). ABI-safe PRE capture; read RV-ENC-ST lines + THIS[sendto] window to find the real driver offset. POST/ciphertext comes from rv.pcap.");
   return rc;
 }
 
@@ -1027,6 +1107,7 @@ static void init(void) {
   if (g_rv_md5) install_rv_md5();               // independent read-only key-derivation observer (NOTES 28fd)
   if (g_rv_enc) install_rv_enc();               // independent read-only plaintext/ciphertext capture (NOTES 28g2)
   if (g_rv_enc) install_rv_pkt();               // upstream Quazal packet-object serialize capture (NOTES 28g5)
+  if (g_rv_enc) install_rv_st_enc();            // NOTES 28i2: capture the RV sendto wrapper too (the wrapper 28g8 actually used)
   if (g_mgr_watch) { HANDLE mh = CreateThread(0, 0, mgr_watch_thread, 0, 0, 0); LOGF("shim: MGR_WATCH thread started h=%p (watch MGR-WATCH lines while doing Co-op -> Host)", (void*)mh); }
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block();
     if (g_online_on) { __try { *(volatile unsigned char*)VA(RVA_online_flag_global) = 1; LOGF("shim: ONLINE_ON set DAT_11f07e48=1 (try to enqueue RV connect)"); } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: ONLINE_ON set fault"); } }

@@ -14,6 +14,8 @@ if (Test-Path $shim) {
     $install = ($txt | Select-String -Pattern "RV-PROBE observers installed" -SimpleMatch).Count
     $probe = ($txt | Select-String -Pattern "RV-PROBE" | Where-Object { $_.Line -notmatch "observers installed" }).Count
     $enc  = ($txt | Select-String -Pattern "shim: RV-ENC #" | Where-Object { $_.Line -match "connId=" }).Count
+    $encst = ($txt | Select-String -Pattern "shim: RV-ENC-ST #" | Where-Object { $_.Line -match "connId=" }).Count
+    $thisdrv = ($txt | Select-String -Pattern "driver-candidate scan|off=0x" ).Count
     $drv  = ($txt | Select-String -Pattern "shim: RV-DRV1" | Where-Object { $_.Line -match "connId=" }).Count
     $mgr  = ($txt | Select-String -Pattern "MGR-WATCH" | Where-Object { $_.Line -notmatch "thread started" }).Count
     $login = ($txt | Select-String -Pattern "LOGIN-EV").Count
@@ -24,6 +26,8 @@ if (Test-Path $shim) {
     Write-Host ("RV-PROBE install banner: {0}" -f $install)
     Write-Host ("RV-PROBE RUNTIME hits  : {0}" -f $probe)
     Write-Host ("RV-ENC captures        : {0}" -f $enc)
+    Write-Host ("RV-ENC-ST captures     : {0}  (sendto wrapper; PRE plaintext for pairing)" -f $encst)
+    Write-Host ("THIS[] driver-cand hits: {0}  (real driver vtable offset candidates logged)" -f $thisdrv)
     Write-Host ("RV-DRV captures        : {0}" -f $drv)
     if (($enc -ge 1) -or ($drv -ge 1) -or ($probe -ge 1)) {
         Write-Host ">>> FC3 ENTERED RendezVous on a real Ubisoft login (RV client reachable) AND RV packets were captured."
@@ -41,7 +45,15 @@ if (Test-Path $shim) {
     try { New-Item -ItemType Directory -Force (Split-Path $keep) | Out-Null; Copy-Item $shim $keep -Force; Write-Host ("[save] coop_shim.log -> {0}" -f $keep) } catch { Write-Host ("[save] failed: {0}" -f $_.Exception.Message) }
     $cmdPy2 = Get-Command python.exe -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike "*\WindowsApps\*" } | Select-Object -First 1
     $Py2 = if ($cmdPy2) { $cmdPy2.Source } else { "python" }
-    try { & $Py2 -I (Join-Path $Repo "scripts\rv_capture\rv_enc_extract.py") $shim } catch { Write-Host ("[extract] failed: {0}" -f $_.Exception.Message) }
+    # pair the shim PRE dumps with the newest RV pcap captured in the same session (pktmon_rv_capture.ps1 output)
+    $pcapFile = Get-ChildItem -Path (Join-Path $Repo "scripts\rv_capture") -Filter "rv*.pcap" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($pcapFile) {
+        Write-Host ("[extract] pairing with pcap: {0}" -f $pcapFile.Name)
+        try { & $Py2 -I (Join-Path $Repo "scripts\rv_capture\rv_enc_extract.py") $shim --apply $pcapFile.FullName } catch { Write-Host ("[extract] failed: {0}" -f $_.Exception.Message) }
+    } else {
+        Write-Host "[extract] no rv*.pcap found; run scripts\pktmon_rv_capture.ps1 during the run to capture the on-wire ciphertext for pairing."
+        try { & $Py2 -I (Join-Path $Repo "scripts\rv_capture\rv_enc_extract.py") $shim } catch { Write-Host ("[extract] failed: {0}" -f $_.Exception.Message) }
+    }
 }
 
 foreach ($proc in @("farcry3_d3d11","farcry3")) { Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
