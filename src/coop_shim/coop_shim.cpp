@@ -678,6 +678,17 @@ static int install_rv_observer(uintptr_t rva, void* detour, uintptr_t* tr, const
   } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-PROBE %s read fault at 0x%x", nm, (uint32_t)f); }
   return -1;
 }
+// NOTES 28i7.1: like install_rv_observer but with an arbitrary clean-instruction boundary n (bytes). Needed for
+// FUN_1123a870 whose prologue 55 8B EC + 81 EC <imm32> needs a 9-byte cut (6 bytes would split the sub-esp imm32).
+static int install_rv_observer_n(uintptr_t rva, void* detour, uintptr_t* tr, const char* nm, int n) {
+  uintptr_t f = VA(rva); uint8_t* p = (uint8_t*)f;
+  __try {
+    if (p[0]==0x55 && p[1]==0x8B && p[2]==0xEC) return patch_entry_n(f, n, detour, tr);
+    LOGF("shim: RV-PROBE %s prologue at 0x%x not 55 8b EC (got %02x %02x %02x) - skip", nm, (uint32_t)f, p[0], p[1], p[2]);
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-PROBE %s read fault at 0x%x", nm, (uint32_t)f); }
+  return -1;
+}
+
 static void install_rv_probe(void) {
   install_rv_observer(RVA_connect_auth_svc, (void*)hk_rv_cas, &g_rv_cas_tr, "ConnectToAuthSvc");
   if (!g_rv_enc) install_rv_observer(RVA_rv_sendto, (void*)hk_rv_st, &g_rv_st_tr, "rv_sendto");   // NOTES 28i2: RV-ENC-ST overrides the sendto observer with its capturing hook (same address)
@@ -1100,7 +1111,7 @@ static volatile LONG  g_step_done = 0;     // arm exactly once
 static volatile LONG  g_step_active = 0;   // stepping in progress (the armed thread has TF)
 static volatile LONG  g_step_count = 0;
 static volatile LONG  g_step_ilen = 0;
-static const LONG     g_step_cap = 200000;
+static const LONG     g_step_cap = 60000;     // per traced invocation
 
 static uintptr_t x86_reg(const CONTEXT* c, int r) {
   switch (r & 7) {
@@ -1167,10 +1178,11 @@ static LONG CALLBACK rv_step_veh(EXCEPTION_POINTERS* ep) {
 static void rv_set_tf(void) { __writeeflags(__readeflags() | 0x100u); }   // enable the trap flag (single-step)
 
 static void __cdecl rv_trace_arm_worker(void) {
-  if (InterlockedCompareExchange(&g_step_done, 1, 0) != 0) return;   // one shot
+  LONG a = InterlockedIncrement(&g_step_done);     // count arms; FUN_1123a870 is a poller, so trace a few invocations
+  if (a > 12) return;                              // at most 12 traced invocations (the login/co-op sends occur early)
   if (!g_step_veh) g_step_veh = AddVectoredExceptionHandler(1, rv_step_veh);
   g_step_count = 0; g_step_ilen = 0; g_step_active = 1;
-  logLock(); LOGF("shim: RV-TRGL armed on FUN_11231860 (rva 0x1231860). Single-stepping this thread to log every indirect-call target (cap %d). Watch RV-TRGL lines; the NON-SENDPATH target reached as the packet turns ciphertext is the prudps RC4.", g_step_cap); logUnlock();
+  logLock(); LOGF("shim: RV-TRGL armed #%ld on FUN_1123a870 (rva 0x123a870, on-path caller of the send). Stepping this invocation to log indirect-call targets (cap %d). The NON-SENDPATH target reached just before a send = the prudps RC4.", a, g_step_cap); logUnlock();
   rv_set_tf();   // enable TF -> first single-step lands in the VEH
 }
 __declspec(naked) static void hk_rv_trace31860(void) {
@@ -1182,8 +1194,12 @@ __declspec(naked) static void hk_rv_trace31860(void) {
   }
 }
 static void install_rv_trace31860(void) {
-  int rc = install_rv_observer(0x01231860u, (void*)hk_rv_trace31860, &g_tr31860, "rv_trace_31860");
-  LOGF("shim: RV-TRGL hook install rc=%d (FUN_11231860 rva 0x01231860; prologue 55 8B EC verified by probe_send_prologues.py)", rc);
+  // NOTES 28i7.1: arm the indirect-call tracer on the REAL on-path caller of FUN_112161b0 (found from the RV-PKT
+  // CALLER log: return rva 0x123abe0 -> inside FUN_1123a870). Its prologue is 55 8B EC + 81 EC imm32 -> needs a
+  // clean 9-byte cut (n=9); 6 bytes would corrupt the sub-esp. Single-stepping this dispatch reaches the indirect
+  // vtable calls (e.g. (**(conn+0x618)->vtable+4)(...)) one of which is the prudps cipher.
+  int rc = install_rv_observer_n(0x0123a870u, (void*)hk_rv_trace31860, &g_tr31860, "rv_trace_a870", 9);
+  LOGF("shim: RV-TRGL hook install rc=%d (FUN_1123a870 rva 0x0123a870, n=9 cut; the on-path caller of FUN_112161b0)", rc);
 }
 
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
