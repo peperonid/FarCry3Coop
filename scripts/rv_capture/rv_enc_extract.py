@@ -235,9 +235,46 @@ def pair_with_pcap(caps, pcap):
     return res
 
 
+def parse_cip(logpath):
+    # NOTES 28i9: parse the shim's RV-CIP-* keystream lines (HW-breakpoint cipher-boundary capture).
+    # The shim already XORs plaintext^ciphertext, so we just surface the triples + the cipher function rva.
+    pre = ct = None; ks = []
+    cip_fn = None
+    def hexof(s):
+        try: return bytes(int(x, 16) for x in s.strip().split())
+        except Exception: return b""
+    with open(logpath, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if "RV-CIP cipher fn" in line:
+                m = line.split("rva", 1)
+                if len(m) == 2:
+                    tok = m[1].strip().lstrip("0x).(").strip().rstrip(")").strip()
+                    cip_fn = tok
+            elif "shim: RV-CIP-PRE " in line:
+                pre = hexof(line.split("RV-CIP-PRE", 1)[1])
+            elif "shim: RV-CIP-CT " in line:
+                ct = hexof(line.split("RV-CIP-CT", 1)[1])
+            elif "shim: RV-CIP-KS " in line:
+                k = hexof(line.split("RV-CIP-KS", 1)[1])
+                if k: ks.append((pre, ct, k)); pre = ct = None
+    return ks, cip_fn
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__); return
+    ks_cip, cip_fn = parse_cip(sys.argv[1])
+    if ks_cip or cip_fn:
+        print(f"[RV-CIP] cipher fn rva: {cip_fn}") if cip_fn else print("[RV-CIP] cipher fn rva: (not logged)")
+        print(f"[RV-CIP] keystream pairs captured: {len(ks_cip)}")
+        uniq = {}
+        for pre, ct, k in ks_cip:
+            sig = k[:16].hex()
+            uniq.setdefault(sig, (pre, ct, k))
+        print(f"[RV-CIP] distinct keystream prefixes: {len(uniq)}")
+        for sig, (pre, ct, k) in list(uniq.items())[:6]:
+            print(f"  ks[0:16]={sig}")
+            if pre: print("    pre[0:16]=", pre[:16].hex())
+            if ct:  print("    ct [0:16]=", ct[:16].hex())
     caps = extract(sys.argv[1])
     print("parsed RV-ENC packets:", len(caps))
     ch = [n for n, d in caps.items() if d.get("changed") == 1]
@@ -258,6 +295,10 @@ def main():
                 if cid not in ks or len(ksb) > len(ks[cid][1]): ks[cid] = (start, ksb)
         except FileNotFoundError as e:
             print("[pair] pcap not found:", e)
+    if not ks and ks_cip:
+        print("\nRV-CIP keystreams captured (see [RV-CIP] above): the cipher boundary worked. Next: capture a full")
+        print("plaintext vs pcap packet pair, then decrypt. NOTE the RV-CIP keystream is per-connId static-key RC4.")
+        return
     if not ks:
         mtp(caps)
         print("\nNo keystream recovered (no in-place pair and no log-vs-pcap plaintext match). If RV-ENC/RV-ENC-ST")

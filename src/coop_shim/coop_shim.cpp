@@ -1177,48 +1177,107 @@ static LONG CALLBACK rv_step_veh(EXCEPTION_POINTERS* ep) {
 
 static void rv_set_tf(void) { __writeeflags(__readeflags() | 0x100u); }   // enable the trap flag (single-step)
 
-static void __cdecl rv_trace_arm_worker(void* param) {
-  // NOTES 28i7.2: the TF single-step tracer crashed FC3 (single-stepping escaped into system code + clashed with
-  // the game's own SEH). The n=9 entry hook itself is SAFE, so instead of stepping, just READ the indirect-call
-  // target statically at entry: FUN_1123a870 does (**(code **)(**(int **)(param+0x618) + 4))(buf) - dump the
-  // object at param+0x618, its vtable, and the vtable slots so slot+4 (the buffer cipher candidate) is a concrete
-  // rva we can decompile offline. NO TF, NO stepping, all reads under __try.
-  LONG a;
-  uintptr_t p = (uintptr_t)param;
-  if (p < 0x10000u) return;
-  uintptr_t o618 = 0;
-  __try { o618 = *(volatile uintptr_t*)(p + 0x618); } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
-  if (o618 <= 0x10000u) return;   // NOTES 28i7.2: no RV-connection object at +0x618 yet (early login poll) -> skip WITHOUT spending quota
-  a = InterlockedIncrement(&g_step_done);
-  if (a > 4) return;              // cap only the MEANINGFUL dumps (RV connected)
+// ---- NOTES 28i9: HARDWARE-BREAKPOINT cipher-boundary capture (replaces the single-step tracer that crashed).
+// Disasm of FUN_1123a870 (the on-path send caller) pins the cipher EXACTLY:
+//   0x1123ab17  CMP dword ptr [EDX+0x618],0x0     ; the cipher-handler object lives at session+0x618
+//   0x1123ab5c  MOV ECX,[EAX+0x618]               ; ECX = the cipher-handler object
+//   0x1123ab69  MOV EDX,[ECX]                     ; its vtable
+//   0x1123ab6b  MOV EDX,[EDX+0x4]                 ; slot +4 = the buffer cipher method
+//   0x1123ab6e  LEA EAX,[EBP-0x108] ; PUSH EAX    ; &packet-buffer
+//   0x1123ab75  CALL EDX                           ; *** cipher: buffer becomes ciphertext in place ***
+//   0x1123ab77  CMP byte ptr [EBP-0xc0],0x0        ; first insn AFTER the cipher returns
+// So two HW execute breakpoints give a direct PRE(plaintext)/POST(ciphertext) pair on the SAME buffer -> the
+// shim XORs them into the keystream itself. No TF single-step, no stepping into system code, no game slowdown.
+static void*          g_hwbp_veh = 0;
+static volatile LONG  g_hwbp_armed = 0;
+static volatile LONG  g_cip_pairs = 0;          // completed PRE/POST keystream pairs
+static volatile LONG  g_cip_ptr_logged = 0;
+#define RV_CI_PRE  0x0123ab75u                    // CALL EDX (cipher)  - fires before -> buffer is plaintext
+#define RV_CI_POST 0x0123ab77u                    // first insn after the cipher ret - buffer is ciphertext
+static uintptr_t      g_pre_dp = 0;
+static LONG           g_pre_len = 0;
+static unsigned char  g_pre_buf[256];
+
+static void cip_hex(const char* tag, const unsigned char* buf, int n) {
+  char out[3*64+1]; int k = 0;
+  if (n > 32) n = 32;                             // keep one line; keystream prefix is what we need first
+  for (int i = 0; i < n; i++) { k += sprintf(out + k, "%02x ", buf[i]); }
+  if (k && out[k-1] == ' ') out[k-1] = 0;
+  LOGF("shim: %s %s", tag, out);
+}
+
+static LONG CALLBACK rv_hwbp_veh(EXCEPTION_POINTERS* ep) {
+  DWORD code = ep->ExceptionRecord->ExceptionCode;
+  CONTEXT* c = ep->ContextRecord;
+  if (code == EXCEPTION_BREAKPOINT) {             // our arm-int3 fallback: install both HW execute BPs, skip int3
+    c->Eip += 1;
+    c->Dr0 = (DWORD)(g_mod + RV_CI_PRE);
+    c->Dr1 = (DWORD)(g_mod + RV_CI_POST);
+    c->Dr7 = (c->Dr7 & ~0x00FF00FFu) | 0x05u;     // BP0 + BP1 local EXECUTE (type/len 00)
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+  if (code != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;   // HW BP fires as a #DB
+  DWORD d6 = c->Dr6; c->Dr6 = 0;
+  if (!(d6 & 0x3)) return EXCEPTION_CONTINUE_SEARCH;                     // not our breakpoints
+  if (g_cip_pairs > 48) return EXCEPTION_CONTINUE_EXECUTION;            // enough keystream samples
   __try {
-    LOGF("shim: RV-TRGLDUMP #%ld param=0x%08x  obj@(param+0x618)=0x%08x", a, (uint32_t)p, (uint32_t)o618);
-    uintptr_t vt = *(volatile uintptr_t*)o618;
-    int inmod = (vt >= g_mod && vt < g_mod + g_imgsize);
-    LOGF("shim:   obj618 vtbl=0x%08x %s", (uint32_t)vt, inmod ? "(in module)" : "[outside module]");
-    if (inmod) {
-      for (int s = 0; s <= 0x30; s += 4) {
-        uintptr_t fn = *(volatile uintptr_t*)(vt + s);
-        LOGF("shim:   vtbl+0x%02x = 0x%08x (rva 0x%x)%s", s, (uint32_t)fn, (uint32_t)(fn - g_mod), (fn>=g_mod&&fn<g_mod+g_imgsize)?"":" [outside]");
+    uintptr_t slot = (uintptr_t)c->Ebp - 0x108u;  // the 8-dword packet-buffer slot in FUN_1123a870
+    uintptr_t dp = *(volatile uintptr_t*)slot;
+    if (dp >= 0x10000u) {
+      if (d6 & 1u) {                                                     // BP0: BEFORE the cipher call -> plaintext
+        if (InterlockedCompareExchange(&g_cip_ptr_logged, 1, 0) == 0) {
+          uintptr_t fn = (uintptr_t)c->Edx;
+          LOGF("shim: RV-CIP cipher fn = 0x%08x (rva 0x%x)  [vtable slot+4 of session+0x618]", (uint32_t)fn, (uint32_t)(fn - g_mod));
+        }
+        g_pre_dp = dp; g_pre_len = 256;
+        for (int i = 0; i < 256; i++) g_pre_buf[i] = ((volatile unsigned char*)dp)[i];
+        cip_hex("RV-CIP-PRE", g_pre_buf, 32);
+      } else if (dp == g_pre_dp && g_pre_len) {                          // BP1: AFTER the cipher -> ciphertext
+        unsigned char ct[64], ks[64];
+        for (int i = 0; i < 32; i++) { ct[i] = ((volatile unsigned char*)dp)[i]; ks[i] = (unsigned char)(g_pre_buf[i] ^ ct[i]); }
+        cip_hex("RV-CIP-CT", ct, 32);
+        cip_hex("RV-CIP-KS", ks, 32);                                    // keystream = plaintext ^ ciphertext
+        InterlockedIncrement(&g_cip_pairs);
       }
     }
-  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-TRGLDUMP fault"); }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-CIP fault"); }
+  return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static void __cdecl rv_trace_arm_worker(void* param) {
+  // NOTES 28i9: this worker runs on the FUN_1123a870 poller thread. Arm the two HW execute breakpoints on THIS
+  // thread once. Try SetThreadContext of the debug registers first (clean, no visible INT3); if the OS rejects it
+  // for the current thread, fall back to __debugbreak() so rv_hwbp_veh can write Dr0/Dr7 into the live CONTEXT.
+  (void)param;
+  if (InterlockedCompareExchange(&g_hwbp_armed, 1, 0) != 0) return;
+  int done = 0;
+  __try {
+    CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    if (GetThreadContext(GetCurrentThread(), &ctx)) {
+      ctx.Dr0 = (DWORD)(g_mod + RV_CI_PRE);
+      ctx.Dr1 = (DWORD)(g_mod + RV_CI_POST);
+      ctx.Dr6 = 0;
+      ctx.Dr7 = (ctx.Dr7 & ~0x00FF00FFu) | 0x05u;
+      if (SetThreadContext(GetCurrentThread(), &ctx)) { done = 1; LOGF("shim: RV-CIP armed via SetThreadContext Dr0=0x%08x Dr1=0x%08x Dr7=0x%x", ctx.Dr0, ctx.Dr1, ctx.Dr7); }
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { done = 0; }
+  if (!done) { LOGF("shim: RV-CIP arming via SetThreadContext failed (err %lu), using INT3 fallback", GetLastError()); __try { __debugbreak(); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
 }
 __declspec(naked) static void hk_rv_trace31860(void) {
   __asm {
     push ecx                       // ECX = thiscall param_1; also serves as the worker's first argument
-    call rv_trace_arm_worker       // dumps the vtable target at param+0x618 (no stepping)
+    call rv_trace_arm_worker       // arms the two HW breakpoints on the poller thread
     pop ecx                        // restore ECX (thiscall this) for the original
     jmp  dword ptr [g_tr31860]      // tail into the 9-byte trampoline -> original FUN_1123a870 body
   }
 }
 static void install_rv_trace31860(void) {
-  // NOTES 28i7.1: arm the indirect-call tracer on the REAL on-path caller of FUN_112161b0 (found from the RV-PKT
-  // CALLER log: return rva 0x123abe0 -> inside FUN_1123a870). Its prologue is 55 8B EC + 81 EC imm32 -> needs a
-  // clean 9-byte cut (n=9); 6 bytes would corrupt the sub-esp. Single-stepping this dispatch reaches the indirect
-  // vtable calls (e.g. (**(conn+0x618)->vtable+4)(...)) one of which is the prudps cipher.
+  // NOTES 28i9: register the HW-breakpoint handler, then the n=9 entry hook on the on-path send caller FUN_1123a870
+  // (the hook only arms the HW BPs on the poller thread). The HW BPs sit on the cipher call (0x0123ab75 PRE) and
+  // the instruction right after it returns (0x0123ab77 POST), giving the shim a direct plaintext/ciphertext pair.
+  if (!g_hwbp_veh) g_hwbp_veh = AddVectoredExceptionHandler(1, rv_hwbp_veh);
   int rc = install_rv_observer_n(0x0123a870u, (void*)hk_rv_trace31860, &g_tr31860, "rv_trace_a870", 9);
-  LOGF("shim: RV-TRGL hook install rc=%d (FUN_1123a870 rva 0x0123a870, n=9 cut; the on-path caller of FUN_112161b0)", rc);
+  LOGF("shim: RV-CIP install rc=%d (hook FUN_1123a870 rva 0x0123a870 n=9; HW BP PRE rva 0x0123ab75 + POST rva 0x0123ab77)", rc);
 }
 
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
