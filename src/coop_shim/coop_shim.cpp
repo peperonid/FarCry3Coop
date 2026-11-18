@@ -1177,20 +1177,38 @@ static LONG CALLBACK rv_step_veh(EXCEPTION_POINTERS* ep) {
 
 static void rv_set_tf(void) { __writeeflags(__readeflags() | 0x100u); }   // enable the trap flag (single-step)
 
-static void __cdecl rv_trace_arm_worker(void) {
-  LONG a = InterlockedIncrement(&g_step_done);     // count arms; FUN_1123a870 is a poller, so trace a few invocations
-  if (a > 12) return;                              // at most 12 traced invocations (the login/co-op sends occur early)
-  if (!g_step_veh) g_step_veh = AddVectoredExceptionHandler(1, rv_step_veh);
-  g_step_count = 0; g_step_ilen = 0; g_step_active = 1;
-  logLock(); LOGF("shim: RV-TRGL armed #%ld on FUN_1123a870 (rva 0x123a870, on-path caller of the send). Stepping this invocation to log indirect-call targets (cap %d). The NON-SENDPATH target reached just before a send = the prudps RC4.", a, g_step_cap); logUnlock();
-  rv_set_tf();   // enable TF -> first single-step lands in the VEH
+static void __cdecl rv_trace_arm_worker(void* param) {
+  // NOTES 28i7.2: the TF single-step tracer crashed FC3 (single-stepping escaped into system code + clashed with
+  // the game's own SEH). The n=9 entry hook itself is SAFE, so instead of stepping, just READ the indirect-call
+  // target statically at entry: FUN_1123a870 does (**(code **)(**(int **)(param+0x618) + 4))(buf) - dump the
+  // object at param+0x618, its vtable, and the vtable slots so slot+4 (the buffer cipher candidate) is a concrete
+  // rva we can decompile offline. NO TF, NO stepping, all reads under __try.
+  LONG a = InterlockedIncrement(&g_step_done);
+  if (a > 6) return;
+  uintptr_t p = (uintptr_t)param;
+  if (p < 0x10000u) return;
+  __try {
+    uintptr_t o618 = *(volatile uintptr_t*)(p + 0x618);
+    LOGF("shim: RV-TRGLDUMP #%ld param=0x%08x rva 0x%x  obj@(param+0x618)=0x%08x", a, (uint32_t)p, (uint32_t)(p - g_mod), (uint32_t)o618);
+    if (o618 > 0x10000u) {
+      uintptr_t vt = *(volatile uintptr_t*)o618;
+      int inmod = (vt >= g_mod && vt < g_mod + g_imgsize);
+      LOGF("shim:   obj618 vtbl=0x%08x %s", (uint32_t)vt, inmod ? "(in module)" : "[outside module]");
+      if (inmod) {
+        for (int s = 0; s <= 0x30; s += 4) {
+          uintptr_t fn = *(volatile uintptr_t*)(vt + s);
+          LOGF("shim:   vtbl+0x%02x = 0x%08x (rva 0x%x)%s", s, (uint32_t)fn, (uint32_t)(fn - g_mod), (fn>=g_mod&&fn<g_mod+g_imgsize)?"":" [outside]");
+        }
+      }
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-TRGLDUMP fault"); }
 }
 __declspec(naked) static void hk_rv_trace31860(void) {
   __asm {
-    push ecx                       // preserve thiscall ECX across the worker call
-    call rv_trace_arm_worker
-    pop ecx
-    jmp  dword ptr [g_tr31860]      // tail into the 6-byte trampoline -> original FUN_11231860 body
+    push ecx                       // ECX = thiscall param_1; also serves as the worker's first argument
+    call rv_trace_arm_worker       // dumps the vtable target at param+0x618 (no stepping)
+    pop ecx                        // restore ECX (thiscall this) for the original
+    jmp  dword ptr [g_tr31860]      // tail into the 9-byte trampoline -> original FUN_1123a870 body
   }
 }
 static void install_rv_trace31860(void) {
