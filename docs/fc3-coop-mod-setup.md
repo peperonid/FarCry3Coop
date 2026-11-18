@@ -5,6 +5,20 @@
 > resolves the long-standing "which version is our build?" question. Private local paths are written
 > as placeholders (`<GAME_DIR>`, `<DOWNLOADS>`, `<UPC_DIR>`) — keep real paths out of the PR.
 
+> **TL;DR / status.** mod 262 gives **SOLO offline co-op** — one human plays the co-op maps
+> offline; this works and is the shipped result. **True multi-human co-op is NOT delivered**: the
+> in-process online route (emulating Ubisoft's RendezVous) is **parked as research** — the RV
+> transport works and the server answers, but the per-packet `prudps` cipher is applied by an
+> OpenSSL-RC4/vtable routine we cannot isolate statically or hook live. Full technical write-up:
+> [Strategy D findings](strategy-d-findings.md).
+
+## 0. What this document is
+
+This is the **release guide** for the **mod-262 SOLO offline co-op** baseline: it tells you how to
+reproduce the one working setup, what it does and does *not* give you, and the version truth behind
+it. It is paired with [Strategy D findings](strategy-d-findings.md) (why the online multiplayer
+frontier was parked) and `NOTES.md` (the raw session log).
+
 ## 1. The working recipe (confirmed by the owner on 2026-11-13)
 
 Build the offline co-op setup **in this exact order**, on a **clean** copy:
@@ -72,6 +86,28 @@ loaders are the ones that must be in `<GAME_DIR>\bin`** — our proxy is an alte
 of the same Uplay-fake idea and was NOT the working config (mixing them caused the `MSVCR100` crash).
 Keep mod 262's loaders in place for the mod-262 baseline; our proxy/shim are for the separate
 custom-bridge experiments. Everything we wrote is backed up (`.orig` / `.bak-<stamp>`).
+
+**Online tooling status (updated 2026-11-14).** After the full RV investigation (sessions 28f5–28g10,
+summarised in [Strategy D findings](strategy-d-findings.md)) the custom online/co-op-emulation tooling
+(`coop_shim`, `rv_server`, the RV observers) is **parked**: RV is reached on a real login and the
+Ubisoft server answers, but the `prudps` per-packet cipher could not be decrypted offline and could not
+be captured live (it sits below every hookable layer). This does **not** affect the mod-262 SOLO
+baseline, which uses mod 262's own loaders only.
+
+## 7. What this gives you, and its limits
+
+**Gives you:** a fully playable **solo offline** Far Cry 3 with the co-op maps/levels reachable without
+Ubisoft services — the stable baseline this repo ships.
+
+**Limits (by design, not a bug):**
+- **One player only.** mod 262 is *Solo Offline Co-op*: it lets the co-op content run offline for a
+  single human. It does **not** bring in a second/third/fourth real player.
+- **No online multiplayer.** Joining other humans requires the RendezVous/`prudps` online stack, which
+  is Ubisoft-server-side and, for us, parked — see [Strategy D findings](strategy-d-findings.md).
+- **Auto-update fragility.** Ubisoft Connect updating can break the mod's hook (§4); re-run §1.
+
+**Strongest next lead for real multiplayer:** scubrah's **Open World Co-op** mod (§5) — it already does
+multi-human co-op on this engine and is a better study target than re-implementing RV from scratch.
 
 Internal Ubisoft paths and the owner's real paths stay LOCAL; artifact names above are public Nexus
 names.
