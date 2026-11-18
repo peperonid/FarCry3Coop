@@ -925,35 +925,9 @@ static void rv_drv_hook_resolve(void* thisp) {
 // the plaintext and the pair yields the keystream; if entry is already ciphertext we still learn where it turns over.
 // All read-only (one call to each original, return value passed through); vtable swap needs no instruction relocation.
 typedef int (__thiscall *pkt_send_t)(void* thisp, void* obj, int p3);
-typedef int (__thiscall *pkt_v4_t)(void* obj);
 static uintptr_t g_rv_pkt_tr = 0;          // FUN_112161b0 trampoline
-static uintptr_t g_pkt4_orig = 0;           // original packet-object vtable +0x4
-static volatile LONG g_pkt4_hooked = 0;     // once flag for the vtable swap
-static volatile LONG g_pkt_logged = 0, g_pkt4_logged = 0;
+static volatile LONG g_pkt_logged = 0;     // NOTES 28g6: vtable +0x4 wrap removed (crashed the game; +0x4 is not the cipher)
 #define RV_PKT_DUMP_CAP 80
-static int __cdecl rv_pkt_v4_work(void* obj, uintptr_t orig) {
-  int r = -1; LONG idx = InterlockedIncrement(&g_pkt4_logged); int do_log = (idx <= RV_PKT_DUMP_CAP); unsigned s0 = 0;
-  __try {
-    unsigned char* b = 0; int len = 0;
-    if (obj) { b = *(unsigned char**)((char*)obj + 8); len = *(volatile int*)((char*)obj + 0xc); }
-    int ok = (b && len > 8 && len < 65536);
-    if (do_log && ok) { s0 = rv_enc_sum(b, len); unsigned cid = (unsigned)*(volatile int*)(b + 4);
-      logLock(); LOGF("shim: RV-PKT4 #%ld obj=%p len=%d connId=%08x (serialize +0x4)", idx, obj, len, cid); rv_enc_dump("PRE(serialize)", b, len); logUnlock(); }
-    if (orig) r = ((pkt_v4_t)orig)(obj);
-    if (do_log && ok) {
-      unsigned s1 = rv_enc_sum(b, len); int changed = (s0 != s1);
-      logLock(); LOGF("shim: RV-PKT4 #%ld POST rc=%d payload_changed=%d%s", idx, r, changed, changed ? "  <== cipher applied INSIDE the serialize method: PRE here is the plaintext" : ""); rv_enc_dump("POST(serialize)", b, len); logUnlock();
-    }
-  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-PKT4 #%ld fault", idx); }
-  return r;
-}
-__declspec(naked) static void rv_pkt_v4_repl(void){ __asm {   // vtable +0x4 called as (**(obj)+4)() : ECX=obj, 0 stack args
-  push dword ptr [g_pkt4_orig]
-  push ecx
-  call rv_pkt_v4_work
-  add  esp, 8
-  ret
-} }
 static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
   int rc = -1; LONG idx = InterlockedIncrement(&g_pkt_logged); int do_log = (idx <= RV_PKT_DUMP_CAP); unsigned s0 = 0;
   __try {
@@ -962,19 +936,8 @@ static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
     int ok = (b && len > 8 && len < 65536);
     if (do_log && ok) { s0 = rv_enc_sum(b, len); unsigned cid = (unsigned)*(volatile int*)(b + 4);
       logLock(); LOGF("shim: RV-PKT #%ld obj=%p vtbl=%p len=%d connId=%08x", idx, obj, *(void**)obj, len, cid); rv_enc_dump("PRE(obj@entry)", b, len); logUnlock(); }
-    if (do_log && obj) {   // arm the +0x4 wrap (once) before invoking the original, so THIS send's serialize is captured
-      uintptr_t vptr = *(volatile uintptr_t*)obj;
-      if (InterlockedCompareExchange(&g_pkt4_hooked, 1, 0) == 0) {
-        if (vptr >= g_mod && vptr < g_mod + g_imgsize) {
-          DWORD old; uintptr_t m4 = *(volatile uintptr_t*)(vptr + 4);
-          logLock(); LOGF("shim: RV-PKT obj vtbl=0x%08x slot4=0x%08x (rva 0x%x) inmod=%d", (uint32_t)vptr, (uint32_t)m4, (uint32_t)(m4 - g_mod), (m4 >= g_mod && m4 < g_mod + g_imgsize) ? 1 : 0); logUnlock();
-          if (m4 >= g_mod && m4 < g_mod + g_imgsize && VirtualProtect((void*)(vptr + 4), 4, PAGE_READWRITE, &old)) {
-            g_pkt4_orig = m4; *(volatile uintptr_t*)(vptr + 4) = (uintptr_t)&rv_pkt_v4_repl;
-            VirtualProtect((void*)(vptr + 4), 4, old, &old);
-          } else { logLock(); LOGF("shim: RV-PKT slot4 swap skipped"); logUnlock(); }
-        } else { InterlockedExchange(&g_pkt4_hooked, 0); logLock(); LOGF("shim: RV-PKT obj vtbl 0x%08x outside module - retry", (uint32_t)vptr); logUnlock(); }
-      }
-    }
+    // NOTES 28g6: vtable +0x4 wrap REMOVED - the +0x4 method is NOT the cipher (data is already encrypted
+    // at FUN_112161b0 entry, NOTES 28g4/28g6) and the thiscall swap corrupted the method ABI and crashed the game on load.
     if (g_rv_pkt_tr) rc = ((pkt_send_t)g_rv_pkt_tr)(thisp, obj, p3);
     if (do_log && ok) {
       unsigned s1 = rv_enc_sum(b, len); int changed = (s0 != s1);
@@ -996,7 +959,7 @@ __declspec(naked) static void hk_rv_pkt(void){ __asm {   // FUN_112161b0 is this
 } }
 static void install_rv_pkt(void){
   int rc = install_rv_observer(0x012161b0u, (void*)hk_rv_pkt, &g_rv_pkt_tr, "rv_pkt_send");   // FUN_112161b0 (prologue 55 8B EC verified)
-  LOGF("shim: RV-PKT capture install rc=%d (FUN_112161b0 RVA 0x012161b0). Do Co-op -> Host w/ real login; read RV-PKT / RV-PKT4 lines: RV-PKT4 payload_changed=1 means the serialize +0x4 method is the cipher and its PRE dump is the PLAINTEXT (=> keystream = PRE^POST, no secret).");
+  LOGF("shim: RV-PKT capture install rc=%d (FUN_112161b0 RVA 0x012161b0). Do Co-op -> Host w/ real login; read RV-PKT lines (entry/exit buffer dump around FUN_112161b0). NOTES 28g6: data is already encrypted at this entry -> the cipher is UPSTREAM of FUN_112161b0; the +0x4 vtable wrap was removed because it crashed the game.");
 }
 
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
