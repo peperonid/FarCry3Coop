@@ -16,6 +16,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
 
 static FILE* g_logf = 0;
 static HINSTANCE g_hinst = 0;
@@ -856,6 +858,29 @@ static void rv_this_window_scan(void* thisp, const char* from) {
   } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim:   THIS[%s] scan fault", from); }
 }
 
+// ---- NOTES 28i4: name the module that OWNS an address. The RV-PKT packet-object vtable (e.g. 0x79F7EBBC with FC3
+// base 0x10000000) is NOT inside FC3_d3d11.dll -> the Quazal packet class and the prudps cipher live in ANOTHER
+// module we never analyzed statically (all RC4 hunts scanned only FC3). This logs the owning module name + base +
+// rva so Ghidra can target the right binary. Caller must hold logLock.
+static void rv_module_of(void* addr, const char* label) {
+  __try {
+    HMODULE mods[512]; DWORD cb = 0; uintptr_t a = (uintptr_t)addr;
+    if (!K32EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &cb)) { LOGF("shim:   RV-MOD %s: enum failed err=%u", label, GetLastError()); return; }
+    int n = (int)(cb / sizeof(HMODULE));
+    for (int i = 0; i < n; i++) {
+      MODULEINFO mi;
+      if (!K32GetModuleInformation(GetCurrentProcess(), mods[i], &mi, sizeof(mi))) continue;
+      uintptr_t b = (uintptr_t)mi.lpBaseOfDll;
+      if (a >= b && a < b + mi.SizeOfImage) {
+        char nm[MAX_PATH]; nm[0] = 0; K32GetModuleBaseNameA(GetCurrentProcess(), mods[i], nm, sizeof(nm));
+        LOGF("shim:   RV-MOD %s addr=0x%08x -> module '%s' base=0x%08x size=0x%x rva=0x%x", label, (uint32_t)a, nm, (uint32_t)b, (unsigned)mi.SizeOfImage, (uint32_t)(a - b));
+        return;
+      }
+    }
+    LOGF("shim:   RV-MOD %s addr=0x%08x not in any module (heap/jit?)", label, (uint32_t)a);
+  } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim:   RV-MOD %s fault", label); }
+}
+
 // ---- NOTES 28i2: RV-ENC-ST. Capture the RV *sendto* wrapper FUN_11218510 - in the 28g8 run the RV data actually
 // left via sendto, not WSASendTo, so the WSASendTo-only capture saw 0. This is an ABI-NEUTRAL observer (save all
 // regs+flags, call a PRE dumper, restore, tail-jump the trampoline) so it cannot corrupt the stack regardless of
@@ -1032,7 +1057,7 @@ static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
     // FUN_11214630, so RV-ENC/RV-ENC-ST saw 0 this run). Scan its connection `thisp` for the real socket-driver
     // vtable and ARM the send-slot swap BEFORE invoking the original, so this very call's driver send is captured
     // in-place by RV-DRV10/RV-DRV1C => payload_changed=1 => the PRE/POST pair IS the keystream (pt^ct), no secret.
-    if (do_log && thisp) { logLock(); if (idx <= 3) rv_this_window_scan(thisp, "pkt-conn"); logUnlock(); rv_drv_hook_resolve(thisp); }
+    if (do_log && thisp) { logLock(); if (idx <= 3) { rv_module_of(thisp, "this"); if (obj) { rv_module_of(*(void**)obj, "obj-vtbl"); rv_module_of(obj, "obj"); } rv_this_window_scan(thisp, "pkt-conn"); } logUnlock(); rv_drv_hook_resolve(thisp); }
     // NOTES 28g6: vtable +0x4 wrap REMOVED - the +0x4 method is NOT the cipher (data is already encrypted
     // at FUN_112161b0 entry, NOTES 28g4/28g6) and the thiscall swap corrupted the method ABI and crashed the game on load.
     if (g_rv_pkt_tr) rc = ((pkt_send_t)g_rv_pkt_tr)(thisp, obj, p3);

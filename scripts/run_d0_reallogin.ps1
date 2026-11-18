@@ -57,21 +57,32 @@ $env:FC3COOP_MGR_WATCH   = "1"
 $env:FC3COOP_LOG_PUMP    = "1"
 Start-Process -FilePath (Join-Path $Bin "farcry3_d3d11.exe") -ArgumentList @("-skipintro","-quickstartup")
 
-Start-Sleep -Seconds 20
-$alive = Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue
+# The proxy loads coop_shim.dll LAZILY via tryLoadShim() on the first call into the uplay loader (i.e. once the
+# game starts its Ubisoft handshake), which can be well after 20s. Poll up to 120s for the install banner instead of
+# judging too early and crying INCONCLUSIVE on a good run.
 $shimLog = Join-Path $Bin "coop_shim.log"
+$banner = "no"; $anyline = 0; $alive = $null; $waited = 0
+for ($t = 0; $t -lt 120; $t += 5) {
+  Start-Sleep -Seconds 5; $waited = $t + 5
+  $alive = Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue
+  $shimTxt = if (Test-Path $shimLog) { Get-Content $shimLog -Raw -ErrorAction SilentlyContinue } else { "" }
+  $anyline = ([regex]::Matches($shimTxt, "shim: ")).Count
+  if ($shimTxt -match "RV-PROBE observers installed") { $banner = "YES"; break }
+  if (-not $alive) { break }   # game gone; stop waiting
+}
 $shimTxt = if (Test-Path $shimLog) { Get-Content $shimLog -Raw -ErrorAction SilentlyContinue } else { "" }
-$banner = if ($shimTxt -match "RV-PROBE observers installed") { "YES" } else { "no" }
 $anyline = ([regex]::Matches($shimTxt, "shim: ")).Count
+if ($shimTxt -match "RV-PROBE observers installed") { $banner = "YES" }
+$alive = Get-Process farcry3_d3d11 -ErrorAction SilentlyContinue
 $ubiconn = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "Uplay|Ubisoft" } | Select-Object -First 1
 Write-Host ""
-Write-Host ("[engagement] game            : {0}" -f $(if ($alive) {"RUNNING pid $($alive.Id)"} else {"NOT RUNNING - the game process exited; shim cannot log"}))
+Write-Host ("[engagement] waited {0}s; game : {1}" -f $waited, $(if ($alive) {"RUNNING pid $($alive.Id)"} else {"NOT RUNNING - the game process exited; shim cannot log"}))
 Write-Host ("[engagement] Ubisoft Connect : {0}" -f $(if ($ubiconn) {"RUNNING $($ubiconn.ProcessName)"} else {"NOT RUNNING - REAL login will fail, launch Ubisoft Connect first"}))
 Write-Host ("[engagement] coop_shim lines  : {0}   install banner: {1}" -f $anyline, $banner)
 if ($banner -ne "YES") {
-    Write-Host "[engagement] WARNING INCONCLUSIVE: coop_shim.dll wrote NO install banner. Causes: game not running,"
-    Write-Host "               or Ubisoft Connect closed (start it + log in), or a stale game instance. The shim only"
-    Write-Host "               installs RV observers after it hooks the live FC3_d3d11 module; with no running game there is nothing to hook."
+    Write-Host "[engagement] NOTE: no install banner yet. The shim loads on the first uplay-loader call (login). If the"
+    Write-Host "               game is at the main menu but still no banner, the proxy did not load coop_shim.dll (check"
+    Write-Host "               uplay_api.log for 'LoadLibrary coop_shim ... OK'). Otherwise proceed to Co-op -> Host."
 }
 Write-Host ""
 Write-Host "== real-login RV-PROBE harness up =="
