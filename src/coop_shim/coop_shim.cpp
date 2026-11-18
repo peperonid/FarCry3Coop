@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <psapi.h>
+#include <intrin.h>
 #pragma comment(lib, "psapi.lib")
 
 static FILE* g_logf = 0;
@@ -1084,6 +1085,104 @@ static void install_rv_pkt(void){
   LOGF("shim: RV-PKT capture install rc=%d (FUN_112161b0 RVA 0x012161b0). Do Co-op -> Host w/ real login; read RV-PKT lines (entry/exit buffer dump around FUN_112161b0). NOTES 28g6: data is already encrypted at this entry -> the cipher is UPSTREAM of FUN_112161b0; the +0x4 vtable wrap was removed because it crashed the game.");
 }
 
+// ---- NOTES 28i6: dynamic INDIRECT-CALL tracer (path #2). Static call-graph dead-ends because the prudps RC4
+// is dispatched through an indirect call (vtable / fn-ptr) that Ghidra cannot resolve. So: single-step ONE
+// send-path descent at runtime (armed on FUN_11231860, prologue 55 8B EC) and log every indirect CALL target
+// (eip rva -> target rva, flagged when the target is OUTSIDE the send block -> the cipher candidate). The
+// target of the call that turns the packet buffer into ciphertext is the RC4; we then hook it next run.
+// OBSERVER-ONLY: TF single-step via a vectored handler, never rewrites game code, one-shot, hard step cap.
+static uintptr_t      g_tr31860 = 0;
+static void*          g_step_veh = 0;
+static volatile LONG  g_step_done = 0;     // arm exactly once
+static volatile LONG  g_step_active = 0;   // stepping in progress (the armed thread has TF)
+static volatile LONG  g_step_count = 0;
+static volatile LONG  g_step_ilen = 0;
+static const LONG     g_step_cap = 200000;
+
+static uintptr_t x86_reg(const CONTEXT* c, int r) {
+  switch (r & 7) {
+    case 0: return c->Eax; case 1: return c->Ecx; case 2: return c->Edx; case 3: return c->Ebx;
+    case 4: return c->Esp; case 5: return c->Ebp; case 6: return c->Esi; default: return c->Edi;
+  }
+}
+
+// decode an indirect CALL (FF /2) at eip; resolve its target from the current register/memory state.
+static int rv_icall_target(uintptr_t eip, const CONTEXT* c, uintptr_t* target) {
+  unsigned char* b = (unsigned char*)eip;
+  int i = 0;
+  for (;;) { unsigned char p = b[i];
+    if (p==0x66||p==0x67||p==0xF0||p==0xF2||p==0xF3||p==0x2E||p==0x36||p==0x3E||p==0x26||p==0x64||p==0x65) { i++; continue; }
+    break;
+  }
+  if (b[i] != 0xFF) return 0;
+  unsigned char modrm = b[i+1]; int mod = modrm>>6, reg = (modrm>>3)&7, rm = modrm&7;
+  if (reg != 2) return 0;            // CALL /2 only (skip jmp /4, callf /3)
+  i += 2;
+  if (mod == 3) { *target = x86_reg(c, rm); return 1; }
+  uintptr_t ea;
+  if (rm == 4) {                      // SIB
+    unsigned char sib = b[i++]; int scale = 1 << (sib>>6); int idx = (sib>>3)&7; int base = sib&7;
+    ea = 0;
+    if (base == 5) { ea = (uintptr_t)*(uint32_t*)(b+i); i += 4; }
+    else           { ea = x86_reg(c, base); }
+    if (idx != 4) ea += (uintptr_t)(scale * x86_reg(c, idx));
+  } else if (mod == 0 && rm == 5) { ea = (uintptr_t)*(uint32_t*)(b+i); i += 4; }
+  else { ea = x86_reg(c, rm); if (mod == 1) ea += (uintptr_t)(signed char)b[i++]; else if (mod == 2) { ea += (uintptr_t)*(uint32_t*)(b+i); i += 4; } }
+  *target = *(volatile uintptr_t*)ea;
+  return 1;
+}
+
+static LONG CALLBACK rv_step_veh(EXCEPTION_POINTERS* ep) {
+  if (!g_step_active) return EXCEPTION_CONTINUE_SEARCH;
+  if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;
+  CONTEXT* c = ep->ContextRecord;
+  uintptr_t eip = (uintptr_t)c->Eip, base = g_mod;
+  __try {
+    uintptr_t tgt = 0;
+    if (rv_icall_target(eip, c, &tgt)) {
+      if (g_step_ilen < 600) {
+        LONG n = InterlockedIncrement(&g_step_ilen);
+        if (tgt >= base && tgt < base + g_imgsize) {
+          uintptr_t r = tgt - base;
+          int inpath = (r >= 0x01210000u && r <= 0x01245000u);
+          logLock(); LOGF("shim: RV-TRGL #%ld icall eip=0x%08x(rva 0x%x) -> 0x%08x(rva 0x%x) %s", n, (uint32_t)eip, (uint32_t)(eip-base), (uint32_t)tgt, (uint32_t)r, inpath?"":"<<< NON-SENDPATH (cipher?)"); logUnlock();
+        } else {
+          logLock(); LOGF("shim: RV-TRGL #%ld icall eip=0x%08x(rva 0x%x) -> 0x%08x OUTSIDE module", n, (uint32_t)eip, (uint32_t)(eip-base), (uint32_t)tgt); logUnlock();
+        }
+      }
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) { /* bad decode - just continue */ }
+  if (InterlockedIncrement(&g_step_count) > g_step_cap) {
+    g_step_active = 0; c->EFlags &= ~0x100u;
+    logLock(); LOGF("shim: RV-TRGL step cap %d reached; tracer stopped after logging %ld indirect calls", g_step_cap, g_step_ilen); logUnlock();
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+  c->EFlags |= 0x100u;   // keep single-stepping
+  return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static void rv_set_tf(void) { __writeeflags(__readeflags() | 0x100u); }   // enable the trap flag (single-step)
+
+static void __cdecl rv_trace_arm_worker(void) {
+  if (InterlockedCompareExchange(&g_step_done, 1, 0) != 0) return;   // one shot
+  if (!g_step_veh) g_step_veh = AddVectoredExceptionHandler(1, rv_step_veh);
+  g_step_count = 0; g_step_ilen = 0; g_step_active = 1;
+  logLock(); LOGF("shim: RV-TRGL armed on FUN_11231860 (rva 0x1231860). Single-stepping this thread to log every indirect-call target (cap %d). Watch RV-TRGL lines; the NON-SENDPATH target reached as the packet turns ciphertext is the prudps RC4.", g_step_cap); logUnlock();
+  rv_set_tf();   // enable TF -> first single-step lands in the VEH
+}
+__declspec(naked) static void hk_rv_trace31860(void) {
+  __asm {
+    push ecx                       // preserve thiscall ECX across the worker call
+    call rv_trace_arm_worker
+    pop ecx
+    jmp  dword ptr [g_tr31860]      // tail into the 6-byte trampoline -> original FUN_11231860 body
+  }
+}
+static void install_rv_trace31860(void) {
+  int rc = install_rv_observer(0x01231860u, (void*)hk_rv_trace31860, &g_tr31860, "rv_trace_31860");
+  LOGF("shim: RV-TRGL hook install rc=%d (FUN_11231860 rva 0x01231860; prologue 55 8B EC verified by probe_send_prologues.py)", rc);
+}
+
 // ---- NOTES 28dp: poll the online session-manager singleton DAT_11e42c90 and log on change, to see whether the
 // Co-op "connecting to servers" hang is blocked on the manager still being NULL (auth/session never established).
 static volatile unsigned g_last_mgr = 0xFFFFFFFFu;
@@ -1150,6 +1249,7 @@ static void init(void) {
   if (g_rv_enc) install_rv_enc();               // independent read-only plaintext/ciphertext capture (NOTES 28g2)
   if (g_rv_enc) install_rv_pkt();               // upstream Quazal packet-object serialize capture (NOTES 28g5)
   if (g_rv_enc) install_rv_st_enc();            // NOTES 28i2: capture the RV sendto wrapper too (the wrapper 28g8 actually used)
+  if (g_rv_enc) install_rv_trace31860();        // NOTES 28i6: dynamic indirect-call tracer (path #2) to find the prudps RC4
   if (g_mgr_watch) { HANDLE mh = CreateThread(0, 0, mgr_watch_thread, 0, 0, 0); LOGF("shim: MGR_WATCH thread started h=%p (watch MGR-WATCH lines while doing Co-op -> Host)", (void*)mh); }
   if (g_watch_login) { install_login_event_watch(); if (g_block_logout) install_logout_block();
     if (g_online_on) { __try { *(volatile unsigned char*)VA(RVA_online_flag_global) = 1; LOGF("shim: ONLINE_ON set DAT_11f07e48=1 (try to enqueue RV connect)"); } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: ONLINE_ON set fault"); } }
