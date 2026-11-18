@@ -1046,14 +1046,16 @@ typedef int (__thiscall *pkt_send_t)(void* thisp, void* obj, int p3);
 static uintptr_t g_rv_pkt_tr = 0;          // FUN_112161b0 trampoline
 static volatile LONG g_pkt_logged = 0;     // NOTES 28g6: vtable +0x4 wrap removed (crashed the game; +0x4 is not the cipher)
 #define RV_PKT_DUMP_CAP 80
-static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
+static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3, void* retaddr) {
   int rc = -1; LONG idx = InterlockedIncrement(&g_pkt_logged); int do_log = (idx <= RV_PKT_DUMP_CAP); unsigned s0 = 0;
   __try {
     unsigned char* b = 0; int len = 0;
     if (obj) { b = *(unsigned char**)((char*)obj + 8); len = *(volatile int*)((char*)obj + 0xc); }
     int ok = (b && len > 8 && len < 65536);
     if (do_log && ok) { s0 = rv_enc_sum(b, len); unsigned cid = (unsigned)*(volatile int*)(b + 4);
-      logLock(); LOGF("shim: RV-PKT #%ld obj=%p vtbl=%p len=%d connId=%08x", idx, obj, *(void**)obj, len, cid); rv_enc_dump("PRE(obj@entry)", b, len); logUnlock(); }
+      logLock(); LOGF("shim: RV-PKT #%ld obj=%p vtbl=%p len=%d connId=%08x", idx, obj, *(void**)obj, len, cid);
+      if (idx <= 4) LOGF("shim: RV-PKT #%ld CALLER=0x%08x (rva 0x%x) this=0x%08x", idx, (uint32_t)(uintptr_t)retaddr, (uint32_t)((uintptr_t)retaddr - g_mod), (uint32_t)(uintptr_t)thisp);
+      rv_enc_dump("PRE(obj@entry)", b, len); logUnlock(); }
     // NOTES 28i2: FUN_112161b0 is the RV send path that ACTUALLY fires (its secured-driver branch skips
     // FUN_11214630, so RV-ENC/RV-ENC-ST saw 0 this run). Scan its connection `thisp` for the real socket-driver
     // vtable and ARM the send-slot swap BEFORE invoking the original, so this very call's driver send is captured
@@ -1072,11 +1074,12 @@ static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
 __declspec(naked) static void hk_rv_pkt(void){ __asm {   // FUN_112161b0 is thiscall: ECX=this, [ebp+8]=obj, [ebp+0xc]=p3
   push ebp
   mov  ebp, esp
+  push dword ptr [ebp+0x04]   // NOTES 28i7: the return address = the CALLER of FUN_112161b0 (find the real upstream)
   push dword ptr [ebp+0x0c]
   push dword ptr [ebp+0x08]
   push ecx
   call rv_pkt_capture
-  add  esp, 12
+  add  esp, 16
   pop  ebp
   ret  8
 } }
