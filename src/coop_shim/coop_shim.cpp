@@ -977,13 +977,25 @@ __declspec(naked) static void rv_drv_repl1c(void){ __asm {
 static void rv_drv_hook_resolve(void* thisp) {
   if (InterlockedCompareExchange(&g_drv_hooked, 1, 0) != 0) return;
   __try {
-    uintptr_t drv = *(volatile unsigned*)((char*)thisp + 0x9c);
-    if (drv < 0x10000u) { logLock(); LOGF("shim: RV-DRV driver ptr 0x%08x invalid - will retry next send", (uint32_t)drv); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); return; }
+    // NOTES 28i2: the driver field is NOT at +0x9c (it read 0x0 every run), so SCAN thisp for the field that
+    // points at an object whose vtable has in-module function pointers at BOTH +0x10 and +0x1c (the secured
+    // socket-driver send pair). Hook whichever offset we find instead of the hard-coded +0x9c.
+    uintptr_t drv = 0; int drv_off = -1;
+    unsigned char* o = (unsigned char*)thisp;
+    for (int off = 0; off <= 0x200 && drv == 0; off += 4) {
+      uintptr_t p = *(volatile uintptr_t*)(o + off);
+      if (p < 0x10000u) continue;
+      if (p < g_mod || p >= g_mod + g_imgsize) continue;                 // must be an in-module object
+      uintptr_t vt = *(volatile uintptr_t*)p;
+      if (vt < g_mod || vt >= g_mod + g_imgsize) continue;               // in-module vtable
+      uintptr_t s10 = *(volatile uintptr_t*)(vt + 0x10), s1c = *(volatile uintptr_t*)(vt + 0x1c);
+      if (s10 >= g_mod && s10 < g_mod + g_imgsize && s1c >= g_mod && s1c < g_mod + g_imgsize) { drv = p; drv_off = off; }
+    }
+    if (drv == 0) { logLock(); LOGF("shim: RV-DRV no driver-like field in thisp+0x0..0x200 (this=%p) - will retry next send", thisp); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); return; }
     uintptr_t vtbl = *(volatile uintptr_t*)drv;
-    if (vtbl < g_mod || vtbl >= g_mod + g_imgsize) { logLock(); LOGF("shim: RV-DRV vtable 0x%08x outside module [0x%08x,+0x%x) - skip", (uint32_t)vtbl, (uint32_t)g_mod, (unsigned)g_imgsize); logUnlock(); InterlockedExchange(&g_drv_hooked, 0); return; }
     uintptr_t m10 = *(volatile uintptr_t*)(vtbl + 0x10), m1c = *(volatile uintptr_t*)(vtbl + 0x1c);
     int ok10 = (m10 >= g_mod && m10 < g_mod + g_imgsize), ok1c = (m1c >= g_mod && m1c < g_mod + g_imgsize);
-    logLock(); LOGF("shim: RV-DRV resolved driver=0x%08x vtbl=0x%08x slot10=0x%08x(rva 0x%x) slot1c=0x%08x(rva 0x%x)", (uint32_t)drv, (uint32_t)vtbl, (uint32_t)m10, (uint32_t)(m10 - g_mod), (uint32_t)m1c, (uint32_t)(m1c - g_mod));
+    logLock(); LOGF("shim: RV-DRV found driver at thisp+0x%x: driver=0x%08x vtbl=0x%08x slot10=0x%08x(rva 0x%x) slot1c=0x%08x(rva 0x%x)", drv_off, (uint32_t)drv, (uint32_t)vtbl, (uint32_t)m10, (uint32_t)(m10 - g_mod), (uint32_t)m1c, (uint32_t)(m1c - g_mod));
     DWORD old;
     if (VirtualProtect((void*)(vtbl + 0x10), 0x10, PAGE_READWRITE, &old)) {
       if (ok10) { g_drv10_orig = m10; *(volatile uintptr_t*)(vtbl + 0x10) = (uintptr_t)&rv_drv_repl10; }
@@ -1016,6 +1028,11 @@ static int __cdecl rv_pkt_capture(void* thisp, void* obj, int p3) {
     int ok = (b && len > 8 && len < 65536);
     if (do_log && ok) { s0 = rv_enc_sum(b, len); unsigned cid = (unsigned)*(volatile int*)(b + 4);
       logLock(); LOGF("shim: RV-PKT #%ld obj=%p vtbl=%p len=%d connId=%08x", idx, obj, *(void**)obj, len, cid); rv_enc_dump("PRE(obj@entry)", b, len); logUnlock(); }
+    // NOTES 28i2: FUN_112161b0 is the RV send path that ACTUALLY fires (its secured-driver branch skips
+    // FUN_11214630, so RV-ENC/RV-ENC-ST saw 0 this run). Scan its connection `thisp` for the real socket-driver
+    // vtable and ARM the send-slot swap BEFORE invoking the original, so this very call's driver send is captured
+    // in-place by RV-DRV10/RV-DRV1C => payload_changed=1 => the PRE/POST pair IS the keystream (pt^ct), no secret.
+    if (do_log && thisp) { logLock(); if (idx <= 3) rv_this_window_scan(thisp, "pkt-conn"); logUnlock(); rv_drv_hook_resolve(thisp); }
     // NOTES 28g6: vtable +0x4 wrap REMOVED - the +0x4 method is NOT the cipher (data is already encrypted
     // at FUN_112161b0 entry, NOTES 28g4/28g6) and the thiscall swap corrupted the method ABI and crashed the game on load.
     if (g_rv_pkt_tr) rc = ((pkt_send_t)g_rv_pkt_tr)(thisp, obj, p3);
