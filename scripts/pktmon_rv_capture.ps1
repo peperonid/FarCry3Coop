@@ -24,10 +24,12 @@ $txt  = Join-Path $OutDir "rv-$stamp.txt"
 # best effort: clear any old filter so we capture all traffic
 pktmon filter remove 2>$null | Out-Null
 
-Write-Host "[pktmon] starting capture (net data) ..."
-& pktmon start --capture --net-data --comp nics -f $etl
+# pktmon build on this PC has no --net-data and rejects --comp here; the plain 'start --capture -f'
+# is the supported form (NOTES 28i7.1: --net-data returned exit 87 and --comp nics made start fail).
+Write-Host "[pktmon] starting capture ..."
+& pktmon start --capture -f $etl
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[pktmon] start with --net-data failed (exit $LASTEXITCODE); retrying minimal 'pktmon start --capture'"
+    Write-Host "[pktmon] start -f failed (exit $LASTEXITCODE); retrying minimal 'pktmon start --capture'"
     & pktmon start --capture
     if ($LASTEXITCODE -ne 0) { throw "pktmon start failed - run this script from an ELEVATED PowerShell" }
 }
@@ -42,11 +44,13 @@ Write-Host "[pktmon] stopping ..."
 & pktmon stop | Out-Null
 Start-Sleep -Seconds 2
 
-# pktmon may have written the etl to the path given with -f, or to %USERPROFILE%. Find the newest .etl.
-$cand = @(Get-ChildItem -Path $OutDir -Filter "*.etl" -ErrorAction SilentlyContinue) +
-        @(Get-ChildItem -Path $env:USERPROFILE -Filter "pktmon*.etl" -ErrorAction SilentlyContinue)
-$src = $cand | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $src) { throw "no .etl produced; check that pktmon ran elevated" }
+# pktmon writes the .etl to the path given with -f, or to the configured logger file (often the CWD / repo
+# root PktMon.etl, or %USERPROFILE%). Search all of them for the newest .etl written in the last 15 minutes.
+$cut = (Get-Date).AddMinutes(-15)
+$search = @($OutDir, $Repo, (Get-Location).Path, $env:USERPROFILE) | Select-Object -Unique
+$cand = foreach ($d in $search) { Get-ChildItem -Path $d -Filter "*.etl" -ErrorAction SilentlyContinue }
+$src = $cand | Where-Object { $_.LastWriteTime -gt $cut } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $src) { throw "no .etl produced; check that pktmon ran elevated (looked in: $($search -join '; '))" }
 Write-Host ("[pktmon] etl: {0}" -f $src.FullName)
 
 & pktmon etl2pcap $src.FullName -o $pcap | Out-Null
