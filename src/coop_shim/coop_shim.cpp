@@ -1183,22 +1183,23 @@ static void __cdecl rv_trace_arm_worker(void* param) {
   // target statically at entry: FUN_1123a870 does (**(code **)(**(int **)(param+0x618) + 4))(buf) - dump the
   // object at param+0x618, its vtable, and the vtable slots so slot+4 (the buffer cipher candidate) is a concrete
   // rva we can decompile offline. NO TF, NO stepping, all reads under __try.
-  LONG a = InterlockedIncrement(&g_step_done);
-  if (a > 6) return;
+  LONG a;
   uintptr_t p = (uintptr_t)param;
   if (p < 0x10000u) return;
+  uintptr_t o618 = 0;
+  __try { o618 = *(volatile uintptr_t*)(p + 0x618); } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+  if (o618 <= 0x10000u) return;   // NOTES 28i7.2: no RV-connection object at +0x618 yet (early login poll) -> skip WITHOUT spending quota
+  a = InterlockedIncrement(&g_step_done);
+  if (a > 4) return;              // cap only the MEANINGFUL dumps (RV connected)
   __try {
-    uintptr_t o618 = *(volatile uintptr_t*)(p + 0x618);
-    LOGF("shim: RV-TRGLDUMP #%ld param=0x%08x rva 0x%x  obj@(param+0x618)=0x%08x", a, (uint32_t)p, (uint32_t)(p - g_mod), (uint32_t)o618);
-    if (o618 > 0x10000u) {
-      uintptr_t vt = *(volatile uintptr_t*)o618;
-      int inmod = (vt >= g_mod && vt < g_mod + g_imgsize);
-      LOGF("shim:   obj618 vtbl=0x%08x %s", (uint32_t)vt, inmod ? "(in module)" : "[outside module]");
-      if (inmod) {
-        for (int s = 0; s <= 0x30; s += 4) {
-          uintptr_t fn = *(volatile uintptr_t*)(vt + s);
-          LOGF("shim:   vtbl+0x%02x = 0x%08x (rva 0x%x)%s", s, (uint32_t)fn, (uint32_t)(fn - g_mod), (fn>=g_mod&&fn<g_mod+g_imgsize)?"":" [outside]");
-        }
+    LOGF("shim: RV-TRGLDUMP #%ld param=0x%08x  obj@(param+0x618)=0x%08x", a, (uint32_t)p, (uint32_t)o618);
+    uintptr_t vt = *(volatile uintptr_t*)o618;
+    int inmod = (vt >= g_mod && vt < g_mod + g_imgsize);
+    LOGF("shim:   obj618 vtbl=0x%08x %s", (uint32_t)vt, inmod ? "(in module)" : "[outside module]");
+    if (inmod) {
+      for (int s = 0; s <= 0x30; s += 4) {
+        uintptr_t fn = *(volatile uintptr_t*)(vt + s);
+        LOGF("shim:   vtbl+0x%02x = 0x%08x (rva 0x%x)%s", s, (uint32_t)fn, (uint32_t)(fn - g_mod), (fn>=g_mod&&fn<g_mod+g_imgsize)?"":" [outside]");
       }
     }
   } __except (EXCEPTION_EXECUTE_HANDLER) { LOGF("shim: RV-TRGLDUMP fault"); }
