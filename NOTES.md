@@ -6060,3 +6060,20 @@ HARDENING (this session): (1) rv_enc_extract.py gained mtp(caps) - groups type-0
 A fresh safe real-login run (the 28g6 crash fix held; no crash) produced coop_shim_last.log: RV-PKT (FUN_112161b0) fired 24x on connId db7eda3a, but every RV-PKT block has only PRE(obj@entry) because the POST read faults (rc=-1), and the entry buffer is ALREADY high-entropy ciphertext -> 3rd independent confirmation the cipher is UPSTREAM of FUN_112161b0. RV-ENC on FUN_11214630 fired 0x while RV-PROBE (same function) fired 2x -> the two inline hooks on one address collide, only the first wins (tooling bug to remember, not chased). STATIC: decompiled the packet-object vtable at RVA 0x016bebbc (all 24 slots) -> ZERO real XOR (slot 18 FUN_112201e0 is just a size/fragment serializer, its 0xff is a mask). Decompiled the send-path data-prepare FUN_11231860 / FUN_1123a780 / FUN_112390f0 / FUN_1123d140 / FUN_1122fd60 / FUN_1123cd20 -> ZERO XOR. Only FUN_11236020 and FUN_11218d40 have XOR, and inspecting it shows all are __security_check_cookie /GS stack guards. CONCLUSION: none of the Quazal send-side code contains the byte cipher; it is a vtable/OPENSSL-RC4 routine (28f8: static OpenSSL 0.9.8l) reached indirectly, below WSASendTo. The many-time-pad is data-starved because the failed co-op join only ever retransmits ONE distinct 0x32 message per connection (that repetition IS the "servers unavailable" bug), so pt1^pt2 has no second message. Net: to read RV plaintext offline we would need either (a) a much deeper OpenSSL-RC4 key-schedule/derivation RE (repeatedly resisted, high cost/low odds), or (b) a peer that ACKs so the client emits diverse RMC messages (chicken-and-egg with the broken join). DECISION (autonomous): park the online multi-human RV-emulation frontier as research; the shipped, owner-confirmed deliverable remains mod-262 SOLO offline co-op. FC3_clean restored clean/playable. All tooling (safe inline observers, MTP extractor, auto-save teardown) committed and ready if the frontier is reopened.
 
 
+
+
+## TODO / Статус (28g8) — онлайн RV заморожен, SOLO закреплён
+
+**Delivered / playable:** mod-262 SOLO offline co-op (`docs/fc3-coop-mod-setup.md`). FC3_clean is
+clean & playable (genuine loader `uplay_r1_loader.dll` 294400, md5 `8313de5e`, no shim).
+
+**Online multi-human via local RV emulation = PARKED (28g8).** Consolidated write-up:
+`docs/strategy-d-findings.md` / `docs/strategy-d-findings.ru.md`.
+
+Open only if the frontier is reopened (see that doc §10):
+- [ ] merge the duplicate `RV-ENC`/`RV-PROBE` hook on `FUN_11214630` (single-address collision).
+- [ ] fix the `RV-PKT` POST-read fault (`rc=-1`) so an entry->exit pair can be captured.
+- [ ] pin the socket-driver vtable at `conn+0x9c` (the `driver=0x0` read was the blocker).
+- [ ] crack the OpenSSL-RC4 key schedule/derivation statically (key = `f(connId, STATIC_SECRET)`).
+- [ ] with any one: decrypt `rv.pcap`, read RV RMC methods/bodies, adapt `scripts/rv_server/`
+      (PRUDP v1 -> `prudps`), redirect RV -> localhost, then test two FC3 instances.
