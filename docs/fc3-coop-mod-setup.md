@@ -106,8 +106,14 @@ Ubisoft services — the stable baseline this repo ships.
   is Ubisoft-server-side and, for us, parked — see [Strategy D findings](strategy-d-findings.md).
 - **Auto-update fragility.** Ubisoft Connect updating can break the mod's hook (§4); re-run §1.
 
-**Strongest next lead for real multiplayer:** scubrah's **Open World Co-op** mod (§5) — it already does
-multi-human co-op on this engine and is a better study target than re-implementing RV from scratch.
+**Not a shortcut — OW15 is NOT the answer.** scubrah's **Open World Co-op** (§5) does real multi-human
+co-op, but it has no netcode of its own: it drives FC3's *native* RendezVous co-op lobby on Ubisoft's
+servers, which are dead (kill-switched), so it fails with the same **"servers unavailable"** error and
+**does not work offline** (owner-confirmed; see [OW15 checklist](ow15-online-coop-checklist.md) and
+`NOTES.md` 28dm). It is therefore not a workaround for our blocker — it *shares* it. Its only value is
+as a **reference** for how FC3's native co-op lobby is driven (a map of what an RV emulator would have
+to reproduce). The only route to offline multi-human remains emulating the dead RV service ourselves —
+parked (see [Strategy D findings](strategy-d-findings.md)).
 
 Internal Ubisoft paths and the owner's real paths stay LOCAL; artifact names above are public Nexus
 names.
