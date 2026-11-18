@@ -35,6 +35,15 @@ if (Test-Path $shim) {
     Write-Host "coop_shim.log missing at $shim (observer never loaded - inconclusive run)."
 }
 
+# persist the log so a fresh launch can't clear the evidence, then run the offline extractor (keystream + MTP) on it
+if (Test-Path $shim) {
+    $keep = Join-Path $Repo "local\scratch\coop_shim_last.log"
+    try { New-Item -ItemType Directory -Force (Split-Path $keep) | Out-Null; Copy-Item $shim $keep -Force; Write-Host ("[save] coop_shim.log -> {0}" -f $keep) } catch { Write-Host ("[save] failed: {0}" -f $_.Exception.Message) }
+    $cmdPy2 = Get-Command python.exe -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike "*\WindowsApps\*" } | Select-Object -First 1
+    $Py2 = if ($cmdPy2) { $cmdPy2.Source } else { "python" }
+    try { & $Py2 -I (Join-Path $Repo "scripts\rv_capture\rv_enc_extract.py") $shim } catch { Write-Host ("[extract] failed: {0}" -f $_.Exception.Message) }
+}
+
 foreach ($proc in @("farcry3_d3d11","farcry3")) { Get-Process $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
 $loader = Join-Path $Bin "uplay_r1_loader.dll"

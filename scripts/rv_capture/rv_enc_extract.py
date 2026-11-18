@@ -141,6 +141,44 @@ def apply_to_pcap(ks, pcap):
         ascii_tail = "".join(chr(c) if 32 <= c < 127 else "." for c in pt[12:])
         print("    plaintext-ish:", ascii_tail[:120])
 
+def mtp(caps, src_pref=("ENC",)):
+    """Many-time-pad: data packets (type 0x32) of the SAME connection share a constant per-packet
+    keystream, so CT1 ^ CT2 = pt1 ^ pt2. Group PRE buffers by connId, drop retransmit variants
+    (bytes differing only at offsets {3,19,20}), and XOR genuinely different messages."""
+    groups = {}
+    for key, d in caps.items():
+        if "pre" not in d: continue
+        if not key[0].startswith(src_pref): continue
+        pre = d["pre"]
+        if len(pre) < 13 or pre[2] != 0x32: continue
+        cid = d["cid"]
+        groups.setdefault(cid, []).append(pre)
+    VARIANT = {3, 19, 20}
+    for cid, bufs in groups.items():
+        # canonicalize retransmit variants: zero out the variant columns, dedup
+        canon = {}
+        for b in bufs:
+            c = bytearray(b)
+            for o in VARIANT:
+                if o < len(c): c[o] = 0
+            canon.setdefault(bytes(c), b)
+        distinct = list(canon.values())
+        print(f"\n[MTP] connId {cid}: {len(bufs)} data pkts -> {len(distinct)} distinct messages")
+        if len(distinct) < 2:
+            print("     only one distinct message (all retransmits) -> no MTP leverage here")
+            continue
+        for ai in range(len(distinct)):
+            for bj in range(ai+1, len(distinct)):
+                A, B = distinct[ai], distinct[bj]
+                L = min(len(A), len(B))
+                x = bytes(A[k] ^ B[k] for k in range(12, L))
+                asc = "".join(chr(c) if 32 <= c < 127 else "." for c in x)
+                runs = re.findall(r"[ -~]{3,}", asc)
+                print(f"   {len(A)}B ^ {len(B)}B -> xor-runs {runs[:5]}")
+                if runs:
+                    print("     (printable runs in pt_i^pt_j: crib-drag candidates)")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__); return
@@ -154,10 +192,12 @@ def main():
         for o in range(0, min(len(ksb), 128), 16):
             print("  +%04x:" % (start + o), " ".join("%02x" % x for x in ksb[o:o+16]))
     if not ks:
+        mtp(caps)
         print("\nNo in-place keystream recovered. If RV-ENC shows payload_changed=0, the driver encrypts a")
-        print("copy -> add a driver-vtable-side capture (see NOTES 28g2 'next').")
+        print("copy -> add a driver-vtable-side capture (see NOTES 28g2/28g6).")
         return
     print("\nOK: recovered keystreams for connIds:", ",".join(sorted(ks)))
+    mtp(caps)
     if "--apply" in sys.argv:
         try:
             ai = sys.argv.index("--apply")

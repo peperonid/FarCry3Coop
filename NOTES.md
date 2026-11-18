@@ -6045,3 +6045,11 @@ KEY DATA POINT (from the RV-PKT #1 entry dump, before the crash): the object buf
 ALTERNATIVE THAT NEEDS NO RUN / NO HOOK: the same-connection 0x32 packets share one constant keystream (28g0 retransmit identity + 28g6), so XOR of two same-connId 0x32 ciphertexts = pt1^pt2 (keystream cancels) = a many-time-pad crack that runs purely offline on the already-captured RV-ENC log / rv.pcap. This is the safest next line of attack. mod-262 SOLO banked.
 
 
+
+
+### Session 28g7 - offline MTP assessed (rv.pcap = one message/connection -> no leverage; control packets plaintext but trivial); tooling hardened so evidence is never lost + extractor now runs MTP automatically
+
+Many-time-pad feasibility on data (type-0x32) packets: same connection -> constant per-packet keystream -> CT1^CT2 = pt1^pt2. Scanned rv.pcap comprehensively: per connId the 0x32 packets are ONE logical message retransmitted (72/74 body columns identical across the 11 'distinct' 86-byte bodies; only header-offset-3 nonce + body offsets 19,20 vary) -> single message per connection -> MTP yields nothing from rv.pcap. Control types (0x0a ack, 0x24) are effectively PLAINTEXT (low entropy; last byte = seq checksum) but carry no RMC payload. The richer 28g4 RV-ENC capture DID contain multiple distinct 0x32 messages (lengths 26/58/114/116/256) - MTP-viable - but coop_shim.log was OVERWRITTEN by the later crashed run and the raw bodies were not persisted (lesson). 
+HARDENING (this session): (1) rv_enc_extract.py gained mtp(caps) - groups type-0x32 PRE buffers by connId, drops retransmit variants (columns {3,19,20}), pairwise-XORs genuinely different messages and prints printable runs (crib-drag candidates). (2) stop_d0_reallogin.ps1 now COPIES coop_shim.log to local/scratch/coop_shim_last.log (so a fresh launch can't clear the evidence) and AUTO-RUNS rv_enc_extract.py on it. Next real-login run (safe now - the crashing vtable +0x4 swap is removed) will yield RV-ENC + RV-PKT and auto-run the keystream+MTP analysis. mod-262 SOLO banked.
+
+
