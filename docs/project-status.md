@@ -141,3 +141,14 @@ Decisive next steps: (A) offline RE the FC3 prudps key exchange (Ghidra 0x112xxx
 captured payloads and read the real RV methods; (B) hosts-redirect lb-rdv-*.ubisoft.com -> rv_server and
 replay the captured handshake to see if the client advances. A2 feasibility now rests on prudps key
 derivation, not on "we will never see the traffic".
+
+## 6. Status update 2026-11-18 - Ubisoft shut FC3 online servers 2024-03-06 (external, decisive)
+
+Independent community sources confirm Ubisoft **shut down Far Cry 3's online servers on 2024-03-06**; multiplayer and
+online co-op are no longer supported. This makes the entire RV/PRUDP online route (A2/A3b) moot for a
+playable co-op: there is no server to reach, and NOTES 28i9 showed the `+0x618` game-session cipher
+handler is only installed post-matchmaking, so the encrypted co-op traffic never even starts. The
+**online co-op goal is therefore permanently out of reach**; the RV-cipher work is archived as research
+only (NOTES 28g8-28i9). The **only** remaining path to 2+ human co-op is the game's own LAN/Storm
+provider over a virtual LAN (Radmin/Hamachi) - the community-proven method and the subject of
+[r2-lan-provider-plan.md](r2-lan-provider-plan.md). mod 262 solo offline co-op stays the shipped baseline.

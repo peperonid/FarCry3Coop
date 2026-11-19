@@ -6,11 +6,15 @@
 > as placeholders (`<GAME_DIR>`, `<DOWNLOADS>`, `<UPC_DIR>`) — keep real paths out of the PR.
 
 > **TL;DR / status.** mod 262 gives **SOLO offline co-op** — one human plays the co-op maps
-> offline; this works and is the shipped result. **True multi-human co-op is NOT delivered**: the
-> in-process online route (emulating Ubisoft's RendezVous) is **parked as research** — the RV
-> transport works and the server answers, but the per-packet `prudps` cipher is applied by an
-> OpenSSL-RC4/vtable routine we cannot isolate statically or hook live. Full technical write-up:
-> [Strategy D findings](strategy-d-findings.md).
+> offline; this works and is the shipped result. **True multi-human co-op is NOT delivered, and the
+> Ubisoft-online route is permanently impossible:** Ubisoft **shut down Far Cry 3's online servers on
+> 2024-03-06** ("map downloads, multiplayer, and online co-op are no longer supported"), so there is
+> no RendezVous server to reach — emulating the RV `prudps` cipher cannot yield playable online co-op
+> (research preserved in [Strategy D findings](strategy-d-findings.md)). The only remaining route to
+> 2+ humans is the game's own **LAN/Storm** session provider over a virtual LAN (Radmin/Hamachi), the
+> community-proven method; that is an active engineering effort (see
+> [R2 LAN-provider plan](r2-lan-provider-plan.md)) — the mod only unlocks *starting* a local/private
+> co-op session by itself.
 
 ## 0. What this document is
 
