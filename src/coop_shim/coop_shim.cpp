@@ -1245,11 +1245,13 @@ static LONG CALLBACK rv_hwbp_veh(EXCEPTION_POINTERS* ep) {
 }
 
 static void __cdecl rv_trace_arm_worker(void* param) {
-  // NOTES 28i9: this worker runs on the FUN_1123a870 poller thread. Arm the two HW execute breakpoints on THIS
-  // thread once. Try SetThreadContext of the debug registers first (clean, no visible INT3); if the OS rejects it
-  // for the current thread, fall back to __debugbreak() so rv_hwbp_veh can write Dr0/Dr7 into the live CONTEXT.
+  // NOTES 28i9b: re-arm the two HW execute breakpoints on EVERY FUN_1123a870 entry (not once). Dr debug registers
+  // are per-thread and can be reset (thread reuse, a lib zeroing Dr7); the poller runs on the SAME thread that
+  // later executes the connected co-op cipher-send, so continuously refreshing Dr0/Dr1/Dr7 on this thread makes
+  // the capture self-heal until the branch actually runs. SetThreadContext of debug regs is a cheap syscall and the
+  // poller is well under 1kHz, so the per-entry cost is negligible. GetThreadContext+SetThreadContext first; if the
+  // OS ever rejects it for the current thread, the INT3 fallback (logged once) lets rv_hwbp_veh write the regs.
   (void)param;
-  if (InterlockedCompareExchange(&g_hwbp_armed, 1, 0) != 0) return;
   int done = 0;
   __try {
     CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
@@ -1258,10 +1260,14 @@ static void __cdecl rv_trace_arm_worker(void* param) {
       ctx.Dr1 = (DWORD)(g_mod + RV_CI_POST);
       ctx.Dr6 = 0;
       ctx.Dr7 = (ctx.Dr7 & ~0x00FF00FFu) | 0x05u;
-      if (SetThreadContext(GetCurrentThread(), &ctx)) { done = 1; LOGF("shim: RV-CIP armed via SetThreadContext Dr0=0x%08x Dr1=0x%08x Dr7=0x%x", ctx.Dr0, ctx.Dr1, ctx.Dr7); }
+      if (SetThreadContext(GetCurrentThread(), &ctx)) {
+        done = 1;
+        if (InterlockedCompareExchange(&g_hwbp_armed, 1, 0) == 0)
+          LOGF("shim: RV-CIP armed via SetThreadContext Dr0=0x%08x Dr1=0x%08x Dr7=0x%x (re-arming each poller entry)", ctx.Dr0, ctx.Dr1, ctx.Dr7);
+      }
     }
   } __except (EXCEPTION_EXECUTE_HANDLER) { done = 0; }
-  if (!done) { LOGF("shim: RV-CIP arming via SetThreadContext failed (err %lu), using INT3 fallback", GetLastError()); __try { __debugbreak(); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
+  if (!done && InterlockedCompareExchange(&g_hwbp_armed, 1, 0) == 0) { LOGF("shim: RV-CIP arming via SetThreadContext failed (err %lu), using INT3 fallback", GetLastError()); __try { __debugbreak(); } __except (EXCEPTION_EXECUTE_HANDLER) {} }
 }
 __declspec(naked) static void hk_rv_trace31860(void) {
   __asm {
