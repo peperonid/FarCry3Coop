@@ -23,3 +23,10 @@ PowerShell-харнесс-скрипты, запускающие игру под
 
 | `pktmon_rv_capture.ps1` | Из админа, БЕЗ патча игры. Пишет реальный RendezVous-трафик, который FC3 отправляет при co-op на настоящем логине Ubisoft (NOTES 28f5: RV-клиент срабатывает). Через Windows pktmon; кладёт .etl/.pcap/.txt в `scripts/rv_capture/` (в git-ignore). Показывает RV UDP-адресата + данные = эталонный трафик для плана локального RV-эмулятора. |
 | `rv_capture/rv_enc_extract.py` | Офлайн: разобрать лог RV-ENC шима (FC3COOP_RV_ENC=1), восстановить поточный ключ RC4 prudps на соединение из пары открытый/шифртекст (стим=pt^ct) и применить `--apply` к rv.pcap для дешифра RV-пакетов (NOTES 28g2). |
+
+## Тест LAN / Local-Session коопа двумя инстансами
+
+| Скрипт | Что делает |
+|---|---|
+| `fc3_lan_2inst_loopback.bat` | ОДИН ПК: запускает инстанс A как `-host` и инстанс B (клон `TestFC3_105_B`) как `-client -ip 127.0.0.1`, каждый со своим `-SavePath`. Рискованный путь; если B не видит A - используй скрипты Radmin. См. docs/fc3-lan-coop-test.md. |
+| `fc3_lan_radmin.bat` | ДВА ПК в сети Radmin VPN: `... host` на хосте, `... client <Radmin-IPv4-хоста>` на подключающемся. Рецепт Bantila `-host/-client/-coop` + отдельный `-SavePath`. Разрешите UDP 9000-9005 в фаерволе. |

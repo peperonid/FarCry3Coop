@@ -241,3 +241,10 @@ Run from an **elevated** PowerShell (config_server binds :80).
 
 | `pktmon_rv_capture.ps1` | Elevated, NO game patch. Records the REAL RendezVous traffic FC3 sends during Co-op on a genuine Ubisoft login (NOTES 28f5: the RV client fires). Uses Windows pktmon; writes .etl/.pcap/.txt to `scripts/rv_capture/` (git-ignored). Reveals the RV UDP destination + payload = the golden reference for the local-RV-emulator plan. |
 | `rv_capture/rv_enc_extract.py` | Offline: parse the shim RV-ENC log (FC3COOP_RV_ENC=1), recover the per-connection prudps RC4 keystream from a plaintext/ciphertext pair (keystream=pt^ct), and `--apply` to rv.pcap to decrypt RV packets (NOTES 28g2). |
+
+## LAN / Local-Session two-instance co-op test / Тест LAN-коопа двумя инстансами
+
+| Script | What it does |
+|---|---|
+| `fc3_lan_2inst_loopback.bat` | ONE PC: launches instance A as `-host` and instance B (the clone `TestFC3_105_B`) as `-client -ip 127.0.0.1`, each with its own `-SavePath` profile. The risky path; if B cannot see A use the Radmin scripts. See docs/fc3-lan-coop-test.md. |
+| `fc3_lan_radmin.bat` | TWO PCs on a Radmin VPN: run `... host` on the host PC, `... client <HOST-Radmin-IPv4>` on the joiner. Bantila `-host/-client/-coop` recipe + separate `-SavePath`. Allow UDP 9000-9005 in the firewall. |
