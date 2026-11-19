@@ -251,3 +251,6 @@ Run from an **elevated** PowerShell (config_server binds :80).
 
 | `fc3_lan_same_subnet.bat` host \| `... client [ip]` | TWO PCs on the SAME real LAN (no VPN), the simplest path. Bantila -host/-client/-coop + -SavePath; client can direct-connect by host LAN IP or join via the in-game LAN browser. |
 | `fc3_lan_firewall.bat` | Elevated, run on both PCs: opens UDP 9000-9005 both ways for FC3 (netsh advfirewall rules, with removal commands). |
+
+| `fc3_lan_host_only.bat` [map] | Start ONLY the host (instance A) with the Bantila `-host` recipe, to first confirm a Local/LAN host session comes up on this build before any client. |
+| `fc3_host_engine_check.ps1` | Read-only poller: after you reach Host in-game, confirms the Local/LAN net engine engaged by listing UDP 9000-9005 owned by farcry3_d3d11.exe (9000 OnlineEnginePort / 9004 LanHostBroadcastPort). No admin, no patch. Prints PASS/PARTIAL verdict. |

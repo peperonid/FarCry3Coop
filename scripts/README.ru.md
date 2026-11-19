@@ -33,3 +33,6 @@ PowerShell-харнесс-скрипты, запускающие игру под
 
 | `fc3_lan_same_subnet.bat` host \| `... client [ip]` | ДВА ПК в ОДНОЙ реальной LAN (без VPN), самый простой путь. Рецепт Bantila -host/-client/-coop + -SavePath; клиент может подключиться по LAN-IP хоста или через LAN-браузер в игре. |
 | `fc3_lan_firewall.bat` | От админа, на обоих ПК: открывает UDP 9000-9005 в обе стороны для FC3 (правила netsh advfirewall + команды удаления). |
+
+| `fc3_lan_host_only.bat` [map] | Запуск ТОЛЬКО хоста (инстанс A) по рецепту Bantila `-host`, чтобы сначала убедиться, что Local/LAN-хост стартует на этой сборке, ещё без клиента. |
+| `fc3_host_engine_check.ps1` | Read-only поллер: после Co-op>Host в игре подтверждает, что LAN/net-движок поднялся, перечисляя UDP 9000-9005 процесса farcry3_d3d11.exe (9000 OnlineEnginePort / 9004 LanHostBroadcastPort). Без админа, без патча. Вердикт PASS/PARTIAL. |
