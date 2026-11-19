@@ -36,3 +36,5 @@ PowerShell-харнесс-скрипты, запускающие игру под
 
 | `fc3_lan_host_only.bat` [map] | Запуск ТОЛЬКО хоста (инстанс A) по рецепту Bantila `-host`, чтобы сначала убедиться, что Local/LAN-хост стартует на этой сборке, ещё без клиента. |
 | `fc3_host_engine_check.ps1` | Read-only поллер: после Co-op>Host в игре подтверждает, что LAN/net-движок поднялся, перечисляя UDP 9000-9005 процесса farcry3_d3d11.exe (9000 OnlineEnginePort / 9004 LanHostBroadcastPort). Без админа, без патча. Вердикт PASS/PARTIAL. |
+
+| `build_coop_package.py` | Собирает **персональный пакет-оверлей co-op для 2-го ПК**: сравнивает рабочую co-op-установку с чистой Uplay-установкой и выдаёт `FC3Coop2PC_Package` + `.zip` (payload отличающихся файлов + распаковщик `INSTALL.ps1`/`.bat` + `manifest.txt` с md5 + двуязычные доки). Личное удобство, **не для распространения**. `python -I scripts/build_coop_package.py` (править REF/MINE/OUT в начале). NOTES 28i23. |

@@ -254,3 +254,5 @@ Run from an **elevated** PowerShell (config_server binds :80).
 
 | `fc3_lan_host_only.bat` [map] | Start ONLY the host (instance A) with the Bantila `-host` recipe, to first confirm a Local/LAN host session comes up on this build before any client. |
 | `fc3_host_engine_check.ps1` | Read-only poller: after you reach Host in-game, confirms the Local/LAN net engine engaged by listing UDP 9000-9005 owned by farcry3_d3d11.exe (9000 OnlineEnginePort / 9004 LanHostBroadcastPort). No admin, no patch. Prints PASS/PARTIAL verdict. |
+
+| `build_coop_package.py` | Build the **personal 2nd-PC co-op overlay package**: diffs the working co-op install vs a pristine Uplay install and emits `FC3Coop2PC_Package` + `.zip` (payload of the differing files + `INSTALL.ps1`/`.bat` unpacker + `manifest.txt` md5 + bilingual docs). Personal convenience, **not for distribution**. `python -I scripts/build_coop_package.py` (edit REF/MINE/OUT at the top). NOTES 28i23. |
