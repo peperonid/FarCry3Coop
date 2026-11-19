@@ -248,3 +248,6 @@ Run from an **elevated** PowerShell (config_server binds :80).
 |---|---|
 | `fc3_lan_2inst_loopback.bat` | ONE PC: launches instance A as `-host` and instance B (the clone `TestFC3_105_B`) as `-client -ip 127.0.0.1`, each with its own `-SavePath` profile. The risky path; if B cannot see A use the Radmin scripts. See docs/fc3-lan-coop-test.md. |
 | `fc3_lan_radmin.bat` | TWO PCs on a Radmin VPN: run `... host` on the host PC, `... client <HOST-Radmin-IPv4>` on the joiner. Bantila `-host/-client/-coop` recipe + separate `-SavePath`. Allow UDP 9000-9005 in the firewall. |
+
+| `fc3_lan_same_subnet.bat` host \| `... client [ip]` | TWO PCs on the SAME real LAN (no VPN), the simplest path. Bantila -host/-client/-coop + -SavePath; client can direct-connect by host LAN IP or join via the in-game LAN browser. |
+| `fc3_lan_firewall.bat` | Elevated, run on both PCs: opens UDP 9000-9005 both ways for FC3 (netsh advfirewall rules, with removal commands). |

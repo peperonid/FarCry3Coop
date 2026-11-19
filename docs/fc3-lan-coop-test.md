@@ -95,3 +95,23 @@ co-op-сессию по виртуальному LAN. Это решающий ш
 - Стартует ли LAN/Local-хост на A?
 - Появляется ли сессия в LAN-браузере B? (да/нет)
 - Если зашло: синхронизируется ли геймплей (оба игрока двигаются/стреляют/видят друг друга)?
+
+
+## Variant: two PCs on the SAME real LAN / Вариант: два ПК в одной реальной локальной сети
+This is the SIMPLEST and most reliable variant - no VPN. LAN/Local Session mode uses
+broadcast discovery on UDP 9004/9005, which works natively on one subnet.
+1. (once, both PCs, elevated) run `scripts\fc3_lan_firewall.bat` to open UDP 9000-9005.
+2. Host PC: `scripts\fc3_lan_same_subnet.bat host`.  Note its LAN IP (`ipconfig | findstr IPv4`, e.g. 192.168.1.10).
+3. Client PC: `scripts\fc3_lan_same_subnet.bat client 192.168.1.10`  (or omit the IP and join via the in-game LAN browser).
+4. Same in-game flow as above: host = Co-op > Local Session > Host; client = Co-op > Local Session > Browse/Join.
+Router caveats: keep both PCs on the same subnet (Wi-Fi + Ethernet on one router is fine); if the
+client does not see the host, try direct `-ip <host>` and make sure AP/client-isolation is off on the router.
+
+Это самый простой и надёжный вариант - без VPN. Режим LAN/Local использует broadcast-обнаружение
+на UDP 9004/9005, которое штатно работает в одной подсети.
+1. (один раз, на обоих ПК, от админа) `scripts\fc3_lan_firewall.bat` - откроет UDP 9000-9005.
+2. Хост: `scripts\fc3_lan_same_subnet.bat host`. Посмотри его LAN-IP (`ipconfig | findstr IPv4`, напр. 192.168.1.10).
+3. Клиент: `scripts\fc3_lan_same_subnet.bat client 192.168.1.10` (или без IP - через LAN-браузер в игре).
+4. Тот же порядок в игре: хост = Co-op > Local Session > Host; клиент = Co-op > Local Session > Browse/Join.
+Нюансы роутера: оба ПК в одной подсети (Wi-Fi + Ethernet одного роутера ок); если клиент не видит
+хост - подключай напрямую `-ip <хост>` и выключи на роутере AP/client isolation.

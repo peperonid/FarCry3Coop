@@ -30,3 +30,6 @@ PowerShell-харнесс-скрипты, запускающие игру под
 |---|---|
 | `fc3_lan_2inst_loopback.bat` | ОДИН ПК: запускает инстанс A как `-host` и инстанс B (клон `TestFC3_105_B`) как `-client -ip 127.0.0.1`, каждый со своим `-SavePath`. Рискованный путь; если B не видит A - используй скрипты Radmin. См. docs/fc3-lan-coop-test.md. |
 | `fc3_lan_radmin.bat` | ДВА ПК в сети Radmin VPN: `... host` на хосте, `... client <Radmin-IPv4-хоста>` на подключающемся. Рецепт Bantila `-host/-client/-coop` + отдельный `-SavePath`. Разрешите UDP 9000-9005 в фаерволе. |
+
+| `fc3_lan_same_subnet.bat` host \| `... client [ip]` | ДВА ПК в ОДНОЙ реальной LAN (без VPN), самый простой путь. Рецепт Bantila -host/-client/-coop + -SavePath; клиент может подключиться по LAN-IP хоста или через LAN-браузер в игре. |
+| `fc3_lan_firewall.bat` | От админа, на обоих ПК: открывает UDP 9000-9005 в обе стороны для FC3 (правила netsh advfirewall + команды удаления). |
