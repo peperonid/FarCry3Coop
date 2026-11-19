@@ -121,3 +121,7 @@ parked (see [Strategy D findings](strategy-d-findings.md)).
 
 Internal Ubisoft paths and the owner's real paths stay LOCAL; artifact names above are public Nexus
 names.
+
+## See also
+
+- Concrete **2-PC co-op over Radmin/Hamachi** (host + join via `-client -ip`, no LAN browser in this build): [fc3-coop-radmin-setup](fc3-coop-radmin-setup.md).
