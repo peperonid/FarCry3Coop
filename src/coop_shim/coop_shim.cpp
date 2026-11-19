@@ -43,6 +43,9 @@ static void logOpen(void) {
 
 // ------------------------------------------------------------------ module + RVA map
 #define FC3_BASE_DEFAULT 0x10000000u
+// NOTES 28i20: storm net-engine LAN option group DAT_11e68a2c (registry FUN_107a227d). RVA = VA - imageBase(0x10000000).
+// +0x34 LanMatchmakingReuseAddress (SO_REUSEADDR, host many sessions on one machine); +0x35 LanMatchmakingDiscoveryOnLoopbackEnable (discover on local machine via loopback).
+#define RVA_LANVAR_GRP 0x01e68a2cu
 static uintptr_t g_mod = 0;
 static inline uintptr_t VA(uint32_t rva) { return g_mod + rva; }
 
@@ -124,6 +127,7 @@ static int g_rv_md5 = 0;        // env FC3COOP_RV_MD5=1 -> read-only hook MD5_Up
 static int g_rv_enc = 0;        // env FC3COOP_RV_ENC=1 -> read-only capture of the RV send wrapper FUN_11214630: dump the packet buffer before+after the driver encrypts -> a known plaintext/ciphertext pair (NOTES 28g2)
 static int g_mgr_watch = 0;     // env FC3COOP_MGR_WATCH=1 -> poll the online session-manager global DAT_11e42c90 and log on change (NOTES 28dp)
 static int g_online_on = 0;     // env FC3COOP_ONLINE_ON=1 -> set online-enable global DAT_11f07e48=1 even in WATCH_LOGIN clean mode (try to enqueue the RV connect job) (NOTES 28dp)ation) to stop the login<->logout cycle (NOTES 28df)
+static int g_lan_force = 0;     // env FC3COOP_LAN=1 -> CLEAN LAN-SAME-MACHINE mode: periodically force the storm net-engine vars LanMatchmakingReuseAddress(+0x34) and LanMatchmakingDiscoveryOnLoopbackEnable(+0x35) in group DAT_11e68a2c to 1 so TWO FC3 instances on ONE PC can host+discover a Local Game over loopback (NOTES 28i20). Inert unless set.
 static uintptr_t g_fake_obj = 0;
 static volatile LONG g_logbusy = 0;  // tiny spinlock so the tracer thread does not interleave LOGF with the main thread
 static inline void logLock(){ while (InterlockedExchange(&g_logbusy,1)) { YieldProcessor(); } }
@@ -146,6 +150,7 @@ static void load_config(void) {
   if (GetEnvironmentVariableA("FC3COOP_RV_ENC", buf, sizeof(buf)) > 0) g_rv_enc = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_MGR_WATCH", buf, sizeof(buf)) > 0) g_mgr_watch = (buf[0] == '1');
   if (GetEnvironmentVariableA("FC3COOP_ONLINE_ON", buf, sizeof(buf)) > 0) g_online_on = (buf[0] == '1');
+  if (GetEnvironmentVariableA("FC3COOP_LAN", buf, sizeof(buf)) > 0) g_lan_force = (buf[0] == '1');
   // TODO: also parse FC3COOP_HOST_IP (dotted -> uint32, network order) for the join address.
 }
 
@@ -1323,6 +1328,42 @@ static void install_hooks(void) {
   if (g_hook_provider) patch_provider_factory();
 }
 
+// ------------------------------------------------------------------ NOTES 28i20 LAN same-machine forcer
+// Forces the two storm net-engine LAN vars ON so two FC3 instances on ONE PC can host + discover a Local Game
+// over loopback (LanMatchmakingReuseAddress + LanMatchmakingDiscoveryOnLoopbackEnable). FC3_d3d11.dll may not be
+// loaded at our DllMain, so resolve its base lazily in the thread and keep re-asserting the bytes every ~2s until
+// the owner reaches the Local Game lobby. This path installs NO hooks and touches NO online code (clean, low risk).
+static DWORD WINAPI lan_force_thread(LPVOID p) {
+  (void)p;
+  int logged = 0;
+  for (int i = 0; i < 600; ++i) {            // ~20 min window
+    Sleep(2000);
+    HMODULE m = GetModuleHandleA("FC3_d3d11.dll");
+    if (!m) continue;                         // game module not loaded yet
+    uintptr_t base = (uintptr_t)m;
+    volatile unsigned char* a34 = (volatile unsigned char*)(base + RVA_LANVAR_GRP + 0x34);
+    volatile unsigned char* a35 = (volatile unsigned char*)(base + RVA_LANVAR_GRP + 0x35);
+    // SAFETY (NOTES 28i21): FUN_102629b5 registers a separate 0x1c-byte DESCRIPTOR per var; DAT_11e68a2c is the
+    // group MANAGER, NOT the value storage. The live bool values live in a separate value block (hypothesis:
+    // DAT_11e34640, bound in FUN_107a213e -> FUN_10261c2f(&group,&DAT_11e34640)), offset by 0x34/0x35. Writing
+    // [DAT_11e68a2c+off] would corrupt the descriptor list. So THIS build only READS/LOGS (no writes). Enabling
+    // the vars for real needs either the game's net console (net_* commands) or pinning the value block first.
+    __try {
+      unsigned char b4 = *a34, b5 = *a35;
+      if (!logged) {
+        LOGF("shim: LAN-DIAG base=0x%08x mgr@grp+0x34=0x%08x val=%u mgr@grp+0x35=0x%08x val=%u (READ-ONLY; write disabled - value block not pinned). candidate value-block 0x%08x +0x34/0x35 = 0x%08x/0x%08x",
+             (uint32_t)base, (uint32_t)(base + RVA_LANVAR_GRP + 0x34), b4,
+             (uint32_t)(base + RVA_LANVAR_GRP + 0x35), b5,
+             (uint32_t)(base + 0x01e3464cu), (uint32_t)(base + 0x01e3464cu + 0x34), (uint32_t)(base + 0x01e3464cu + 0x35));
+        logged = 1;
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      if (!logged) { LOGF("shim: LAN-DIAG read fault base=0x%08x", (uint32_t)base); logged = 1; }
+    }
+  }
+  return 0;
+}
+
 // ------------------------------------------------------------------ init
 static void init(void) {
   logOpen();
@@ -1335,6 +1376,11 @@ static void init(void) {
   } __except (EXCEPTION_EXECUTE_HANDLER) { g_imgsize = 0x2000000; }
   load_config();
   LOGF("shim: FC3_d3d11 base=0x%08x enable=%d\n", (uint32_t)g_mod, g_cfg.enable);
+  if (g_lan_force) {   // NOTES 28i20: clean standalone LAN-same-machine mode; no enable gate, no hooks, no online code
+    HANDLE h = CreateThread(0, 0, lan_force_thread, 0, 0, 0);
+    LOGF("shim: LAN-FORCE thread started h=%p (forces LanMatchmakingReuseAddress+DiscoveryOnLoopbackEnable=1). Launch host + client from the SAME patched folder; in-game: Co-op -> Local Game, host stays in lobby, client browses/joins.", (void*)h);
+    return;
+  }
   if (!g_cfg.enable) { LOGF("shim: inert (set FC3COOP_SHIM=1 to enable)\n"); return; }
   // Stage0b (NOTES 28ci): minimal, collateral-free experiment. The co-op Host action FUN_10443663 returns the
   // 'service unavailable' error code 4 iff DAT_11e42c90 (online session-manager) == 0. Forcing that global to a
