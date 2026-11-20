@@ -38,3 +38,5 @@ PowerShell-харнесс-скрипты, запускающие игру под
 | `fc3_host_engine_check.ps1` | Read-only поллер: после Co-op>Host в игре подтверждает, что LAN/net-движок поднялся, перечисляя UDP 9000-9005 процесса farcry3_d3d11.exe (9000 OnlineEnginePort / 9004 LanHostBroadcastPort). Без админа, без патча. Вердикт PASS/PARTIAL. |
 
 | `build_coop_package.py` | Собирает **персональный пакет-оверлей co-op для 2-го ПК**: сравнивает рабочую co-op-установку с чистой Uplay-установкой и выдаёт `FC3Coop2PC_Package` + `.zip` (payload отличающихся файлов + распаковщик `INSTALL.ps1`/`.bat` + `manifest.txt` с md5 + двуязычные доки). Личное удобство, **не для распространения**. `python -I scripts/build_coop_package.py` (править REF/MINE/OUT в начале). NOTES 28i23. |
+
+| `fc3_diag.ps1` | Диагностика 2-го ПК с co-op, где игра падает до меню: печатает md5 ключевых bin-лоадеров/exe против заведомо рабочей установки, размеры data_win32 (ловит другую скачанную версию игры), наличие рантаймов VC++/DirectX, размер `uplay_install.manifest`, свежие события Application-Error для `farcry3` (модуль отказа) и дампы краша. Запустить на 2-м ПК после падения и прислать вывод. |

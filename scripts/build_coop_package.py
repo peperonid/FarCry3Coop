@@ -144,7 +144,8 @@ def build():
 
     for sub, names, src in (
         ("tools", ("patch_dll.py", "fc3_addrmap.py", "fc3_lan_radmin.bat", "fc3_lan_firewall.bat",
-                   "fc3_lan_same_subnet.bat", "fc3_lan_host_only.bat", "fc3_host_engine_check.ps1"),
+                   "fc3_lan_same_subnet.bat", "fc3_lan_host_only.bat", "fc3_host_engine_check.ps1",
+                   "fc3_diag.ps1"),
          os.path.join(REPO, "scripts")),
         ("docs", ("fc3-coop-radmin-setup.md", "fc3-coop-radmin-setup.ru.md",
                   "fc3-coop-mod-setup.md", "fc3-coop-mod-setup.ru.md"),
