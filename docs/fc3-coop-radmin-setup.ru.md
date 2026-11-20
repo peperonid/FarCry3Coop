@@ -118,3 +118,15 @@ FC3_d3d11.dll предоставляет CLI прямого подключени
 и `CFCXJoinSessionOperation`, `CJoinSessionParam` / `CJoinGameSessionParam`, `JoinSessionId`,
 `CSessionImpl::RemoveClient` («Non-host leaving»). Записано в NOTES 28i22. Подробнее про LAN-провайдер:
 [R2 LAN-provider plan](r2-lan-provider-plan.md). Сырой журнал сессий: `NOTES.md`.
+
+
+## Папка игры определяется автоматически
+
+LAN-скрипты (`fc3_lan_radmin.bat`, `fc3_lan_host_only.bat`, `fc3_lan_same_subnet.bat`,
+`fc3_lan_firewall.bat`) НЕ жёстко прописывают папку установки. Путь определяется по приоритету:
+1. переменная окружения `FC3_GAME`;
+2. файл `game_dir.txt` рядом с `.bat` (одна строка с путём к игре);
+3. интерактивный запрос при первом запуске.
+На 2-м ПК просто запустите скрипт и введите путь к игре по запросу (или задайте `FC3_GAME`, или
+положите путь в `game_dir.txt`). Скрипт проверяет наличие `bin\farcry3_d3d11.exe`. Папки сохранений
+создаются рядом со скриптом (`save_coop` / `save_host` / `save_lan`).

@@ -118,3 +118,15 @@ FC3_d3d11.dll exposes a host/client direct-connect CLI and session-join objects,
 `-login`; and `CFCXJoinSessionOperation`, `CJoinSessionParam` / `CJoinGameSessionParam`, `JoinSessionId`,
 `CSessionImpl::RemoveClient` ("Non-host leaving"). Recorded in NOTES 28i22. Deeper LAN-provider design:
 [R2 LAN-provider plan](r2-lan-provider-plan.md). Raw session log: `NOTES.md`.
+
+
+## Game folder is auto-detected
+
+The LAN scripts (`fc3_lan_radmin.bat`, `fc3_lan_host_only.bat`, `fc3_lan_same_subnet.bat`,
+`fc3_lan_firewall.bat`) do **not** hard-code the install folder. They resolve it by priority:
+1. environment variable `FC3_GAME`;
+2. a file `game_dir.txt` next to the `.bat` (a single line with the game path);
+3. an interactive prompt on first run.
+On the 2nd PC just run the script and type the game path when asked (or set `FC3_GAME`, or put the
+path into `game_dir.txt`). The script checks that `bin\farcry3_d3d11.exe` exists. Save folders are
+created next to the script (`save_coop` / `save_host` / `save_lan`).
