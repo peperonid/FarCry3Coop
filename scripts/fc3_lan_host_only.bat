@@ -1,26 +1,27 @@
 @echo off
-rem ============================================================================
-rem  FC3 co-op - HOST ONLY (instance A) / ТОЛЬКО ХОСТ (инстанс A)
-rem  Start just the host to verify the Local/LAN host session comes up on this
-rem  build, BEFORE any client. Uses the Bantila -host recipe on farcry3_d3d11.exe.
-rem  Usage:
-rem     fc3_lan_host_only.bat            (default map coop_vidar)
-rem     fc3_lan_host_only.bat coop_skadi (pick a co-op map)
-rem  After the game is at the menu, do:  Co-op > Local/LAN Session > Host.
-rem  Then in ANOTHER console run  scripts\fc3_host_engine_check.ps1  to confirm
-rem  the LAN/net engine bound its ports (9000 / 9004). See the check script.
-rem ============================================================================
-setlocal
-set A=H:\FarCryCoop\TestFC3_105
-set SAVEA=H:\FarCryCoop\save_A
-set MAP=%1
-if "%MAP%"=="" set MAP=coop_vidar
-if not exist "%SAVEA%" mkdir "%SAVEA%"
-echo HOST ONLY  map=%MAP%   profile=%SAVEA%
-echo Window at 0,0 900x640. In-game: Co-op ^> Local/LAN Session ^> Host.
-echo Verify the engine with:  powershell -File H:\...\scripts\fc3_host_engine_check.ps1
-start "FC3-A-host" "%A%\bin\farcry3_d3d11.exe" -host %MAP% -login Host -coop -SavePath "%SAVEA%" -xpos 0 -ypos 0 -xres 900 -yres 640 -skipintro -quickstartup
-echo.
-echo If the game ignores -host (retail 1.06 sometimes does), just navigate the menu
-echo to Co-op ^> Local/LAN Session ^> Host manually - mod-262 unlocked it.
+setlocal EnableExtensions
+rem ==========================================================================
+rem  Game folder resolution (no hard-coded path). Priority:
+rem    1) environment variable FC3_GAME
+rem    2) file game_dir.txt next to this bat (one line with the path)
+rem    3) interactive prompt
+rem  To make a permanent choice, create a text file game_dir.txt in this bat
+rem  folder whose single line is your Far Cry 3 install path.
+rem ==========================================================================
+set "GAME="
+if defined FC3_GAME set "GAME=%FC3_GAME%"
+if "%GAME%"=="" if exist "%~dp0game_dir.txt" set /p "GAME=<%~dp0game_dir.txt"
+if "%GAME%"=="" set /p "GAME=Far Cry 3 install folder (contains bin\farcry3_d3d11.exe): "
+if not exist "%GAME%\bin\farcry3_d3d11.exe" ( echo ERROR: not a Far Cry 3 folder: "%GAME%" & exit /b 1 )
+set "EXE=%GAME%\bin\farcry3_d3d11.exe"
+set "SAVE=%~dp0save_coop"
+if not exist "%SAVE%" mkdir "%SAVE%"
+
+set "MAP=%~1"
+if "%MAP%"=="" set "MAP=coop_vidar"
+set "SAVE=%~dp0save_host"
+if not exist "%SAVE%" mkdir "%SAVE%"
+rem Host-only boot to confirm the Local/LAN host engine comes up. Then Co-op, Local Session, Host.
+echo HOST ONLY  map=%MAP%  profile=%SAVE%
+start "FC3-host" "%EXE%" -host %MAP% -login Host -coop -SavePath "%SAVE%" -xres 900 -yres 640 -skipintro -quickstartup
 endlocal

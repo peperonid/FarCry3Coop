@@ -1,35 +1,39 @@
 @echo off
-rem ============================================================================
-rem  FC3 co-op TWO PCs ON THE SAME REAL LAN / ДВА ПК В ОДНОЙ РЕАЛЬНОЙ ЛОКАЛЬНОЙ СЕТИ
-rem  No VPN needed. LAN mode uses broadcast discovery on UDP 9004/9005.
-rem  Host PC : fc3_lan_same_subnet.bat host
-rem  Client PC: fc3_lan_same_subnet.bat client <HOST-LAN-IPv4 e.g. 192.168.1.10>
-rem            (or just:  fc3_lan_same_subnet.bat client  -> relies on in-game
-rem             LAN browser, you may not even need the -ip for a real LAN)
-rem  Open the firewall BOTH ways on BOTH PCs first: run fc3_lan_firewall.bat (admin).
-rem  Checklist: docs/fc3-lan-coop-test.md
-rem ============================================================================
-setlocal
-set GAME=H:\FarCryCoop\TestFC3_105
-set ROLE=%1
-set CLI=%2
-set MAP=coop_vidar
-set SAVE=H:\FarCryCoop\save_lan
+setlocal EnableExtensions
+rem ==========================================================================
+rem  Game folder resolution (no hard-coded path). Priority:
+rem    1) environment variable FC3_GAME
+rem    2) file game_dir.txt next to this bat (one line with the path)
+rem    3) interactive prompt
+rem  To make a permanent choice, create a text file game_dir.txt in this bat
+rem  folder whose single line is your Far Cry 3 install path.
+rem ==========================================================================
+set "GAME="
+if defined FC3_GAME set "GAME=%FC3_GAME%"
+if "%GAME%"=="" if exist "%~dp0game_dir.txt" set /p "GAME=<%~dp0game_dir.txt"
+if "%GAME%"=="" set /p "GAME=Far Cry 3 install folder (contains bin\farcry3_d3d11.exe): "
+if not exist "%GAME%\bin\farcry3_d3d11.exe" ( echo ERROR: not a Far Cry 3 folder: "%GAME%" & exit /b 1 )
+set "EXE=%GAME%\bin\farcry3_d3d11.exe"
+set "SAVE=%~dp0save_coop"
 if not exist "%SAVE%" mkdir "%SAVE%"
+
+set "ROLE=%~1"
+set "CLI=%~2"
+set "SAVE=%~dp0save_lan"
+if not exist "%SAVE%" mkdir "%SAVE%"
+rem Same physical LAN (no VPN). Host: fc3_lan_same_subnet.bat host  Client: ... client HOST-LAN-IPv4
 if /I "%ROLE%"=="host" (
-  echo HOST. Show this PC's LAN IP (run:  ipconfig  ^| findstr IPv4) for the client.
-  start "FC3-host" "%GAME%\bin\farcry3_d3d11.exe" -host %MAP% -login Host -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
+  echo HOST. Find this PC LAN IPv4 in ipconfig for the client.
+  start "FC3-host" "%EXE%" -host coop_vidar -login Host -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
   goto :end
 )
 if /I "%ROLE%"=="client" (
   if "%CLI%"=="" (
-    echo CLIENT: launching without -ip. In-game use Co-op ^> Local Session ^> Browse
-    echo         and join the session shown via LAN broadcast. To direct-connect run:
-    echo             fc3_lan_same_subnet.bat client ^<HOST-LAN-IPv4^>
-    start "FC3-client" "%GAME%\bin\farcry3_d3d11.exe" -client -login Guest -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
+    echo CLIENT no -ip: in-game Co-op, Local Session, Browse to join via LAN broadcast.
+    start "FC3-client" "%EXE%" -client -login Guest -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
   ) else (
     echo CLIENT direct-connect to %CLI% ...
-    start "FC3-client" "%GAME%\bin\farcry3_d3d11.exe" -client -login Guest -ip %CLI% -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
+    start "FC3-client" "%EXE%" -client -login Guest -ip %CLI% -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
   )
   goto :end
 )

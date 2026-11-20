@@ -1,37 +1,47 @@
 @echo off
-rem ============================================================================
-rem  FC3 co-op TWO PCs over RADMIN / ДВА ПК ПО RADMIN
-rem  Run this on EACH PC after both are in one Radmin VPN network.
-rem  PC that hosts:   fc3_lan_radmin.bat host
-rem  PC that joins:   fc3_lan_radmin.bat client <HOST-Radmin-IPv4>
-rem  Join with the HOST's Radmin IP (the 26.x / 21.x address from Radmin).
-rem  Allow Windows Firewall for the game on UDP 9000-9005 (both directions).
-rem  See docs/fc3-lan-coop-test.md for the full checklist.
-rem ============================================================================
-setlocal
-set GAME=H:\FarCryCoop\TestFC3_105
-set ROLE=%1
-set CLI=%2
-set MAP=coop_vidar
-set SAVE=H:\FarCryCoop\save_net
+setlocal EnableExtensions
+rem ==========================================================================
+rem  Game folder resolution (no hard-coded path). Priority:
+rem    1) environment variable FC3_GAME
+rem    2) file game_dir.txt next to this bat (one line with the path)
+rem    3) interactive prompt
+rem  To make a permanent choice, create a text file game_dir.txt in this bat
+rem  folder whose single line is your Far Cry 3 install path.
+rem ==========================================================================
+set "GAME="
+if defined FC3_GAME set "GAME=%FC3_GAME%"
+if "%GAME%"=="" if exist "%~dp0game_dir.txt" set /p "GAME=<%~dp0game_dir.txt"
+if "%GAME%"=="" set /p "GAME=Far Cry 3 install folder (contains bin\farcry3_d3d11.exe): "
+if not exist "%GAME%\bin\farcry3_d3d11.exe" ( echo ERROR: not a Far Cry 3 folder: "%GAME%" & exit /b 1 )
+set "EXE=%GAME%\bin\farcry3_d3d11.exe"
+set "SAVE=%~dp0save_coop"
 if not exist "%SAVE%" mkdir "%SAVE%"
+
+set "ROLE=%~1"
+set "CLI=%~2"
+set "MAP=%~3"
+if "%MAP%"=="" set "MAP=coop_vidar"
+rem ==========================================================================
+rem  Radmin/Hamachi 2-PC co-op.  Host PC: fc3_lan_radmin.bat host
+rem  Join PC: fc3_lan_radmin.bat client  HOST-Radmin-IPv4
+rem  Join uses the engine direct-connect (-client -ip): there is no LAN browser.
+rem  Also: open firewall UDP 9000-9005 on both (fc3_lan_firewall.bat) and
+rem  disable extra virtual NICs (vEthernet WSL/Hyper-V) so the host binds 26.x.
+rem ==========================================================================
 if /I "%ROLE%"=="host" (
-  echo HOST on this PC. Find your Radmin IP (Radmin window / IPCONFIG 26.*).
+  echo HOST. Find your Radmin IP in ipconfig - a 26.x address - for the other PC.
   echo On the OTHER PC run:  fc3_lan_radmin.bat client ^<this-PC-radmin-ip^>
-  start "FC3-host" "%GAME%\bin\farcry3_d3d11.exe" -host %MAP% -login Host -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
+  start "FC3-host" "%EXE%" -host %MAP% -login Host -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
   goto :end
 )
 if /I "%ROLE%"=="client" (
-  if "%CLI%"=="" (
-    echo usage: fc3_lan_radmin.bat client ^<HOST-Radmin-IPv4^>
-    exit /b 1
-  )
+  if "%CLI%"=="" ( echo usage: fc3_lan_radmin.bat client ^<HOST-Radmin-IPv4^> & exit /b 1 )
   echo CLIENT joining %CLI% ...
-  start "FC3-client" "%GAME%\bin\farcry3_d3d11.exe" -client -login Guest -ip %CLI% -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
+  start "FC3-client" "%EXE%" -client -login Guest -ip %CLI% -coop -SavePath "%SAVE%" -xres 1280 -yres 720 -skipintro -quickstartup
   goto :end
 )
 echo usage:
-echo   fc3_lan_radmin.bat host
-echo   fc3_lan_radmin.bat client ^<HOST-Radmin-IPv4^>
+echo   fc3_lan_radmin.bat host [map]
+echo   fc3_lan_radmin.bat client ^<HOST-Radmin-IPv4^> [map]
 :end
 endlocal
